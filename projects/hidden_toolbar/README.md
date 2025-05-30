@@ -73,6 +73,8 @@ Then, in your WSL terminal:
 
 - export DISPLAY=$(cat /etc/resolv.conf | grep nameserver | awk '{print $2}'):0
 - You can add that line to your ~/.bashrc or ~/.zshrc to make it permanent.
+- Make sure the ip shown when using **echo $DISPLAY** is the same as the **(WSL (Hyper-V firewall)** when using command **ipconfig** in windows.
+  - If not the same set a static address, **ipconfig** is the correct address.
 ### 4. Clone the Repository
 - git clone https://github.com/datamann1013/User_Functionality_WSL.git 
 - cd User_Functionality_WSL/projects/hidden_toolbar
@@ -85,8 +87,9 @@ Use 32x32px PNGs for best results.
 ### 6. Run the Toolbar
 Option A: Run manually
 - cd src python3 main.py
-Option B: Run with fullscreen detection
-- chmod +x ../detect_fullscreen.sh ../detect_fullscreen.sh & python3 src/main.py &
+
+Option B: Run with fullscreen detection (when in hidden_toolbar folder)
+- chmod +x detect_fullscreen.sh detect_fullscreen.sh & python3 src/main.py &
 ### 7. Autostart on Login (Optional)
 If you're using Openbox or another window manager, add this to your autostart file (e.g., ~/.config/openbox/autostart):
 - /path/to/User_Functionality_WSL/projects/hidden_toolbar/detect_fullscreen.sh & python3 /path/to/User_Functionality_WSL/projects/hidden_toolbar/src/main.py &
