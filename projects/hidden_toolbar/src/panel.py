@@ -3,7 +3,6 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GLib, GdkPixbuf
 
 from utils import get_screen_size, run_command
-from visibility import is_fullscreen
 
 class HiddenToolbar(Gtk.Window):
     def __init__(self):
@@ -38,14 +37,16 @@ class HiddenToolbar(Gtk.Window):
         )
 
         width, height = get_screen_size()
-        self.set_size_request(60, 20)  # Small bump size
-        self.move((width - 60) // 2, height - 40)  # Just above Windows taskbar
+        self.set_size_request(100, 36)  # Slightly larger to fit icons
+        self.move((width - 100) // 2, height - 40)  # Just above Windows taskbar
 
-        box = Gtk.Box(spacing=4)
+        # Create a centered box
+        box = Gtk.Box(spacing=6)
+        box.set_halign(Gtk.Align.CENTER)
+        box.set_valign(Gtk.Align.CENTER)
         self.add(box)
 
-        # Load icons
-
+        # Load and scale icons
         def load_icon(path, size=24):
             pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, size, size, True)
             return Gtk.Image.new_from_pixbuf(pixbuf)
@@ -69,10 +70,10 @@ class HiddenToolbar(Gtk.Window):
         launcher_button.set_image(launcher_icon)
         launcher_button.connect("clicked", lambda w: run_command("rofi -show drun"))
 
-        # Add buttons to box
-        box.pack_start(terminal_button, True, True, 0)
-        box.pack_start(filemanager_button, True, True, 0)
-        box.pack_start(launcher_button, True, True, 0)
+        # Add buttons to box (no expansion)
+        box.pack_start(terminal_button, False, False, 0)
+        box.pack_start(filemanager_button, False, False, 0)
+        box.pack_start(launcher_button, False, False, 0)
 
         self.connect("destroy", Gtk.main_quit)
         self.show_all()
