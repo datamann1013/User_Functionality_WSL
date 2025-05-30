@@ -36,14 +36,15 @@ class HiddenToolbar(Gtk.Window):
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
+        # Set window size and position
         width, height = get_screen_size()
-        self.set_size_request(100, 36)  # Slightly larger to fit icons
-        self.move((width - 100) // 2, height - 40)  # Just above Windows taskbar
+        self.set_size_request(100, 36)  # Width and height of the bump
+        self.move((width - 100) // 2, height - 60)  # Bottom center, above taskbar
 
-        # Create a centered box
+        # Create a horizontal box centered in the window
         box = Gtk.Box(spacing=6)
         box.set_halign(Gtk.Align.CENTER)
-        box.set_valign(Gtk.Align.CENTER)
+        box.set_valign(Gtk.Align.START)  # Align to top of the window
         self.add(box)
 
         # Load and scale icons
