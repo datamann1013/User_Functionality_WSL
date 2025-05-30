@@ -1,6 +1,6 @@
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk, GLib
+from gi.repository import Gtk, Gdk, GLib, GdkPixbuf
 
 from utils import get_screen_size, run_command
 from visibility import is_fullscreen
@@ -45,9 +45,14 @@ class HiddenToolbar(Gtk.Window):
         self.add(box)
 
         # Load icons
-        terminal_icon = Gtk.Image.new_from_file("icons/terminal.png")
-        filemanager_icon = Gtk.Image.new_from_file("icons/folder.png")
-        launcher_icon = Gtk.Image.new_from_file("icons/search.png")
+
+        def load_icon(path, size=24):
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, size, size, True)
+            return Gtk.Image.new_from_pixbuf(pixbuf)
+
+        terminal_icon = load_icon("icons/terminal.png")
+        filemanager_icon = load_icon("icons/filemanager.png")
+        launcher_icon = load_icon("icons/launcher.png")
 
         # Terminal button
         terminal_button = Gtk.Button()
