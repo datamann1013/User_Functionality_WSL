@@ -43,8 +43,8 @@ class HiddenToolbar(Gtk.Window):
 
         # Position the window at the bottom center of the screen
         screen_width, screen_height = get_screen_size()
-        x = (screen_width - window_width) // 2
-        y = screen_height - window_height - 10  # 10px above bottom edge
+        x = screen_width // 2
+        y = screen_height - window_height  # 10px above bottom edge
         self.move(x, y)
 
         # Create a horizontal box centered in the window
