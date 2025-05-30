@@ -51,8 +51,8 @@ class HiddenToolbar(Gtk.Window):
             return Gtk.Image.new_from_pixbuf(pixbuf)
 
         terminal_icon = load_icon("icons/terminal.png")
-        filemanager_icon = load_icon("icons/filemanager.png")
-        launcher_icon = load_icon("icons/launcher.png")
+        filemanager_icon = load_icon("icons/folder.png")
+        launcher_icon = load_icon("icons/search.png")
 
         # Terminal button
         terminal_button = Gtk.Button()
