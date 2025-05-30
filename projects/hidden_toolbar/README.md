@@ -74,7 +74,8 @@ Then, in your WSL terminal:
 - export DISPLAY=$(cat /etc/resolv.conf | grep nameserver | awk '{print $2}'):0
 - You can add that line to your ~/.bashrc or ~/.zshrc to make it permanent.
 ### 4. Clone the Repository
-- git clone https://github.com/datamann1013/User_Functionality_WSL.git cd User_Functionality_WSL/projects/hidden_toolbar
+- git clone https://github.com/datamann1013/User_Functionality_WSL.git 
+- cd User_Functionality_WSL/projects/hidden_toolbar
 ### 5. Add Icons
 Place your icons in the icons/ folder:
 - terminal.png 
