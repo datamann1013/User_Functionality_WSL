@@ -40,9 +40,15 @@ class HiddenToolbar(Gtk.Window):
 
         # Create a horizontal box centered in the window
         box = Gtk.Box(spacing=6)
-        box.set_halign(Gtk.Align.CENTER)
+        box.set_halign(Gtk.Align.FILL)
         box.set_valign(Gtk.Align.CENTER)
+        box.set_hexpand(True)
         self.add(box)
+
+        # Center the contents inside the box
+        inner_box = Gtk.Box(spacing=6)
+        inner_box.set_halign(Gtk.Align.CENTER)
+        inner_box.set_valign(Gtk.Align.CENTER)
 
         # Load and scale icons
         def load_icon(path, size=24):
@@ -66,10 +72,13 @@ class HiddenToolbar(Gtk.Window):
         launcher_button.set_image(launcher_icon)
         launcher_button.connect("clicked", lambda w: run_command("rofi -show drun"))
 
-        # Add buttons to box
-        box.pack_start(terminal_button, False, False, 0)
-        box.pack_start(filemanager_button, False, False, 0)
-        box.pack_start(launcher_button, False, False, 0)
+        # Add buttons to inner box
+        inner_box.pack_start(terminal_button, False, False, 0)
+        inner_box.pack_start(filemanager_button, False, False, 0)
+        inner_box.pack_start(launcher_button, False, False, 0)
+
+        # Add inner box to outer box
+        box.pack_start(inner_box, True, True, 0)
 
         self.connect("destroy", Gtk.main_quit)
         self.connect("realize", self.on_realize)
@@ -82,3 +91,7 @@ class HiddenToolbar(Gtk.Window):
         x = (screen_width - alloc.width) // 2
         y = screen_height - alloc.height - 10
         self.move(x, y)
+
+if __name__ == "__main__":
+    toolbar = HiddenToolbar()
+    Gtk.main()
