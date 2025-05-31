@@ -87,9 +87,11 @@ class HiddenToolbar(Gtk.Window):
 
     def on_realize(self, widget):
         screen_width, screen_height = get_screen_size()
+        panel_height = 30  # Adjust this to match your tint2 or taskbar height
         x = (screen_width - self.window_width) // 2
-        y = screen_height - self.window_height - 10
+        y = screen_height - self.window_height - panel_height
         self.move(x, y)
+
 
 if __name__ == "__main__":
     toolbar = HiddenToolbar()
