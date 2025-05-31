@@ -10,7 +10,7 @@ class HiddenToolbar(Gtk.Window):
         self.set_decorated(False)
         self.set_resizable(False)
         self.set_keep_above(True)
-        self.set_type_hint(Gdk.WindowTypeHint.DOCK)
+        #self.set_type_hint(Gdk.WindowTypeHint.DOCK)
         self.set_opacity(1.0)  # Always visible for testing
 
         # Set background color to match Windows taskbar
