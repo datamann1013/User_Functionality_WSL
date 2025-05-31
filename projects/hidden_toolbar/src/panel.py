@@ -1,6 +1,6 @@
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
+from gi.repository import Gtk, Gdk, GdkPixbuf
 
 from utils import get_screen_size, run_command
 
@@ -38,17 +38,13 @@ class HiddenToolbar(Gtk.Window):
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
-        # Create a horizontal box centered in the window
-        box = Gtk.Box(spacing=6)
-        box.set_halign(Gtk.Align.FILL)
-        box.set_valign(Gtk.Align.CENTER)
-        box.set_hexpand(True)
-        self.add(box)
-
-        # Center the contents inside the box
-        inner_box = Gtk.Box(spacing=6)
-        inner_box.set_halign(Gtk.Align.CENTER)
-        inner_box.set_valign(Gtk.Align.CENTER)
+        # Use a grid to center the button row
+        grid = Gtk.Grid()
+        grid.set_column_homogeneous(True)
+        grid.set_row_homogeneous(True)
+        grid.set_halign(Gtk.Align.CENTER)
+        grid.set_valign(Gtk.Align.CENTER)
+        self.add(grid)
 
         # Load and scale icons
         def load_icon(path, size=24):
@@ -72,20 +68,16 @@ class HiddenToolbar(Gtk.Window):
         launcher_button.set_image(launcher_icon)
         launcher_button.connect("clicked", lambda w: run_command("rofi -show drun"))
 
-        # Add buttons to inner box
-        inner_box.pack_start(terminal_button, False, False, 0)
-        inner_box.pack_start(filemanager_button, False, False, 0)
-        inner_box.pack_start(launcher_button, False, False, 0)
-
-        # Add inner box to outer box
-        box.pack_start(inner_box, True, True, 0)
+        # Add buttons to grid
+        grid.attach(terminal_button, 0, 0, 1, 1)
+        grid.attach(filemanager_button, 1, 0, 1, 1)
+        grid.attach(launcher_button, 2, 0, 1, 1)
 
         self.connect("destroy", Gtk.main_quit)
         self.connect("realize", self.on_realize)
         self.show_all()
 
     def on_realize(self, widget):
-        # Called when the window is fully realized
         screen_width, screen_height = get_screen_size()
         alloc = self.get_allocation()
         x = (screen_width - alloc.width) // 2
