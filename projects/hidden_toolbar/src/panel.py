@@ -1,6 +1,6 @@
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk, GdkPixbuf
+from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
 
 from utils import get_screen_size, run_command
 
@@ -72,11 +72,13 @@ class HiddenToolbar(Gtk.Window):
         box.pack_start(launcher_button, False, False, 0)
 
         self.connect("destroy", Gtk.main_quit)
-        self.connect("size-allocate", self.on_size_allocate)
+        self.connect("realize", self.on_realize)
         self.show_all()
 
-    def on_size_allocate(self, widget, allocation):
+    def on_realize(self, widget):
+        # Called when the window is fully realized
         screen_width, screen_height = get_screen_size()
-        x = (screen_width - allocation.width) // 2
-        y = screen_height - allocation.height - 10
+        alloc = self.get_allocation()
+        x = (screen_width - alloc.width) // 2
+        y = screen_height - alloc.height - 10
         self.move(x, y)
