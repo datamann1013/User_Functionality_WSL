@@ -86,9 +86,23 @@ class HiddenToolbar(Gtk.Window):
         self.show_all()
 
     def on_realize(self, widget):
-        screen_width, screen_height = get_screen_size()
-        x = (screen_width - self.window_width) // 2
-        y = screen_height - self.window_height  # Dock to bottom
+        # Get actual screen dimensions
+        screen = self.get_screen()
+        monitor = screen.get_primary_monitor()
+        geometry = screen.get_monitor_geometry(monitor)
+
+        screen_width = geometry.width
+        screen_height = geometry.height
+
+        # Get window size
+        alloc = self.get_allocation()
+        window_width = alloc.width
+        window_height = alloc.height
+
+        # Calculate centered X and bottom Y
+        x = (screen_width - window_width) // 2
+        y = screen_height - window_height
+
         self.move(x, y)
 
 
