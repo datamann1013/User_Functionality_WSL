@@ -1,6 +1,6 @@
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk, GdkPixbuf
+from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
 
 from utils import get_screen_size, run_command
 
@@ -22,9 +22,14 @@ class HiddenToolbar(Gtk.Window):
         # Position the window at the bottom center of the screen
         screen_width, screen_height = get_screen_size()
 
-        x = (screen_width - window_width) // 2
-        y = screen_height - window_height - 10 # 10px above bottom
-        self.move(x, y)
+        def position_window():
+            screen_width, screen_height = get_screen_size()
+            x = (screen_width - window_width) // 2
+            y = screen_height - window_height - 10
+            self.move(x, y)
+            return False  # Stop the idle_add callback
+
+        GLib.idle_add(position_window)
 
         # Apply minimal styling
         css_provider = Gtk.CssProvider()
