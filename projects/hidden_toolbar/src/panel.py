@@ -1,6 +1,6 @@
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
+from gi.repository import Gtk, Gdk, GdkPixbuf
 
 from utils import get_screen_size, run_command
 
@@ -17,9 +17,6 @@ class HiddenToolbar(Gtk.Window):
         # Desired window size
         self.window_width = 100
         self.window_height = 40
-
-        # Force exact size
-        self.set_size_request(self.window_width, self.window_height)
         self.set_default_size(self.window_width, self.window_height)
 
         # Apply minimal styling
@@ -75,16 +72,11 @@ class HiddenToolbar(Gtk.Window):
         box.pack_start(launcher_button, False, False, 0)
 
         self.connect("destroy", Gtk.main_quit)
+        self.connect("size-allocate", self.on_size_allocate)
         self.show_all()
 
-        # Position the window after it's shown
-        GLib.idle_add(self.position_window)
-
-    def position_window(self):
+    def on_size_allocate(self, widget, allocation):
         screen_width, screen_height = get_screen_size()
-        # Use actual window size in case GTK adjusted it
-        actual_width, actual_height = self.get_size()
-        x = (screen_width - actual_width) // 2
-        y = screen_height - actual_height - 10
+        x = (screen_width - allocation.width) // 2
+        y = screen_height - allocation.height - 10
         self.move(x, y)
-        return False  # Only run once
