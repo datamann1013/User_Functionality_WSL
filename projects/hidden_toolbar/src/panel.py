@@ -14,8 +14,8 @@ class HiddenToolbar(Gtk.Window):
         self.set_keep_above(True)
         self.set_opacity(1.0)
 
-        # Desired window size
-        self.window_width = 100
+        # Set a wider window to allow true centering
+        self.window_width = 400  # Increased width
         self.window_height = 40
         self.set_default_size(self.window_width, self.window_height)
 
@@ -38,13 +38,18 @@ class HiddenToolbar(Gtk.Window):
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
-        # Use a grid to center the button row
-        grid = Gtk.Grid()
-        grid.set_column_homogeneous(True)
-        grid.set_row_homogeneous(True)
-        grid.set_halign(Gtk.Align.CENTER)
-        grid.set_valign(Gtk.Align.CENTER)
-        self.add(grid)
+        # Outer box fills the window
+        outer_box = Gtk.Box()
+        outer_box.set_halign(Gtk.Align.FILL)
+        outer_box.set_valign(Gtk.Align.FILL)
+        outer_box.set_hexpand(True)
+        outer_box.set_vexpand(True)
+        self.add(outer_box)
+
+        # Inner box is centered
+        inner_box = Gtk.Box(spacing=6)
+        inner_box.set_halign(Gtk.Align.CENTER)
+        inner_box.set_valign(Gtk.Align.CENTER)
 
         # Load and scale icons
         def load_icon(path, size=24):
@@ -68,10 +73,13 @@ class HiddenToolbar(Gtk.Window):
         launcher_button.set_image(launcher_icon)
         launcher_button.connect("clicked", lambda w: run_command("rofi -show drun"))
 
-        # Add buttons to grid
-        grid.attach(terminal_button, 0, 0, 1, 1)
-        grid.attach(filemanager_button, 1, 0, 1, 1)
-        grid.attach(launcher_button, 2, 0, 1, 1)
+        # Add buttons to inner box
+        inner_box.pack_start(terminal_button, False, False, 0)
+        inner_box.pack_start(filemanager_button, False, False, 0)
+        inner_box.pack_start(launcher_button, False, False, 0)
+
+        # Add inner box to outer box
+        outer_box.pack_start(inner_box, True, True, 0)
 
         self.connect("destroy", Gtk.main_quit)
         self.connect("realize", self.on_realize)
@@ -79,9 +87,8 @@ class HiddenToolbar(Gtk.Window):
 
     def on_realize(self, widget):
         screen_width, screen_height = get_screen_size()
-        alloc = self.get_allocation()
-        x = (screen_width - alloc.width) // 2
-        y = screen_height - alloc.height - 10
+        x = (screen_width - self.window_width) // 2
+        y = screen_height - self.window_height - 10
         self.move(x, y)
 
 if __name__ == "__main__":
