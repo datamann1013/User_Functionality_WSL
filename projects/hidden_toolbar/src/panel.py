@@ -19,18 +19,6 @@ class HiddenToolbar(Gtk.Window):
         window_height = 40
         self.set_size_request(window_width, window_height)
 
-        # Position the window at the bottom center of the screen
-        screen_width, screen_height = get_screen_size()
-
-        def position_window():
-            screen_width, screen_height = get_screen_size()
-            x = (screen_width - window_width) // 2
-            y = screen_height - window_height - 10
-            self.move(x, y)
-            return False  # Stop the idle_add callback
-
-        GLib.idle_add(position_window)
-
         # Apply minimal styling
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(b"""
@@ -82,6 +70,18 @@ class HiddenToolbar(Gtk.Window):
         box.pack_start(terminal_button, False, False, 0)
         box.pack_start(filemanager_button, False, False, 0)
         box.pack_start(launcher_button, False, False, 0)
+
+        # Position the window at the bottom center of the screen
+        screen_width, screen_height = get_screen_size()
+
+        def position_window():
+            screen_width, screen_height = get_screen_size()
+            x = (screen_width - window_width) // 2
+            y = screen_height - window_height - 10
+            self.move(x, y)
+            return False  # Stop the idle_add callback
+
+        GLib.idle_add(position_window)
 
         self.connect("destroy", Gtk.main_quit)
         self.show_all()
