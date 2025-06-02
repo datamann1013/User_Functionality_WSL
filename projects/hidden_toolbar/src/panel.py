@@ -1,8 +1,8 @@
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk, GdkPixbuf
+from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
 
-from utils import get_screen_size, run_command
+from utils import run_command  # get_screen_size is unused
 
 class HiddenToolbar(Gtk.Window):
     def __init__(self):
@@ -15,7 +15,7 @@ class HiddenToolbar(Gtk.Window):
         self.set_opacity(1.0)
 
         # Set a wider window to allow true centering
-        self.window_width = 400  # Increased width
+        self.window_width = 400
         self.window_height = 40
         self.set_default_size(self.window_width, self.window_height)
 
@@ -82,26 +82,22 @@ class HiddenToolbar(Gtk.Window):
         outer_box.pack_start(inner_box, True, True, 0)
 
         self.connect("destroy", Gtk.main_quit)
-        self.connect("realize", self.on_realize)
+        self.connect("realize", lambda w: GLib.idle_add(self.position_window))
         self.show_all()
 
-    def on_realize(self, widget):
-        # Get screen dimensions from the primary monitor
+    def position_window(self):
         screen = self.get_screen()
-        monitor = screen.get_primary_monitor()
-        geometry = screen.get_monitor_geometry(monitor)
+        monitor_index = screen.get_primary_monitor()
+        geometry = screen.get_monitor_geometry(monitor_index)
 
-        screen_width = geometry.width
-        screen_height = geometry.height
+        window_width = self.get_allocated_width()
+        window_height = self.get_allocated_height()
 
-        # Get actual window size
-        window_width, window_height = self.get_size()
-
-        # Center horizontally, dock to bottom
-        x = (screen_width - window_width) // 2
-        y = screen_height - window_height
+        x = geometry.x + (geometry.width - window_width) // 2
+        y = geometry.y + geometry.height - window_height
 
         self.move(x, y)
+        return False  # Stop idle_add
 
 
 if __name__ == "__main__":

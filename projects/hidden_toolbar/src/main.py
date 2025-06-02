@@ -1,3 +1,4 @@
+import gi
 from panel import HiddenToolbar
 from gi.repository import Gtk
 
