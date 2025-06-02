@@ -87,17 +87,18 @@ class HiddenToolbar(Gtk.Window):
         window_width = self.get_allocated_width()
         window_height = self.get_allocated_height()
 
-        TASKBAR_OFFSET = 10  # Tune this value to align with Windows taskbar
-
-        x = geometry.x + (geometry.width - window_width) // 2
-        y = geometry.y + geometry.height - window_height + TASKBAR_OFFSET
-
+        # Optional: print debug info
         print(
             f"[DEBUG] Monitor geometry: x={geometry.x}, y={geometry.y}, width={geometry.width}, height={geometry.height}")
         print(f"[DEBUG] Window size: width={window_width}, height={window_height}")
-        print(f"[DEBUG] Moving window to: x={x}, y={y}")
 
-        self.set_gravity(Gdk.Gravity.SOUTH)
+        # Center horizontally
+        x = geometry.x + (geometry.width - window_width) // 2
+
+        # Align to bottom of screen (flush with Windows taskbar)
+        y = geometry.y + geometry.height - window_height
+
+        print(f"[DEBUG] Moving window to: x={x}, y={y}")
         self.move(x, y)
         return False
 
