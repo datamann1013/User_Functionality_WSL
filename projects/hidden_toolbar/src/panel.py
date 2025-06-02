@@ -2,24 +2,21 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
 
-from utils import run_command  # get_screen_size is unused
+from utils import run_command
 
 class HiddenToolbar(Gtk.Window):
     def __init__(self):
         super().__init__()
 
-        # Basic window setup
         self.set_decorated(False)
         self.set_resizable(False)
         self.set_keep_above(True)
         self.set_opacity(1.0)
 
-        # Set a wider window to allow true centering
         self.window_width = 400
         self.window_height = 40
         self.set_default_size(self.window_width, self.window_height)
 
-        # Apply minimal styling
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(b"""
             window {
@@ -38,7 +35,6 @@ class HiddenToolbar(Gtk.Window):
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
 
-        # Outer box fills the window
         outer_box = Gtk.Box()
         outer_box.set_halign(Gtk.Align.FILL)
         outer_box.set_valign(Gtk.Align.FILL)
@@ -46,12 +42,10 @@ class HiddenToolbar(Gtk.Window):
         outer_box.set_vexpand(True)
         self.add(outer_box)
 
-        # Inner box is centered
         inner_box = Gtk.Box(spacing=6)
         inner_box.set_halign(Gtk.Align.CENTER)
         inner_box.set_valign(Gtk.Align.CENTER)
 
-        # Load and scale icons
         def load_icon(path, size=24):
             pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, size, size, True)
             return Gtk.Image.new_from_pixbuf(pixbuf)
@@ -60,7 +54,6 @@ class HiddenToolbar(Gtk.Window):
         filemanager_icon = load_icon("icons/folder.png")
         launcher_icon = load_icon("icons/search.png")
 
-        # Create buttons
         terminal_button = Gtk.Button()
         terminal_button.set_image(terminal_icon)
         terminal_button.connect("clicked", lambda w: run_command("alacritty"))
@@ -73,17 +66,18 @@ class HiddenToolbar(Gtk.Window):
         launcher_button.set_image(launcher_icon)
         launcher_button.connect("clicked", lambda w: run_command("rofi -show drun"))
 
-        # Add buttons to inner box
         inner_box.pack_start(terminal_button, False, False, 0)
         inner_box.pack_start(filemanager_button, False, False, 0)
         inner_box.pack_start(launcher_button, False, False, 0)
 
-        # Add inner box to outer box
         outer_box.pack_start(inner_box, True, True, 0)
 
         self.connect("destroy", Gtk.main_quit)
-        self.connect("realize", lambda w: GLib.idle_add(self.position_window))
+        self.connect("realize", self.defer_positioning)
         self.show_all()
+
+    def defer_positioning(self, widget):
+        GLib.timeout_add(100, self.position_window)  # Delay by 100ms
 
     def position_window(self):
         screen = self.get_screen()
@@ -97,7 +91,7 @@ class HiddenToolbar(Gtk.Window):
         y = geometry.y + geometry.height - window_height
 
         self.move(x, y)
-        return False  # Stop idle_add
+        return False  # Stop timeout
 
 
 if __name__ == "__main__":
