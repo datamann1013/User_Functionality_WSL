@@ -66,7 +66,7 @@ Once installed update the system with
 - sudo pacman -Syu
 ### 2. Install Required Packages
 Install the following packages inside your WSL2 distro: 
-- sudo pacman -S python python-gobject gtk3 xdotool xorg-xprop wmctrl picom rofi pcmanfm alacritty
+- sudo pacman -S python python-gobject gtk3 xdotool xorg-xprop wmctrl picom rofi pcmanfm alacritty openbox
 ### 3. Set Up X11 Display
 Install and run VcXsrv on Windows, https://vcxsrv.com/
 Then, in your WSL terminal:
