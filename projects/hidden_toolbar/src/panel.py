@@ -89,10 +89,8 @@ class HiddenToolbar(Gtk.Window):
         window_width = self.get_allocated_width()
         window_height = self.get_allocated_height()
 
-        BOTTOM_PADDING = -20  # Try -20, adjust as needed
-
         x = geometry.x + (geometry.width - window_width) // 2
-        y = geometry.y + geometry.height - window_height + BOTTOM_PADDING
+        y = geometry.y + geometry.height - window_height
 
         print(
             f"[DEBUG] Monitor geometry: x={geometry.x}, y={geometry.y}, width={geometry.width}, height={geometry.height}")
