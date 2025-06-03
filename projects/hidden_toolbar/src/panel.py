@@ -52,9 +52,9 @@ class HiddenToolbar(Gtk.Window):
             pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, size, size, True)
             return Gtk.Image.new_from_pixbuf(pixbuf)
 
-        terminal_icon = load_icon("projects/hidden_toolbar/icons/terminal.png")
-        filemanager_icon = load_icon("projects/hidden_toolbar/icons/folder.png")
-        launcher_icon = load_icon("projects/hidden_toolbar/icons/search.png")
+        terminal_icon = load_icon("icons/terminal.png")
+        filemanager_icon = load_icon("icons/folder.png")
+        launcher_icon = load_icon("icons/search.png")
 
         terminal_button = Gtk.Button()
         terminal_button.set_image(terminal_icon)
