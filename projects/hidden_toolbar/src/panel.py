@@ -13,6 +13,7 @@ class HiddenToolbar(Gtk.Window):
         self.set_keep_above(True)
         self.set_opacity(1.0)
         self.set_title("hidden_toolbar")
+        self.positioned = False
 
         self.window_width = 400
         self.window_height = 40
@@ -82,6 +83,11 @@ class HiddenToolbar(Gtk.Window):
         GLib.timeout_add(100, self.position_window)  # Delay by 100ms
 
     def position_window(self):
+        if self.positioned:
+             return False
+
+        self.positioned = True
+
         screen = self.get_screen()
         monitor_index = screen.get_primary_monitor()
         geometry = screen.get_monitor_geometry(monitor_index)
