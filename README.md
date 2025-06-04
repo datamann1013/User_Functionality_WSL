@@ -9,7 +9,7 @@ independently or together.
 
 ## 🧩 What You’ll Find Here
 
-- 🪟 `hidden_toolbar/` — A hover-activated launcher bump for Openbox
+- 🪟 [hidden_toolbar/](projects/hidden_toolbar/README.md) — A hover-activated launcher bump for Openbox
 - 🧪 More tools coming soon...
 
 ---
