@@ -55,10 +55,15 @@ pip install -r requirements.txt
 ---
 ## 🚀 How to use:
 
+### 0. (Assumed) Download WSL2
+Command: **wsl --install**
+
 ### 0. (Optional) Reset WSL2
 If you want to start fresh with a clean Linux environment:
 - wsl --unregister archlinux
-### 1. Install a Linux Distro in WSL2
+
+
+### 1. Install a Linux Distro (this tutorial is based on archlinux) in WSL2
 You can install a distro from the Microsoft Store (e.g., Ubuntu, Debian, Arch).
 For Arch, use a community installer like ArchWSL.
 You can also use **wsl --install archlinux** for automated installation.
@@ -78,17 +83,21 @@ Then, in your WSL terminal:
 ### 4. Clone the Repository
 - git clone https://github.com/datamann1013/User_Functionality_WSL.git 
 - cd User_Functionality_WSL/projects/hidden_toolbar
-### 5. Add Icons
+### 5. Add Icons (optional)
 Place your icons in the icons/ folder:
 - terminal.png 
 - filemanager.png 
 - launcher.png
 Use 32x32px PNGs for best results.
+
+There are standard images which can be used.
 ### 6. Run the Toolbar
 Option A: Run manually
-- cd src python3 main.py
+- cd src 
+- python3 main.py
+To run in the background use (python3 main.py&)
 
-Option B: Run with fullscreen detection (when in hidden_toolbar folder)
+Option B: Run with fullscreen detection (when in hidden_toolbar folder) **NOT IMPLEMENTED YET**
 - chmod +x detect_fullscreen.sh detect_fullscreen.sh & python3 src/main.py &
 ### 7. Autostart on Login (Optional)
 If you're using Openbox or another window manager, add this to your autostart file (e.g., ~/.config/openbox/autostart):
