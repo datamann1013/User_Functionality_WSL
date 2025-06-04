@@ -4,11 +4,37 @@ import gi
 from panel import HiddenToolbar
 from gi.repository import Gtk, Gdk
 
-# Check DISPLAY environment variable
+import subprocess
+
+def find_vcxsrv_display():
+    # Try to find a running VcXsrv process and guess the DISPLAY
+    try:
+        result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
+        for line in result.stdout.splitlines():
+            if 'VcXsrv' in line:
+                # Default VcXsrv display is :0.0, but could be different
+                # Try to extract display number from command line
+                if '-multiwindow' in line or '-fullscreen' in line or '-rootless' in line:
+                    # Heuristic: use :0.0 if not specified
+                    return ':0.0'
+                import re
+                m = re.search(r'-ac\s+-multiwindow\s+-screen\s+\d+\s+:(\d+)', line)
+                if m:
+                    return f':{m.group(1)}.0'
+        return None
+    except Exception:
+        return None
+
 DISPLAY = os.environ.get('DISPLAY')
-if not DISPLAY:
-    print("[ERROR] DISPLAY environment variable is not set. Please ensure VcXsrv is running and DISPLAY is configured.")
-    sys.exit(1)
+if not DISPLAY or DISPLAY == ':0':
+    guessed = find_vcxsrv_display()
+    if guessed:
+        os.environ['DISPLAY'] = guessed
+        DISPLAY = guessed
+        print(f"[INFO] DISPLAY not set or default, guessing VcXsrv display: {DISPLAY}")
+    else:
+        print("[ERROR] DISPLAY environment variable is not set and VcXsrv was not found running. Please start VcXsrv and set DISPLAY.")
+        sys.exit(1)
 
 # Check X server vendor
 try:
@@ -17,7 +43,6 @@ try:
         raise RuntimeError("No X display found.")
     vendor = display.get_name() if hasattr(display, 'get_name') else str(display)
     # Try to get vendor string from Xlib if possible
-    # Fallback: use Xlib directly if available
     try:
         import Xlib.display
         xdisp = Xlib.display.Display()
