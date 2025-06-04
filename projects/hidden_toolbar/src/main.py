@@ -36,26 +36,22 @@ if not DISPLAY or DISPLAY == ':0':
         print("[ERROR] DISPLAY environment variable is not set and VcXsrv was not found running. Please start VcXsrv and set DISPLAY.")
         sys.exit(1)
 
-# Check X server vendor
+# Only check DISPLAY is set, do not enforce vendor string
 try:
     display = Gdk.Display.get_default()
     if display is None:
         raise RuntimeError("No X display found.")
-    vendor = display.get_name() if hasattr(display, 'get_name') else str(display)
-    # Try to get vendor string from Xlib if possible
+    print(f"[DEBUG] DISPLAY={DISPLAY}")
+    # Try to print vendor string if possible, but do not enforce
     try:
         import Xlib.display
         xdisp = Xlib.display.Display()
         vendor = xdisp.get_vendor()
+        print(f"[DEBUG] X server vendor: {vendor}")
     except Exception:
-        pass
-    print(f"[DEBUG] DISPLAY={DISPLAY}")
-    print(f"[DEBUG] X server vendor: {vendor}")
-    if 'VcXsrv' not in vendor:
-        print("[ERROR] X server is not VcXsrv. Please start VcXsrv and set DISPLAY accordingly.")
-        sys.exit(1)
+        print("[DEBUG] X server vendor: (could not determine, but proceeding)")
 except Exception as e:
-    print(f"[ERROR] Could not determine X server vendor: {e}")
+    print(f"[ERROR] Could not connect to X server: {e}")
     sys.exit(1)
 
 def main():
