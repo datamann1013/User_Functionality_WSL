@@ -80,14 +80,6 @@ class HiddenToolbar(Gtk.Window):
         self.show_all()
 
     def defer_positioning(self, widget):
-        # Try to set override-redirect to remove border (must be after realize)
-        try:
-            gdk_window = self.get_window()
-            if gdk_window is not None:
-                gdk_window.set_override_redirect(True)
-                print("[DEBUG] Set override-redirect for borderless window.")
-        except Exception as e:
-            print(f"[DEBUG] Could not set override-redirect: {e}")
         GLib.timeout_add(100, self.position_window)  # Delay by 100ms
 
     def position_window(self):
