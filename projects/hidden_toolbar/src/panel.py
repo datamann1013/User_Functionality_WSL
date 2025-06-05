@@ -59,7 +59,7 @@ class HiddenToolbar(Gtk.Window):
 
         terminal_button = Gtk.Button()
         terminal_button.set_image(terminal_icon)
-        terminal_button.connect("clicked", lambda w: run_command("alacritty"))
+        terminal_button.connect("clicked", lambda w: run_command("xterm"))
 
         filemanager_button = Gtk.Button()
         filemanager_button.set_image(filemanager_icon)
