@@ -109,7 +109,7 @@ class HiddenToolbar(Gtk.Window):
         window_height = self.get_allocated_height()
 
         # Move the window a bit higher to sit above the taskbar (e.g., 10px)
-        offset = 50
+        offset = 46
         x = geometry.x + (geometry.width - window_width) // 2
         y = geometry.y + geometry.height - window_height - offset
 
