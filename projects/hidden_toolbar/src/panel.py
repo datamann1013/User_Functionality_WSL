@@ -19,7 +19,11 @@ class HiddenToolbar(Gtk.Window):
         self.window_width = 400
         self.window_height = 40
         self.set_default_size(self.window_width, self.window_height)
-        self.set_type_hint(Gdk.WindowTypeHint.DOCK)
+        # Try POPUP_MENU type hint to minimize border/shadow in VcXsrv
+        self.set_type_hint(Gdk.WindowTypeHint.POPUP_MENU)
+        self.set_app_paintable(True)
+        self.set_skip_taskbar_hint(True)
+        self.set_skip_pager_hint(True)
 
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(b"""
