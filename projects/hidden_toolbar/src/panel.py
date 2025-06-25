@@ -3,6 +3,7 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
 
 from utils import run_command
+import os
 
 class HiddenToolbar(Gtk.Window):
     def __init__(self):
@@ -49,13 +50,15 @@ class HiddenToolbar(Gtk.Window):
         inner_box.set_halign(Gtk.Align.CENTER)
         inner_box.set_valign(Gtk.Align.CENTER)
 
-        def load_icon(path, size=24):
-            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, size, size, True)
+        def load_icon(filename, size=24):
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            icon_path = os.path.join(base_dir, "icons", filename)
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(icon_path, size, size, True)
             return Gtk.Image.new_from_pixbuf(pixbuf)
 
-        terminal_icon = load_icon("icons/terminal.png")
-        filemanager_icon = load_icon("icons/folder.png")
-        launcher_icon = load_icon("icons/search.png")
+        terminal_icon = load_icon("terminal.png")
+        filemanager_icon = load_icon("folder.png")
+        launcher_icon = load_icon("search.png")
 
         terminal_button = Gtk.Button()
         terminal_button.set_image(terminal_icon)
