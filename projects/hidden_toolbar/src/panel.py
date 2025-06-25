@@ -92,7 +92,8 @@ class HiddenToolbar(Gtk.Window):
         self.show_all()
 
     def defer_positioning(self, widget):
-        GLib.timeout_add(100, self.position_window)  # Delay by 100ms
+        # Increase delay to 300ms to ensure window is fully realized before moving
+        GLib.timeout_add(300, self.position_window)  # Delay by 300ms
 
     def position_window(self):
         if self.positioned:
