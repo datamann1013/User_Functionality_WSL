@@ -26,10 +26,15 @@ class HiddenToolbar(Gtk.Window):
             window {
                 background-color: #2b2b2b;
                 border-radius: 6px;
+                border-width: 0;
+                border: none;
+                box-shadow: none;
             }
             button {
                 background-color: transparent;
                 border: none;
+                border-width: 0;
+                box-shadow: none;
                 padding: 2px;
             }
         """)
