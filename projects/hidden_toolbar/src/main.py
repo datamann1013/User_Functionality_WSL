@@ -55,10 +55,14 @@ except Exception as e:
     sys.exit(1)
 
 def main():
-    win = HiddenToolbar()
-    win.connect("destroy", Gtk.main_quit)
-    win.show_all()
-    Gtk.main()
+    try:
+        win = HiddenToolbar()
+        win.connect("destroy", Gtk.main_quit)
+        win.show_all()
+        Gtk.main()
+    except Exception as e:
+        print(f"[ERROR] {e}", file=sys.stderr)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
