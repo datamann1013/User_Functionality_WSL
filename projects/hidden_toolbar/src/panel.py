@@ -75,7 +75,8 @@ class HiddenToolbar(Gtk.Window):
 
         filemanager_button = Gtk.Button()
         filemanager_button.set_image(filemanager_icon)
-        filemanager_button.connect("clicked", lambda w: run_command("pcmanfm"))
+        # Open Windows Explorer in the current directory instead of pcmanfm
+        filemanager_button.connect("clicked", lambda w: run_command("explorer.exe ."))
 
         launcher_button = Gtk.Button()
         launcher_button.set_image(launcher_icon)
