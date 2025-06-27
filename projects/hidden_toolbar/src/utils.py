@@ -50,3 +50,34 @@ def toggle_favourite(program):
 def is_favourite(program):
     data = load_usage_data()
     return program in data['favourites']
+
+def scan_development_programs():
+    """
+    Scan for common development programs in PATH and cache the result.
+    """
+    import shutil
+    import threading
+    dev_programs = [
+        # IDEs
+        "code", "pycharm", "eclipse", "idea", "clion", "netbeans", "geany",
+        # Editors
+        "vim", "emacs", "gedit", "kate", "sublime_text", "atom", "nano",
+        # Terminals
+        "gnome-terminal", "konsole", "xterm", "tilix", "alacritty", "terminator",
+        # Others
+        "thunderbird", "dbeaver", "mysql-workbench", "android-studio"
+    ]
+    found = {}
+    for prog in dev_programs:
+        path = shutil.which(prog)
+        if path:
+            found[prog] = path
+    cache_path = os.path.join(os.path.dirname(__file__), "scanned_programs.json")
+    try:
+        with open(cache_path, "w") as f:
+            json.dump(found, f)
+    except Exception as e:
+        print(f"[DEBUG] Failed to write scanned_programs.json: {e}")
+
+def scan_development_programs_background():
+    threading.Thread(target=scan_development_programs, daemon=True).start()
