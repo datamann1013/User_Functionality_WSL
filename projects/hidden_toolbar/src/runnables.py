@@ -3,7 +3,7 @@ import os
 import json
 
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk
+from gi.repository import Gtk, GLib
 
 class ProgramLauncher(Gtk.Window):
     def __init__(self, programs=None):
@@ -15,7 +15,7 @@ class ProgramLauncher(Gtk.Window):
         self.add(self.label)
         self.show_all()
         # After 1 second, update the label with the first program name
-        Gtk.timeout_add(1000, self.update_label_with_first_program)
+        GLib.timeout_add(1000, self.update_label_with_first_program)
 
     def update_label_with_first_program(self):
         scanned_path = os.path.join(os.path.dirname(__file__), "scanned_programs.json")
