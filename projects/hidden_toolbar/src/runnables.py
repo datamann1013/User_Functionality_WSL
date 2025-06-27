@@ -30,6 +30,7 @@ class ProgramLauncher(Gtk.Window):
                     print(f"[DEBUG] Exception loading json: {e}")
         else:
             print("[DEBUG] scanned_programs.json does not exist")
+        print(f"[DEBUG] About to create Gtk.Label with: {first_program}")
         label = Gtk.Label(label=first_program)
         print("[DEBUG] Gtk.Label created")
         self.add(label)
