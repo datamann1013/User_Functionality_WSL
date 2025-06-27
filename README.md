@@ -9,9 +9,14 @@ independently or together.
 
 ## 🧩 What You’ll Find Here
 
-- 🪟 [hidden_toolbar/](projects/hidden_toolbar/README.md) — A hover-activated launcher bump for Openbox
+- 🪟 [hidden_toolbar](projects/hidden_toolbar/README.md) — A hover-activated launcher bump for Openbox
 - 🧪 More tools coming soon...
 
+## Ideas for later projects:
+- 🖥️ Computer communication - An application to use one computer to control another, e.g., using a phone to control a desktop.
+- 📊 System monitoring - A tool to monitor system performance across multiple computers, e.g., monitoring CPU usage on a desktop from a laptop.
+- 🔐 Security tool - A tool to manage security settings across multiple computers, e.g., managing firewall settings on a desktop from a laptop.
+- 
 ---
 
 ## 📁 Folder Structure
