@@ -21,8 +21,8 @@ class HiddenToolbar(Gtk.Window):
         self.set_title("hidden_toolbar")
         self.positioned = False
 
-        self.window_width = 500
-        self.window_height = 120
+        self.window_width = 400
+        self.window_height = 40
         self.set_default_size(self.window_width, self.window_height)
         # Try POPUP_MENU type hint to minimize border/shadow in VcXsrv
         self.set_type_hint(Gdk.WindowTypeHint.POPUP_MENU)
@@ -115,11 +115,10 @@ class HiddenToolbar(Gtk.Window):
         window_width = self.get_allocated_width()
         window_height = self.get_allocated_height()
 
-        panel_height = 40  # match panel height
         # Move the window a bit higher to sit above the taskbar (e.g., 10px)
         offset = 46
         x = geometry.x + (geometry.width - window_width) // 2
-        y = geometry.y + geometry.height - window_height - panel_height - offset
+        y = geometry.y + geometry.height - window_height - offset
 
         print(
             f"[DEBUG] Monitor geometry: x={geometry.x}, y={geometry.y}, width={geometry.width}, height={geometry.height}")
