@@ -70,12 +70,14 @@ def scan_development_programs():
     found = {}
     for prog in dev_programs:
         path = shutil.which(prog)
+        print(f"[DEBUG] Scanning: {prog} -> {path}")
         if path:
             found[prog] = path
     cache_path = os.path.join(os.path.dirname(__file__), "scanned_programs.json")
     try:
         with open(cache_path, "w") as f:
             json.dump(found, f)
+        print(f"[DEBUG] Wrote {len(found)} programs to {cache_path}")
     except Exception as e:
         print(f"[DEBUG] Failed to write scanned_programs.json: {e}")
 
