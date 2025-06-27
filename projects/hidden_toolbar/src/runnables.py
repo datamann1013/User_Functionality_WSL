@@ -35,7 +35,7 @@ button {
 class ProgramLauncher(Gtk.Window):
     def __init__(self, programs):
         super().__init__(title="Program Launcher")
-        self.set_default_size(500, 400)
+        self.set_default_size(500, 600)  # Reduce height to avoid Gdk-WARNING
         self.set_position(Gtk.WindowPosition.CENTER)
         self.set_border_width(12)
         self.set_resizable(False)
@@ -113,4 +113,3 @@ def show_launcher(programs):
     win.connect("destroy", Gtk.main_quit)
     win.show_all()
     Gtk.main()
-
