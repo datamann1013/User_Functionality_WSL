@@ -7,8 +7,7 @@ class ProgramLauncher(Gtk.Window):
     def __init__(self, programs=None):
         super().__init__(title="Program Launcher")
         self.set_default_size(200, 60)
-        button = Gtk.Button(label="Click Me!")
-        self.add(button)
+        # No widgets added, just an empty window
         self.show_all()
 
 def show_launcher(programs=None):
