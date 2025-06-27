@@ -3,6 +3,7 @@ import subprocess
 import sys
 import gi
 import logging
+from .utils import load_usage_data, add_last_used, toggle_favourite, is_favourite
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -83,24 +84,45 @@ class ProgramLauncher(Gtk.Window):
 
         self.programs = programs
         self.filtered_programs = self.programs.copy()
+        self.usage_data = load_usage_data()
         self.populate_listbox()
 
+    def get_display_programs(self):
+        # Get last used and favourites from usage data
+        last_used = [p for p in self.usage_data.get('last_used', []) if p in self.programs][:5]
+        favourites = [p for p in self.usage_data.get('favourites', []) if p in self.programs and p not in last_used][:5]
+        # Others: not in last_used or favourites
+        others = [p for p in self.programs if p not in last_used and p not in favourites]
+        # Sort: special chars/numbers first, then A-Z
+        def sort_key(x):
+            if x and not x[0].isalpha():
+                return (0, x.lower())
+            return (1, x.lower())
+        others = sorted(others, key=sort_key)[:10]
+        return last_used, favourites, others
+
     def populate_listbox(self):
-        logging.debug(f"Populating listbox with {len(self.filtered_programs)} filtered programs")
+        logging.debug(f"Populating listbox with custom sections")
         for child in self.listbox.get_children():
             self.listbox.remove(child)
-        max_rows = 200
-        shown_programs = self.filtered_programs[:max_rows]
-        for prog in shown_programs:
-            row = Gtk.ListBoxRow()
-            label = Gtk.Label(label=prog, xalign=0)
-            row.add(label)
-            self.listbox.add(row)
-        if len(self.filtered_programs) > max_rows:
-            row = Gtk.ListBoxRow()
-            label = Gtk.Label(label=f"...and {len(self.filtered_programs) - max_rows} more, refine your search.", xalign=0)
-            row.add(label)
-            self.listbox.add(row)
+        last_used, favourites, others = self.get_display_programs()
+        def add_section(title, items):
+            if items:
+                header = Gtk.Label(label=f"--- {title} ---", xalign=0)
+                header.set_justify(Gtk.Justification.LEFT)
+                header.set_markup(f'<b>{title}</b>')
+                row = Gtk.ListBoxRow()
+                row.add(header)
+                row.set_sensitive(False)
+                self.listbox.add(row)
+                for prog in items:
+                    row = Gtk.ListBoxRow()
+                    label = Gtk.Label(label=prog + (" ★" if is_favourite(prog) else ""), xalign=0)
+                    row.add(label)
+                    self.listbox.add(row)
+        add_section("Last Used", last_used)
+        add_section("Favourites", favourites)
+        add_section("Others", others)
         self.listbox.show_all()
         logging.debug("Listbox populated and shown.")
 
@@ -108,21 +130,33 @@ class ProgramLauncher(Gtk.Window):
         text = entry.get_text().lower()
         logging.debug(f"Search text changed: '{text}'")
         self.filtered_programs = [p for p in self.programs if text in p.lower()]
+        self.usage_data = load_usage_data()
         self.populate_listbox()
 
     def on_row_activated(self, listbox, row):
         idx = row.get_index()
-        logging.debug(f"Row activated: index={idx}")
-        if 0 <= idx < len(self.filtered_programs):
-            self.launch_program(self.filtered_programs[idx])
+        # Skip section headers
+        widget = row.get_child()
+        if isinstance(widget, Gtk.Label) and widget.get_text().startswith("---"):
+            return
+        # Find the program name from the label
+        prog = widget.get_text().replace(" ★", "").strip()
+        logging.debug(f"Row activated: {prog}")
+        if prog in self.programs:
+            add_last_used(prog)
+            self.launch_program(prog)
 
     def on_launch(self, button):
         selected = self.listbox.get_selected_row()
         logging.debug(f"Launch button clicked. Selected row: {selected}")
         if selected:
-            idx = selected.get_index()
-            if 0 <= idx < len(self.filtered_programs):
-                self.launch_program(self.filtered_programs[idx])
+            widget = selected.get_child()
+            if isinstance(widget, Gtk.Label) and widget.get_text().startswith("---"):
+                return
+            prog = widget.get_text().replace(" ★", "").strip()
+            if prog in self.programs:
+                add_last_used(prog)
+                self.launch_program(prog)
 
     def launch_program(self, prog):
         logging.debug(f"Launching program: {prog}")
