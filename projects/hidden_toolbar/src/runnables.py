@@ -2,6 +2,9 @@ import os
 import subprocess
 import sys
 import gi
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
 
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk
@@ -34,6 +37,7 @@ button {
 
 class ProgramLauncher(Gtk.Window):
     def __init__(self, programs):
+        logging.debug(f"Initializing ProgramLauncher with {len(programs)} programs")
         super().__init__(title="Program Launcher")
         self.set_default_size(500, 600)  # Reduce height to avoid Gdk-WARNING
         self.set_position(Gtk.WindowPosition.CENTER)
@@ -42,6 +46,7 @@ class ProgramLauncher(Gtk.Window):
         self.set_type_hint(Gdk.WindowTypeHint.DIALOG)
         self.set_keep_above(True)
         self.set_decorated(True)
+        logging.debug("Window properties set.")
 
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(css.encode())
@@ -73,6 +78,7 @@ class ProgramLauncher(Gtk.Window):
         self.populate_listbox()
 
     def populate_listbox(self):
+        logging.debug(f"Populating listbox with {len(self.filtered_programs)} filtered programs")
         for child in self.listbox.get_children():
             self.listbox.remove(child)
         for prog in self.filtered_programs:
@@ -81,34 +87,41 @@ class ProgramLauncher(Gtk.Window):
             row.add(label)
             self.listbox.add(row)
         self.listbox.show_all()
+        logging.debug("Listbox populated and shown.")
 
     def on_search(self, entry):
         text = entry.get_text().lower()
+        logging.debug(f"Search text changed: '{text}'")
         self.filtered_programs = [p for p in self.programs if text in p.lower()]
         self.populate_listbox()
 
     def on_row_activated(self, listbox, row):
         idx = row.get_index()
+        logging.debug(f"Row activated: index={idx}")
         if 0 <= idx < len(self.filtered_programs):
             self.launch_program(self.filtered_programs[idx])
 
     def on_launch(self, button):
         selected = self.listbox.get_selected_row()
+        logging.debug(f"Launch button clicked. Selected row: {selected}")
         if selected:
             idx = selected.get_index()
             if 0 <= idx < len(self.filtered_programs):
                 self.launch_program(self.filtered_programs[idx])
 
     def launch_program(self, prog):
+        logging.debug(f"Launching program: {prog}")
         try:
             subprocess.Popen([prog])
         except Exception as e:
+            logging.error(f"Failed to launch {prog}: {e}")
             dialog = Gtk.MessageDialog(self, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK,
                                       f"Failed to launch {prog}: {e}")
             dialog.run()
             dialog.destroy()
 
 def show_launcher(programs):
+    logging.debug("Calling show_launcher")
     win = ProgramLauncher(programs)
     win.connect("destroy", Gtk.main_quit)
     win.show_all()
