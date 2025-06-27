@@ -39,7 +39,7 @@ class ProgramLauncher(Gtk.Window):
     def __init__(self, programs):
         logging.debug(f"Initializing ProgramLauncher with {len(programs)} programs")
         super().__init__(title="Program Launcher")
-        self.set_default_size(500, 600)  # Window size
+        self.set_default_size(500, 600)  # Fixed window size
         self.set_position(Gtk.WindowPosition.CENTER)
         self.set_border_width(12)
         self.set_resizable(False)
@@ -59,12 +59,13 @@ class ProgramLauncher(Gtk.Window):
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.add(vbox)
 
+        # Search bar at the top
         self.entry = Gtk.Entry()
         self.entry.set_placeholder_text("Search for a program...")
         self.entry.connect("changed", self.on_search)
         vbox.pack_start(self.entry, False, False, 0)
 
-        # Add a scrolled window for the listbox
+        # Scrolled window for the listbox
         scrolled = Gtk.ScrolledWindow()
         scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
         scrolled.set_min_content_height(400)
