@@ -7,7 +7,7 @@ class ProgramLauncher(Gtk.Window):
     def __init__(self, programs=None):
         super().__init__(title="Program Launcher")
         self.set_default_size(200, 60)
-        label = Gtk.Label(label="Hello World")
+        label = Gtk.Label(label="This is static text! If you see this, GTK is working.")
         self.add(label)
         self.show_all()
 
