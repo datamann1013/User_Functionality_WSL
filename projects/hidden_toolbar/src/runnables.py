@@ -17,8 +17,15 @@ class ProgramLauncher(Gtk.Window):
                 json_content = f.read()
         else:
             json_content = "{}"
-        label = Gtk.Label(label=json_content)
-        self.add(label)
+        # Use TextView inside a ScrolledWindow for large/multiline text
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        textview = Gtk.TextView()
+        textview.get_buffer().set_text(json_content)
+        textview.set_editable(False)
+        textview.set_cursor_visible(False)
+        scrolled.add(textview)
+        self.add(scrolled)
         self.show_all()
 
 def show_launcher(programs=None):
