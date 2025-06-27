@@ -10,6 +10,7 @@ from utils import run_command
 import subprocess
 import threading
 import traceback
+from runnables import ProgramLauncher
 
 class HiddenToolbar(Gtk.Window):
     def __init__(self):
@@ -89,9 +90,14 @@ class HiddenToolbar(Gtk.Window):
         # Launch the correct runnable (the minimal ProgramLauncher window)
         launcher_button.connect("clicked", self.launch_runnables)
 
+        # Add a test button to launch the runnables window as an import (not subprocess)
+        test_button = Gtk.Button(label="Open Runnables Window (import)")
+        test_button.connect("clicked", lambda w: ProgramLauncher())
+
         inner_box.pack_start(terminal_button, False, False, 0)
         inner_box.pack_start(filemanager_button, False, False, 0)
         inner_box.pack_start(launcher_button, False, False, 0)
+        inner_box.pack_start(test_button, False, False, 0)
 
         outer_box.pack_start(inner_box, True, True, 0)
 
