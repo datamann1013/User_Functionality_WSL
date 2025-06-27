@@ -13,6 +13,7 @@ import traceback
 
 class HiddenToolbar(Gtk.Window):
     def __init__(self):
+        super().__init__()
 
         self.set_decorated(False)
         self.set_resizable(False)
