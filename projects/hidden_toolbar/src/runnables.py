@@ -3,21 +3,13 @@ import os
 import json
 
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, GLib
+from gi.repository import Gtk
 
 class ProgramLauncher(Gtk.Window):
     def __init__(self, programs=None):
         super().__init__(title="Program Launcher")
-        self.set_default_size(800, 600)
+        self.set_default_size(400, 100)
         self.connect("destroy", Gtk.main_quit)
-        # Create a label with placeholder text
-        self.label = Gtk.Label(label="Loading...")
-        self.add(self.label)
-        self.show_all()
-        # After 1 second, update the label with the first program name
-        GLib.timeout_add(1000, self.update_label_with_first_program)
-
-    def update_label_with_first_program(self):
         scanned_path = os.path.join(os.path.dirname(__file__), "scanned_programs.json")
         first_program = "No program found"
         if os.path.exists(scanned_path):
@@ -28,8 +20,14 @@ class ProgramLauncher(Gtk.Window):
                         first_program = next(iter(data.keys()))
                 except Exception:
                     pass
-        self.label.set_text(first_program)
-        return False  # Only run once
+        label = Gtk.Label(label=first_program)
+        label.set_margin_top(20)
+        label.set_margin_bottom(20)
+        label.set_margin_start(20)
+        label.set_margin_end(20)
+        label.set_justify(Gtk.Justification.CENTER)
+        self.add(label)
+        self.show_all()
 
 def show_launcher(programs=None):
     win = ProgramLauncher(programs)
