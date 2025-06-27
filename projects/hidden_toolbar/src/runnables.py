@@ -7,7 +7,9 @@ class ProgramLauncher(Gtk.Window):
     def __init__(self, programs=None):
         super().__init__(title="Program Launcher")
         self.set_default_size(200, 60)
-        # No widgets added, just an empty window
+
+        label = Gtk.Label(label="Test text")
+        self.add(label)
         self.show_all()
 
 def show_launcher(programs=None):
