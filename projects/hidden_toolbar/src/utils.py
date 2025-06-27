@@ -4,6 +4,7 @@ from gi.repository import Gdk
 import subprocess
 import json
 import os
+import threading
 
 USAGE_FILE = os.path.join(os.path.dirname(__file__), '..', 'program_usage.json')
 
@@ -56,7 +57,6 @@ def scan_development_programs():
     Scan for common development programs in PATH and cache the result.
     """
     import shutil
-    import threading
     dev_programs = [
         # IDEs
         "code", "pycharm", "eclipse", "idea", "clion", "netbeans", "geany",
