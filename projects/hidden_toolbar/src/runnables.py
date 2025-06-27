@@ -89,9 +89,16 @@ class ProgramLauncher(Gtk.Window):
         logging.debug(f"Populating listbox with {len(self.filtered_programs)} filtered programs")
         for child in self.listbox.get_children():
             self.listbox.remove(child)
-        for prog in self.filtered_programs:
+        max_rows = 200
+        shown_programs = self.filtered_programs[:max_rows]
+        for prog in shown_programs:
             row = Gtk.ListBoxRow()
             label = Gtk.Label(label=prog, xalign=0)
+            row.add(label)
+            self.listbox.add(row)
+        if len(self.filtered_programs) > max_rows:
+            row = Gtk.ListBoxRow()
+            label = Gtk.Label(label=f"...and {len(self.filtered_programs) - max_rows} more, refine your search.", xalign=0)
             row.add(label)
             self.listbox.add(row)
         self.listbox.show_all()
