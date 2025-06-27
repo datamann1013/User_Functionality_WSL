@@ -9,7 +9,9 @@ logging.basicConfig(level=logging.DEBUG)
 class ProgramLauncher(Gtk.Window):
     def __init__(self, programs):
         super().__init__(title="Program Launcher")
-        self.set_default_size(400, 300)
+        # Explicitly set a safe, fixed window size
+        self.set_default_size(800, 600)
+        self.set_resizable(False)
         self.set_position(Gtk.WindowPosition.CENTER)
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.add(vbox)
