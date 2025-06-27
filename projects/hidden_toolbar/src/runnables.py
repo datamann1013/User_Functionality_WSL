@@ -13,3 +13,9 @@ class ProgramLauncher(Gtk.Window):
 def show_launcher(programs=None):
     win = ProgramLauncher(programs)
     Gtk.main()
+
+if __name__ == "__main__":
+    from gi.repository import Gtk
+    win = ProgramLauncher()
+    win.connect("destroy", Gtk.main_quit)
+    Gtk.main()
