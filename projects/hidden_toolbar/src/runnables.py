@@ -8,7 +8,15 @@ class ProgramLauncher(Gtk.Window):
     def __init__(self, programs=None):
         super().__init__(title="Program Launcher")
         self.set_default_size(200, 60)
-        # Use a box and a label, like in panel.py
+        self.set_decorated(False)
+        self.set_resizable(False)
+        self.set_keep_above(True)
+        self.set_opacity(1.0)
+        self.set_title("hidden_toolbar_runnables")
+        self.set_type_hint(Gtk.gdk.WINDOW_TYPE_HINT_POPUP_MENU if hasattr(Gtk, 'gdk') else getattr(__import__('gi.repository.Gdk', fromlist=['WindowTypeHint']), 'WindowTypeHint').POPUP_MENU)
+        self.set_app_paintable(True)
+        self.set_skip_taskbar_hint(True)
+        self.set_skip_pager_hint(True)
         outer_box = Gtk.Box()
         outer_box.set_halign(Gtk.Align.FILL)
         outer_box.set_valign(Gtk.Align.FILL)
