@@ -75,12 +75,13 @@ class HiddenToolbar(Gtk.Window):
 
         filemanager_button = Gtk.Button()
         filemanager_button.set_image(filemanager_icon)
-        # Open Windows Explorer in the current directory instead of pcmanfm
-        filemanager_button.connect("clicked", lambda w: run_command("explorer.exe ."))
+        # Open Windows Explorer in the user's home directory
+        filemanager_button.connect("clicked", lambda w: run_command("explorer.exe ~"))
 
         launcher_button = Gtk.Button()
         launcher_button.set_image(launcher_icon)
-        launcher_button.connect("clicked", lambda w: run_command("rofi -show drun"))
+        # Use dmenu_run for a simple, robust application launcher
+        launcher_button.connect("clicked", lambda w: run_command("dmenu_run"))
 
         inner_box.pack_start(terminal_button, False, False, 0)
         inner_box.pack_start(filemanager_button, False, False, 0)
