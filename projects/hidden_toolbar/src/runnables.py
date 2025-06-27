@@ -10,7 +10,11 @@ class ProgramLauncher(Gtk.Window):
     def __init__(self, programs):
         super().__init__(title="Program Launcher")
         # Explicitly set a safe, fixed window size
-        self.set_default_size(800, 600)
+        width, height = 800, 600
+        # Safety check: never exceed 32767
+        width = min(width, 32767)
+        height = min(height, 32767)
+        self.set_default_size(width, height)
         self.set_resizable(False)
         self.set_position(Gtk.WindowPosition.CENTER)
         vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
