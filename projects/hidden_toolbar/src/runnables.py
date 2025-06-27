@@ -181,6 +181,10 @@ class ProgramLauncher(Gtk.Window):
 def show_launcher(programs):
     logging.debug("Calling show_launcher")
     win = ProgramLauncher(programs)
-    win.connect("destroy", Gtk.main_quit)
+    def on_destroy(*args):
+        logging.debug("Launcher window destroyed!")
+    win.connect("destroy", on_destroy)
     win.show_all()
+    logging.debug("Before Gtk.main()")
     Gtk.main()
+    logging.debug("After Gtk.main() - main loop exited!")
