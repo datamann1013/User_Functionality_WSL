@@ -64,13 +64,22 @@ class HiddenToolbar(Gtk.Window):
         inner_box.set_halign(Gtk.Align.CENTER)
         inner_box.set_valign(Gtk.Align.CENTER)
 
+        terminal_label = Gtk.Label()
+        terminal_label.set_markup("<b>Terminal</b>")
         terminal_button = Gtk.Button()
+        terminal_button.add(terminal_label)
         terminal_button.connect("clicked", lambda w: run_command("xterm"))
 
+        filemanager_label = Gtk.Label()
+        filemanager_label.set_markup("<i>File Manager</i>")
         filemanager_button = Gtk.Button()
+        filemanager_button.add(filemanager_label)
         filemanager_button.connect("clicked", lambda w: run_command("explorer.exe ~"))
 
+        launcher_label = Gtk.Label()
+        launcher_label.set_markup("<span foreground='yellow'>Launcher</span>")
         launcher_button = Gtk.Button()
+        launcher_button.add(launcher_label)
         launcher_button.connect("clicked", self.launch_runnables)
 
         inner_box.pack_start(terminal_button, False, False, 0)
