@@ -10,22 +10,19 @@ class ProgramLauncher(Gtk.Window):
         super().__init__(title="Program Launcher")
         self.set_default_size(800, 600)
         self.connect("destroy", Gtk.main_quit)
-        # Load and display the scanned_programs.json as raw JSON
+        # Load scanned_programs.json and extract the first program name
         scanned_path = os.path.join(os.path.dirname(__file__), "scanned_programs.json")
+        first_program = "No program found"
         if os.path.exists(scanned_path):
             with open(scanned_path, "r") as f:
-                json_content = f.read()
-        else:
-            json_content = "{}"
-        # Use TextView inside a ScrolledWindow for large/multiline text
-        scrolled = Gtk.ScrolledWindow()
-        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
-        textview = Gtk.TextView()
-        textview.get_buffer().set_text(json_content)
-        textview.set_editable(False)
-        textview.set_cursor_visible(False)
-        scrolled.add(textview)
-        self.add(scrolled)
+                try:
+                    data = json.load(f)
+                    if data:
+                        first_program = next(iter(data.keys()))
+                except Exception:
+                    pass
+        label = Gtk.Label(label=first_program)
+        self.add(label)
         self.show_all()
 
 def show_launcher(programs=None):
