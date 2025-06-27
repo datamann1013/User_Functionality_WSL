@@ -13,7 +13,6 @@ import traceback
 
 class HiddenToolbar(Gtk.Window):
     def __init__(self):
-        super().__init__()
 
         self.set_decorated(False)
         self.set_resizable(False)
@@ -22,8 +21,8 @@ class HiddenToolbar(Gtk.Window):
         self.set_title("hidden_toolbar")
         self.positioned = False
 
-        self.window_width = 400
-        self.window_height = 40
+        self.window_width = 500
+        self.window_height = 120
         self.set_default_size(self.window_width, self.window_height)
         # Try POPUP_MENU type hint to minimize border/shadow in VcXsrv
         self.set_type_hint(Gdk.WindowTypeHint.POPUP_MENU)
@@ -41,11 +40,16 @@ class HiddenToolbar(Gtk.Window):
                 box-shadow: none;
             }
             button {
-                background-color: transparent;
+                background-color: #444;
+                color: #fff;
                 border: none;
-                border-width: 0;
-                box-shadow: none;
-                padding: 2px;
+                border-radius: 4px;
+                padding: 6px 16px;
+                margin: 4px;
+                font-size: 14px;
+            }
+            button:hover {
+                background-color: #666;
             }
         """)
         Gtk.StyleContext.add_provider_for_screen(
@@ -61,32 +65,17 @@ class HiddenToolbar(Gtk.Window):
         outer_box.set_vexpand(True)
         self.add(outer_box)
 
-        inner_box = Gtk.Box(spacing=6)
+        inner_box = Gtk.Box(spacing=16)
         inner_box.set_halign(Gtk.Align.CENTER)
         inner_box.set_valign(Gtk.Align.CENTER)
 
-        def load_icon(filename, size=24):
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            icon_path = os.path.join(base_dir, "icons", filename)
-            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(icon_path, size, size, True)
-            return Gtk.Image.new_from_pixbuf(pixbuf)
-
-        terminal_icon = load_icon("terminal.png")
-        filemanager_icon = load_icon("folder.png")
-        launcher_icon = load_icon("search.png")
-
-        terminal_button = Gtk.Button()
-        terminal_button.set_image(terminal_icon)
+        terminal_button = Gtk.Button(label="Terminal")
         terminal_button.connect("clicked", lambda w: run_command("xterm"))
 
-        filemanager_button = Gtk.Button()
-        filemanager_button.set_image(filemanager_icon)
-        # Open Windows Explorer in the user's home directory
+        filemanager_button = Gtk.Button(label="File Manager")
         filemanager_button.connect("clicked", lambda w: run_command("explorer.exe ~"))
 
-        launcher_button = Gtk.Button()
-        launcher_button.set_image(launcher_icon)
-        # Launch the correct runnable (the minimal ProgramLauncher window)
+        launcher_button = Gtk.Button(label="Launcher")
         launcher_button.connect("clicked", self.launch_runnables)
 
         inner_box.pack_start(terminal_button, False, False, 0)
@@ -96,36 +85,27 @@ class HiddenToolbar(Gtk.Window):
         outer_box.pack_start(inner_box, True, True, 0)
 
         self.connect("destroy", Gtk.main_quit)
-        #self.connect("realize", self.defer_positioning)
+        self.connect("realize", self.defer_positioning)
         self.show_all()
 
     def defer_positioning(self, widget):
-        # Increase delay to 300ms to ensure window is fully realized before moving
-        GLib.timeout_add(300, self.position_window)  # Delay by 300ms
+        # Position this window just above the panel (not covering it)
+        GLib.timeout_add(300, self.position_window)
 
     def position_window(self):
         if self.positioned:
-             return False
-
+            return False
         self.positioned = True
-
         screen = self.get_screen()
         monitor_index = screen.get_primary_monitor()
         geometry = screen.get_monitor_geometry(monitor_index)
-
         window_width = self.get_allocated_width()
         window_height = self.get_allocated_height()
-
-        # Move the window a bit higher to sit above the taskbar (e.g., 10px)
+        # Place this window just above where the panel sits (assume panel is at bottom)
+        panel_height = 40  # match panel height
         offset = 46
         x = geometry.x + (geometry.width - window_width) // 2
-        y = geometry.y + geometry.height - window_height - offset
-
-        print(
-            f"[DEBUG] Monitor geometry: x={geometry.x}, y={geometry.y}, width={geometry.width}, height={geometry.height}")
-        print(f"[DEBUG] Window size: width={window_width}, height={window_height}")
-        print(f"[DEBUG] Moving window to: x={x}, y={y}")
-
+        y = geometry.y + geometry.height - window_height - panel_height - offset
         self.move(x, y)
         return False
 
