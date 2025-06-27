@@ -4,6 +4,9 @@ from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
 
 from utils import run_command
 import os
+import subprocess
+import threading
+import traceback
 
 class HiddenToolbar(Gtk.Window):
     def __init__(self):
@@ -80,8 +83,8 @@ class HiddenToolbar(Gtk.Window):
 
         launcher_button = Gtk.Button()
         launcher_button.set_image(launcher_icon)
-        # Launch the graphical program launcher
-        launcher_button.connect("clicked", lambda w: run_command("python3 ../launcher.py"))
+        # Launch the graphical program launcher and report errors
+        launcher_button.connect("clicked", self.launch_launcher_with_report)
 
         inner_box.pack_start(terminal_button, False, False, 0)
         inner_box.pack_start(filemanager_button, False, False, 0)
@@ -122,6 +125,24 @@ class HiddenToolbar(Gtk.Window):
 
         self.move(x, y)
         return False
+
+    def launch_launcher_with_report(self, widget):
+        def run_launcher():
+            try:
+                proc = subprocess.Popen([
+                    "python3", os.path.join(os.path.dirname(__file__), "..", "launcher.py")
+                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                stdout, stderr = proc.communicate()
+                if proc.returncode != 0 or stderr:
+                    GLib.idle_add(self.show_error_dialog, stderr or f"Launcher exited with code {proc.returncode}")
+            except Exception as e:
+                GLib.idle_add(self.show_error_dialog, f"Failed to launch: {e}\n{traceback.format_exc()}")
+        threading.Thread(target=run_launcher, daemon=True).start()
+
+    def show_error_dialog(self, message):
+        dialog = Gtk.MessageDialog(self, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK, f"Launcher error:\n{message}")
+        dialog.run()
+        dialog.destroy()
 
 
 if __name__ == "__main__":
