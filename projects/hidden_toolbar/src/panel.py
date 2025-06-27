@@ -132,14 +132,21 @@ class HiddenToolbar(Gtk.Window):
     def launch_runnables(self, widget):
         def run_runnables():
             try:
+                runnables_path = os.path.join(os.path.dirname(__file__), "runnables.py")
+                print(f"[DEBUG] Launching runnables: python3 {runnables_path}")
                 proc = subprocess.Popen([
-                    "python3", os.path.join(os.path.dirname(__file__), "runnables.py")
-                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    sys.executable, runnables_path
+                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=os.path.dirname(__file__))
                 stdout, stderr = proc.communicate()
                 if proc.returncode != 0 or stderr:
-                    GLib.idle_add(self.show_error_dialog, stderr or f"Runnables exited with code {proc.returncode}")
+                    error_msg = f"Runnables exited with code {proc.returncode}\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}"
+                    print(error_msg)
+                    GLib.idle_add(self.show_error_dialog, error_msg)
             except Exception as e:
-                GLib.idle_add(self.show_error_dialog, f"Failed to launch runnables: {e}\n{traceback.format_exc()}")
+                import traceback
+                err = f"Failed to launch runnables: {e}\n{traceback.format_exc()}"
+                print(err)
+                GLib.idle_add(self.show_error_dialog, err)
         threading.Thread(target=run_runnables, daemon=True).start()
 
     def show_error_dialog(self, message):
