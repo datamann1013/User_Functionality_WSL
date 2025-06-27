@@ -7,23 +7,35 @@ from gi.repository import Gtk
 
 class ProgramLauncher(Gtk.Window):
     def __init__(self, programs=None):
+        print("[DEBUG] ProgramLauncher __init__ start")
         super().__init__(title="Program Launcher")
+        print("[DEBUG] Gtk.Window initialized")
         self.set_default_size(800, 600)
+        print("[DEBUG] set_default_size called")
         self.connect("destroy", Gtk.main_quit)
-        # Load scanned_programs.json and extract the first program name
+        print("[DEBUG] destroy signal connected")
         scanned_path = os.path.join(os.path.dirname(__file__), "scanned_programs.json")
+        print(f"[DEBUG] scanned_path: {scanned_path}")
         first_program = "No program found"
         if os.path.exists(scanned_path):
+            print("[DEBUG] scanned_programs.json exists")
             with open(scanned_path, "r") as f:
                 try:
                     data = json.load(f)
+                    print(f"[DEBUG] loaded json: {data}")
                     if data:
                         first_program = next(iter(data.keys()))
-                except Exception:
-                    pass
+                        print(f"[DEBUG] first_program: {first_program}")
+                except Exception as e:
+                    print(f"[DEBUG] Exception loading json: {e}")
+        else:
+            print("[DEBUG] scanned_programs.json does not exist")
         label = Gtk.Label(label=first_program)
+        print("[DEBUG] Gtk.Label created")
         self.add(label)
+        print("[DEBUG] label added to window")
         self.show_all()
+        print("[DEBUG] show_all called")
 
 def show_launcher(programs=None):
     win = ProgramLauncher(programs)
