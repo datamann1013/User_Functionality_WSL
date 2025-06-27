@@ -1,10 +1,5 @@
 import os
 import sys
-
-if __name__ == "__main__":
-    print("Please run this launcher using: python3 -m projects.hidden_toolbar.launcher")
-    sys.exit(1)
-
 from .src.runnables import show_launcher
 
 def get_linux_runnables():
