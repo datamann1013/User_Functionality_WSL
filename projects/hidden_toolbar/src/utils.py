@@ -72,6 +72,10 @@ def scan_development_programs():
         path = shutil.which(prog)
         print(f"[DEBUG] Scanning: {prog} -> {path}")
         if path and os.path.exists(path):
+            # Exclude Windows executables mounted via /mnt/*
+            if path.startswith("/mnt/") and len(path) > 6 and path[5].isalpha() and path[6] == '/':
+                print(f"[DEBUG] Skipping {prog} (Windows binary detected: {path})")
+                continue
             # Only add if the binary is actually present in the current distro
             found[prog] = path
     cache_path = os.path.join(os.path.dirname(__file__), "scanned_programs.json")
