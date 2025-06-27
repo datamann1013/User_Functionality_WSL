@@ -64,28 +64,14 @@ class HiddenToolbar(Gtk.Window):
         inner_box.set_halign(Gtk.Align.CENTER)
         inner_box.set_valign(Gtk.Align.CENTER)
 
-        def load_icon(filename, size=24):
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            icon_path = os.path.join(base_dir, "icons", filename)
-            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(icon_path, size, size, True)
-            return Gtk.Image.new_from_pixbuf(pixbuf)
-
-        terminal_icon = load_icon("terminal.png")
-        filemanager_icon = load_icon("folder.png")
-        launcher_icon = load_icon("search.png")
-
-        terminal_button = Gtk.Button()
-        terminal_button.set_image(terminal_icon)
+        # Replace icon buttons with text buttons
+        terminal_button = Gtk.Button(label="Terminal")
         terminal_button.connect("clicked", lambda w: run_command("xterm"))
 
-        filemanager_button = Gtk.Button()
-        filemanager_button.set_image(filemanager_icon)
-        # Open Windows Explorer in the user's home directory
+        filemanager_button = Gtk.Button(label="File Manager")
         filemanager_button.connect("clicked", lambda w: run_command("explorer.exe ~"))
 
-        launcher_button = Gtk.Button()
-        launcher_button.set_image(launcher_icon)
-        # Launch the correct runnable (the minimal ProgramLauncher window)
+        launcher_button = Gtk.Button(label="Launcher")
         launcher_button.connect("clicked", self.launch_runnables)
 
         inner_box.pack_start(terminal_button, False, False, 0)
