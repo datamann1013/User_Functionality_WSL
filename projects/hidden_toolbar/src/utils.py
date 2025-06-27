@@ -1,5 +1,7 @@
-import subprocess
+import gi
+gi.require_version('Gdk', '3.0')
 from gi.repository import Gdk
+import subprocess
 import json
 import os
 
