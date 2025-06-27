@@ -80,8 +80,8 @@ class HiddenToolbar(Gtk.Window):
 
         launcher_button = Gtk.Button()
         launcher_button.set_image(launcher_icon)
-        # Use dmenu_run for a simple, robust application launcher
-        launcher_button.connect("clicked", lambda w: run_command("dmenu_run"))
+        # Launch the graphical program launcher
+        launcher_button.connect("clicked", lambda w: run_command("python3 ../launcher.py"))
 
         inner_box.pack_start(terminal_button, False, False, 0)
         inner_box.pack_start(filemanager_button, False, False, 0)
