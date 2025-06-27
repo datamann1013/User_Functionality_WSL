@@ -39,7 +39,7 @@ class ProgramLauncher(Gtk.Window):
     def __init__(self, programs):
         logging.debug(f"Initializing ProgramLauncher with {len(programs)} programs")
         super().__init__(title="Program Launcher")
-        self.set_default_size(500, 600)  # Reduce height to avoid Gdk-WARNING
+        self.set_default_size(500, 600)  # Window size
         self.set_position(Gtk.WindowPosition.CENTER)
         self.set_border_width(12)
         self.set_resizable(False)
@@ -64,10 +64,17 @@ class ProgramLauncher(Gtk.Window):
         self.entry.connect("changed", self.on_search)
         vbox.pack_start(self.entry, False, False, 0)
 
+        # Add a scrolled window for the listbox
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scrolled.set_min_content_height(400)
+        scrolled.set_max_content_height(500)
+        vbox.pack_start(scrolled, True, True, 0)
+
         self.listbox = Gtk.ListBox()
         self.listbox.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.listbox.connect("row-activated", self.on_row_activated)
-        vbox.pack_start(self.listbox, True, True, 0)
+        scrolled.add(self.listbox)
 
         self.button = Gtk.Button(label="Launch")
         self.button.connect("clicked", self.on_launch)
