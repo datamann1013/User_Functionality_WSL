@@ -1,5 +1,3 @@
-# main.py is now deprecated. All launching should be done via launcher.py
-
 import os
 import sys
 import gi

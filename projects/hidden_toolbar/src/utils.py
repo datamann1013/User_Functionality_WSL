@@ -13,14 +13,9 @@ def get_screen_size():
     return screen.get_width(), screen.get_height()
 
 def run_command(command):
+    import os
     env = os.environ.copy()
-    try:
-        proc = subprocess.Popen(command, shell=True, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = proc.communicate()  # No timeout
-        if proc.returncode != 0:
-            print(f"[ERROR] Command failed: {command}\nSTDOUT: {stdout.decode()}\nSTDERR: {stderr.decode()}")
-    except Exception as e:
-        print(f"[ERROR] Exception running command '{command}': {e}")
+    subprocess.Popen(command, shell=True, env=env)
 
 def load_usage_data():
     try:
@@ -94,3 +89,5 @@ def scan_development_programs():
 
 def scan_development_programs_background():
     threading.Thread(target=scan_development_programs, daemon=True).start()
+
+

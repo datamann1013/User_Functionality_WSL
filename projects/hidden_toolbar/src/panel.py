@@ -1,11 +1,15 @@
 import sys
 import os
+sys.path.insert(0, os.path.dirname(__file__))
+
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
-from .utils import run_command
+
+from utils import run_command
 import subprocess
 import threading
+import traceback
 
 class HiddenToolbar(Gtk.Window):
     def __init__(self):
@@ -15,12 +19,13 @@ class HiddenToolbar(Gtk.Window):
         self.set_resizable(False)
         self.set_keep_above(True)
         self.set_opacity(1.0)
-        self.set_title("")
+        self.set_title("hidden_toolbar")
         self.positioned = False
 
         self.window_width = 400
         self.window_height = 40
         self.set_default_size(self.window_width, self.window_height)
+        # Try POPUP_MENU type hint to minimize border/shadow in VcXsrv
         self.set_type_hint(Gdk.WindowTypeHint.POPUP_MENU)
         self.set_app_paintable(True)
         self.set_skip_taskbar_hint(True)
@@ -31,10 +36,15 @@ class HiddenToolbar(Gtk.Window):
             window {
                 background-color: #2b2b2b;
                 border-radius: 6px;
+                border-width: 0;
+                border: none;
+                box-shadow: none;
             }
             button {
                 background-color: transparent;
                 border: none;
+                border-width: 0;
+                box-shadow: none;
                 padding: 2px;
             }
         """)
@@ -73,23 +83,9 @@ class HiddenToolbar(Gtk.Window):
         filemanager_button = Gtk.Button()
         filemanager_button.set_image(filemanager_icon)
         filemanager_button.set_tooltip_text("Open File Manager")
-        # Open the user's home directory in the best available Linux file manager, fallback to terminal file manager
+        # Open Windows Explorer in the user's home directory
         home_dir = os.path.expanduser("~")
-        def open_home_folder(_):
-            import shutil
-            # Try graphical file managers first
-            for fm in ("nautilus", "thunar", "pcmanfm", "dolphin", "nemo", "caja"):
-                if shutil.which(fm):
-                    run_command(f"{fm} '{home_dir}'")
-                    return
-            # Try terminal file managers
-            for tfm in ("ranger", "nnn", "mc"):
-                if shutil.which(tfm):
-                    run_command(f"xterm -e {tfm} '{home_dir}'")
-                    return
-            # Fallback: just show ls in xterm
-            run_command(f"xterm -e ls '{home_dir}'")
-        filemanager_button.connect("clicked", open_home_folder)
+        filemanager_button.connect("clicked", lambda w: run_command(f"explorer.exe {home_dir}"))
 
         launcher_button = Gtk.Button()
         launcher_button.set_image(launcher_icon)
@@ -113,7 +109,7 @@ class HiddenToolbar(Gtk.Window):
 
     def position_window(self):
         if self.positioned:
-            return False
+             return False
 
         self.positioned = True
 
@@ -129,6 +125,11 @@ class HiddenToolbar(Gtk.Window):
         x = geometry.x + (geometry.width - window_width) // 2
         y = geometry.y + geometry.height - window_height - offset
 
+        print(
+            f"[DEBUG] Monitor geometry: x={geometry.x}, y={geometry.y}, width={geometry.width}, height={geometry.height}")
+        print(f"[DEBUG] Window size: width={window_width}, height={window_height}")
+        print(f"[DEBUG] Moving window to: x={x}, y={y}")
+
         self.move(x, y)
         return False
 
@@ -136,16 +137,19 @@ class HiddenToolbar(Gtk.Window):
         def run_runnables():
             try:
                 runnables_path = os.path.join(os.path.dirname(__file__), "runnables.py")
-                env = os.environ.copy()
+                print(f"[DEBUG] Launching runnables: python3 {runnables_path}")
                 proc = subprocess.Popen([
                     sys.executable, runnables_path
-                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=os.path.dirname(__file__), env=env)
+                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=os.path.dirname(__file__))
                 stdout, stderr = proc.communicate()
                 if proc.returncode != 0 or stderr:
                     error_msg = f"Runnables exited with code {proc.returncode}\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}"
+                    print(error_msg)
                     GLib.idle_add(self.show_error_dialog, error_msg)
             except Exception as e:
-                err = f"Failed to launch runnables: {e}"
+                import traceback
+                err = f"Failed to launch runnables: {e}\n{traceback.format_exc()}"
+                print(err)
                 GLib.idle_add(self.show_error_dialog, err)
         threading.Thread(target=run_runnables, daemon=True).start()
 
