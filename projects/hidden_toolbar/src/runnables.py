@@ -172,9 +172,10 @@ class HiddenToolbar(Gtk.Window):
         dialog.destroy()
 
     def show_program_dialog(self, name, path):
-        dialog = Gtk.MessageDialog(self, 0, Gtk.MessageType.INFO, Gtk.ButtonsType.OK, f"{name}:\n{path}")
-        dialog.run()
-        dialog.destroy()
+        print(f"[PROGRAM INFO] {name}: {path}")
+        # Optionally, you can also use notify-send or another mechanism if you want a desktop notification
+        # import subprocess
+        # subprocess.Popen(["notify-send", f"{name}", f"{path}"])
 
 
 if __name__ == "__main__":
