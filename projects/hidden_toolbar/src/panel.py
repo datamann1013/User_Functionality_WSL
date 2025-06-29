@@ -77,15 +77,20 @@ class HiddenToolbar(Gtk.Window):
 
         terminal_button = Gtk.Button()
         terminal_button.set_image(terminal_icon)
+        terminal_button.set_tooltip_text("Open Terminal")
         terminal_button.connect("clicked", lambda w: run_command("xterm"))
 
         filemanager_button = Gtk.Button()
         filemanager_button.set_image(filemanager_icon)
+        filemanager_button.set_tooltip_text("Open File Manager")
         # Open Windows Explorer in the user's home directory
-        filemanager_button.connect("clicked", lambda w: run_command("explorer.exe ~"))
+        import os
+        home_dir = os.path.expanduser("~")
+        filemanager_button.connect("clicked", lambda w: run_command(f"explorer.exe {home_dir}"))
 
         launcher_button = Gtk.Button()
         launcher_button.set_image(launcher_icon)
+        launcher_button.set_tooltip_text("Open Program Launcher")
         # Launch the correct runnable (the minimal ProgramLauncher window)
         launcher_button.connect("clicked", self.launch_runnables)
 
