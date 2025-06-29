@@ -9,7 +9,6 @@ from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
 from utils import run_command
 import subprocess
 import threading
-import traceback
 import json
 import random
 
@@ -21,7 +20,7 @@ class HiddenToolbar(Gtk.Window):
         self.set_resizable(False)
         self.set_keep_above(True)
         self.set_opacity(1.0)
-        self.set_title("hidden_toolbar")
+        self.set_title("")
         self.positioned = False
 
         self.window_width = 400
@@ -37,15 +36,10 @@ class HiddenToolbar(Gtk.Window):
             window {
                 background-color: #2b2b2b;
                 border-radius: 6px;
-                border-width: 0;
-                border: none;
-                box-shadow: none;
             }
             button {
                 background-color: transparent;
                 border: none;
-                border-width: 0;
-                box-shadow: none;
                 padding: 2px;
             }
         """)
@@ -66,7 +60,6 @@ class HiddenToolbar(Gtk.Window):
         inner_box.set_halign(Gtk.Align.CENTER)
         inner_box.set_valign(Gtk.Align.CENTER)
 
-        # Load scanned programs and create a button for each
         scanned_path = os.path.join(os.path.dirname(__file__), "scanned_programs.json")
         program_buttons = []
         if os.path.exists(scanned_path):
@@ -105,7 +98,6 @@ class HiddenToolbar(Gtk.Window):
                     btn.connect("clicked", lambda w: self.show_program_dialog(prog_tuple[0], prog_tuple[1]))
                     return btn
                 program_buttons = [make_image_button(prog) for prog in programs]
-        # Calculate menu height based on number of programs
         spacing = 12
         button_height = 32
         n = len(program_buttons)
@@ -116,16 +108,13 @@ class HiddenToolbar(Gtk.Window):
             menu_height = max(min_height, min(menu_height, max_height))
             self.window_height = menu_height
             self.set_default_size(self.window_width, self.window_height)
-        # Clear inner_box and add program buttons with spacing
         for btn in program_buttons:
             inner_box.pack_start(btn, False, False, spacing)
-        # Add spacing to top and bottom
         inner_box.set_spacing(spacing)
         inner_box.set_margin_top(spacing)
         inner_box.set_margin_bottom(spacing)
         inner_box.set_margin_start(spacing)
         inner_box.set_margin_end(spacing)
-
         outer_box.pack_start(inner_box, True, True, 0)
 
         self.connect("destroy", Gtk.main_quit)
@@ -133,12 +122,11 @@ class HiddenToolbar(Gtk.Window):
         self.show_all()
 
     def defer_positioning(self, widget):
-        # Increase delay to 300ms to ensure window is fully realized before moving
-        GLib.timeout_add(300, self.position_window)  # Delay by 300ms
+        GLib.timeout_add(300, self.position_window)
 
     def position_window(self):
         if self.positioned:
-             return False
+            return False
 
         self.positioned = True
 
@@ -149,16 +137,10 @@ class HiddenToolbar(Gtk.Window):
         window_width = self.get_allocated_width()
         window_height = self.get_allocated_height()
 
-        # Move the window a bit higher to sit above the taskbar (e.g., 10px)
         panel_height = 40
         offset = 46
         x = geometry.x + (geometry.width - window_width) // 2
         y = geometry.y + geometry.height - window_height - offset - panel_height
-
-        print(
-            f"[DEBUG] Monitor geometry: x={geometry.x}, y={geometry.y}, width={geometry.width}, height={geometry.height}")
-        print(f"[DEBUG] Window size: width={window_width}, height={window_height}")
-        print(f"[DEBUG] Moving window to: x={x}, y={y}")
 
         self.move(x, y)
         return False
@@ -167,19 +149,16 @@ class HiddenToolbar(Gtk.Window):
         def run_runnables():
             try:
                 runnables_path = os.path.join(os.path.dirname(__file__), "runnables.py")
-                print(f"[DEBUG] Launching runnables: python3 {runnables_path}")
+                env = os.environ.copy()
                 proc = subprocess.Popen([
-                    sys.executable, runnables_path
-                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=os.path.dirname(__file__))
+                    os.sys.executable, runnables_path
+                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=os.path.dirname(__file__), env=env)
                 stdout, stderr = proc.communicate()
                 if proc.returncode != 0 or stderr:
                     error_msg = f"Runnables exited with code {proc.returncode}\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}"
-                    print(error_msg)
                     GLib.idle_add(self.show_error_dialog, error_msg)
             except Exception as e:
-                import traceback
-                err = f"Failed to launch runnables: {e}\n{traceback.format_exc()}"
-                print(err)
+                err = f"Failed to launch runnables: {e}"
                 GLib.idle_add(self.show_error_dialog, err)
         threading.Thread(target=run_runnables, daemon=True).start()
 
@@ -190,9 +169,6 @@ class HiddenToolbar(Gtk.Window):
 
     def show_program_dialog(self, name, path):
         print(f"[PROGRAM INFO] {name}: {path}")
-        # Optionally, you can also use notify-send or another mechanism if you want a desktop notification
-        # import subprocess
-        # subprocess.Popen(["notify-send", f"{name}", f"{path}"])
 
 
 if __name__ == "__main__":
