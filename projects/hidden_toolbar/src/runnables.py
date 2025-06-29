@@ -64,9 +64,8 @@ class HiddenToolbar(Gtk.Window):
         inner_box.set_halign(Gtk.Align.CENTER)
         inner_box.set_valign(Gtk.Align.CENTER)
 
-        terminal_button = Gtk.Button()
+        terminal_button = Gtk.Button(label="Terminal")
         terminal_button.connect("clicked", lambda w: run_command("xterm"))
-        terminal_button.set_tooltip_text("Open Terminal")
 
         filemanager_button = Gtk.Button()
         filemanager_button.connect("clicked", lambda w: run_command("explorer.exe ~"))
