@@ -84,7 +84,6 @@ class HiddenToolbar(Gtk.Window):
         filemanager_button.set_image(filemanager_icon)
         filemanager_button.set_tooltip_text("Open File Manager")
         # Open Windows Explorer in the user's home directory
-        import os
         home_dir = os.path.expanduser("~")
         filemanager_button.connect("clicked", lambda w: run_command(f"explorer.exe {home_dir}"))
 
