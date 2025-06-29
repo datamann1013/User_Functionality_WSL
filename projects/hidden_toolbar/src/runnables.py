@@ -88,15 +88,20 @@ class HiddenToolbar(Gtk.Window):
         if random_program:
             from PIL import Image, ImageDraw, ImageFont
             import io
-            import base64
             # Generate an image from the program name
-            img = Image.new('RGB', (200, 50), color=(43, 43, 43))
+            width, height = 200, 32  # Shorter height
+            img = Image.new('RGBA', (width, height), (255, 255, 255, 0))  # Transparent background
             d = ImageDraw.Draw(img)
             try:
-                font = ImageFont.truetype("arial.ttf", 20)
+                font = ImageFont.truetype("arial.ttf", 26)  # Bigger text
             except Exception:
                 font = ImageFont.load_default()
-            d.text((10, 10), random_program[0], fill=(255, 255, 255), font=font)
+            # Center the text vertically
+            text = random_program[0]
+            text_width, text_height = d.textsize(text, font=font)
+            x = 10
+            y = (height - text_height) // 2
+            d.text((x, y), text, fill=(0, 0, 0, 255), font=font)  # Black text
             buf = io.BytesIO()
             img.save(buf, format='PNG')
             buf.seek(0)
