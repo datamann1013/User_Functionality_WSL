@@ -14,7 +14,13 @@ def get_screen_size():
 
 def run_command(command):
     env = os.environ.copy()
-    subprocess.Popen(command, shell=True, env=env)
+    try:
+        proc = subprocess.Popen(command, shell=True, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = proc.communicate(timeout=5)
+        if proc.returncode != 0:
+            print(f"[ERROR] Command failed: {command}\nSTDOUT: {stdout.decode()}\nSTDERR: {stderr.decode()}")
+    except Exception as e:
+        print(f"[ERROR] Exception running command '{command}': {e}")
 
 def load_usage_data():
     try:
