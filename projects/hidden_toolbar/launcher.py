@@ -2,8 +2,10 @@
 from .src.panel import HiddenToolbar
 from .src.utils import scan_development_programs_background, ensure_x_server
 from gi.repository import Gtk
+import os
 
 def main():
+    print(f"[DEBUG] DISPLAY={os.environ.get('DISPLAY')}")
     ensure_x_server()
     scan_development_programs_background()
     success, _ = Gtk.init_check()
