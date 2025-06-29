@@ -107,7 +107,7 @@ class HiddenToolbar(Gtk.Window):
             text_height = bbox[3] - bbox[1]
             x = (width - text_width) // 2
             y = (height - text_height) // 2
-            d.text((x, y), text, fill=(0, 0, 0, 255), font=font)
+            d.text((x, y), text, fill=(0, 0, 0, 255), font=font, anchor="lt")
             buf = io.BytesIO()
             img.save(buf, format='PNG')
             buf.seek(0)
