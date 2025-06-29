@@ -122,9 +122,10 @@ class HiddenToolbar(Gtk.Window):
         def run_runnables():
             try:
                 runnables_path = os.path.join(os.path.dirname(__file__), "runnables.py")
+                env = os.environ.copy()
                 proc = subprocess.Popen([
                     sys.executable, runnables_path
-                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=os.path.dirname(__file__))
+                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=os.path.dirname(__file__), env=env)
                 stdout, stderr = proc.communicate()
                 if proc.returncode != 0 or stderr:
                     error_msg = f"Runnables exited with code {proc.returncode}\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}"
