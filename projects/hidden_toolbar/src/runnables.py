@@ -66,42 +66,30 @@ class HiddenToolbar(Gtk.Window):
         inner_box.set_halign(Gtk.Align.CENTER)
         inner_box.set_valign(Gtk.Align.CENTER)
 
-        terminal_button = Gtk.Button()
-        terminal_button.connect("clicked", lambda w: run_command("xterm"))
-
-        filemanager_button = Gtk.Button()
-        filemanager_button.connect("clicked", lambda w: run_command("explorer.exe ~"))
-
-        launcher_button = Gtk.Button()
-        launcher_button.connect("clicked", self.launch_runnables)
-
-        # Load scanned programs and pick a random one
+        # Load scanned programs and pick three random ones for the three buttons
         scanned_path = os.path.join(os.path.dirname(__file__), "scanned_programs.json")
-        random_program = None
+        random_programs = []
         if os.path.exists(scanned_path):
             with open(scanned_path, "r", encoding="utf-8") as f:
-                programs = json.load(f)
-                if programs:
-                    prog_name, prog_path = random.choice(list(programs.items()))
-                    random_program = (prog_name, prog_path)
-
-        if random_program:
+                programs = list(json.load(f).items())
+                if len(programs) >= 3:
+                    random_programs = random.sample(programs, 3)
+                elif programs:
+                    random_programs = programs * (3 // len(programs)) + programs[:3 % len(programs)]
+        def make_image_button(prog_tuple, on_click):
             from PIL import Image, ImageDraw, ImageFont
             import io
-            # Generate an image from the program name
-            width, height = 200, 32  # Shorter height, same width
-            img = Image.new('RGBA', (width, height), (255, 255, 255, 0))  # Transparent background
+            width, height = 200, 32
+            img = Image.new('RGBA', (width, height), (255, 255, 255, 0))
             d = ImageDraw.Draw(img)
             try:
-                # Try to use a nicer font if available
                 font = ImageFont.truetype("DejaVuSans-Bold.ttf", 22)
             except Exception:
                 try:
                     font = ImageFont.truetype("arial.ttf", 22)
                 except Exception:
                     font = ImageFont.load_default()
-            text = random_program[0]
-            # Center the text horizontally and vertically
+            text = prog_tuple[0]
             bbox = d.textbbox((0, 0), text, font=font)
             text_width = bbox[2] - bbox[0]
             text_height = bbox[3] - bbox[1]
@@ -116,10 +104,15 @@ class HiddenToolbar(Gtk.Window):
             loader.close()
             pixbuf = loader.get_pixbuf()
             image = Gtk.Image.new_from_pixbuf(pixbuf)
-            prog_button = Gtk.Button()
-            prog_button.set_image(image)
-            prog_button.connect("clicked", lambda w: self.show_program_dialog(random_program[0], random_program[1]))
-            inner_box.pack_start(prog_button, False, False, 0)
+            btn = Gtk.Button()
+            btn.set_image(image)
+            btn.connect("clicked", lambda w: self.show_program_dialog(prog_tuple[0], prog_tuple[1]))
+            return btn
+        # Replace the three main buttons with image buttons if possible
+        if len(random_programs) == 3:
+            terminal_button = make_image_button(random_programs[0], self.show_program_dialog)
+            filemanager_button = make_image_button(random_programs[1], self.show_program_dialog)
+            launcher_button = make_image_button(random_programs[2], self.show_program_dialog)
 
         inner_box.pack_start(terminal_button, False, False, 0)
         inner_box.pack_start(filemanager_button, False, False, 0)
