@@ -6,10 +6,12 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
 
-from utils import run_command, get_button_text
+from utils import run_command
 import subprocess
 import threading
 import traceback
+import json
+import random
 
 class HiddenToolbar(Gtk.Window):
     def __init__(self):
@@ -64,9 +66,7 @@ class HiddenToolbar(Gtk.Window):
         inner_box.set_halign(Gtk.Align.CENTER)
         inner_box.set_valign(Gtk.Align.CENTER)
 
-        # Use a Gtk.Button with text from utils.py
-        button_text = get_button_text("terminal")
-        terminal_button = Gtk.Button(label=button_text)
+        terminal_button = Gtk.Button()
         terminal_button.connect("clicked", lambda w: run_command("xterm"))
 
         filemanager_button = Gtk.Button()
@@ -75,9 +75,34 @@ class HiddenToolbar(Gtk.Window):
         launcher_button = Gtk.Button()
         launcher_button.connect("clicked", self.launch_runnables)
 
+        # Load scanned programs and pick a random one
+        scanned_path = os.path.join(os.path.dirname(__file__), "scanned_programs.json")
+        random_program = None
+        if os.path.exists(scanned_path):
+            with open(scanned_path, "r", encoding="utf-8") as f:
+                programs = json.load(f)
+                if programs:
+                    prog_name, prog_path = random.choice(list(programs.items()))
+                    random_program = (prog_name, prog_path)
+
+        if random_program:
+            prog_button = Gtk.Button(label=f"Random Program: {random_program[0]}")
+            prog_button.connect("clicked", lambda w: self.show_program_dialog(random_program[0], random_program[1]))
+            inner_box.pack_start(prog_button, False, False, 0)
+
+        # Load solutions and pick a random one
+        solutions_path = os.path.join(os.path.dirname(__file__), "solutions.json")
+        with open(solutions_path, "r", encoding="utf-8") as f:
+            solutions = json.load(f)
+        random_solution = random.choice(solutions)
+
+        solution_button = Gtk.Button(label=random_solution["title"])
+        solution_button.connect("clicked", lambda w: self.show_solution_dialog(random_solution["text"]))
+
         inner_box.pack_start(terminal_button, False, False, 0)
         inner_box.pack_start(filemanager_button, False, False, 0)
         inner_box.pack_start(launcher_button, False, False, 0)
+        inner_box.pack_start(solution_button, False, False, 0)
 
         outer_box.pack_start(inner_box, True, True, 0)
 
@@ -138,6 +163,16 @@ class HiddenToolbar(Gtk.Window):
 
     def show_error_dialog(self, message):
         dialog = Gtk.MessageDialog(self, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK, f"Launcher error:\n{message}")
+        dialog.run()
+        dialog.destroy()
+
+    def show_solution_dialog(self, text):
+        dialog = Gtk.MessageDialog(self, 0, Gtk.MessageType.INFO, Gtk.ButtonsType.OK, text)
+        dialog.run()
+        dialog.destroy()
+
+    def show_program_dialog(self, name, path):
+        dialog = Gtk.MessageDialog(self, 0, Gtk.MessageType.INFO, Gtk.ButtonsType.OK, f"{name}:\n{path}")
         dialog.run()
         dialog.destroy()
 
