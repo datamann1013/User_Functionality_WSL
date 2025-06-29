@@ -66,7 +66,7 @@ class HiddenToolbar(Gtk.Window):
 
         terminal_button = Gtk.Button()
         terminal_button.connect("clicked", lambda w: run_command("xterm"))
-        terminal_button.set_text("terminal_icon")
+        terminal_button.set_tooltip_text("Open Terminal")
 
         filemanager_button = Gtk.Button()
         filemanager_button.connect("clicked", lambda w: run_command("explorer.exe ~"))
