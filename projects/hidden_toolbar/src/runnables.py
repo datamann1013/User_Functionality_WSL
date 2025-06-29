@@ -110,19 +110,9 @@ class HiddenToolbar(Gtk.Window):
             prog_button.connect("clicked", lambda w: self.show_program_dialog(random_program[0], random_program[1]))
             inner_box.pack_start(prog_button, False, False, 0)
 
-        # Load solutions and pick a random one
-        solutions_path = os.path.join(os.path.dirname(__file__), "solutions.json")
-        with open(solutions_path, "r", encoding="utf-8") as f:
-            solutions = json.load(f)
-        random_solution = random.choice(solutions)
-
-        solution_button = Gtk.Button(label=random_solution["title"])
-        solution_button.connect("clicked", lambda w: self.show_solution_dialog(random_solution["text"]))
-
         inner_box.pack_start(terminal_button, False, False, 0)
         inner_box.pack_start(filemanager_button, False, False, 0)
         inner_box.pack_start(launcher_button, False, False, 0)
-        inner_box.pack_start(solution_button, False, False, 0)
 
         outer_box.pack_start(inner_box, True, True, 0)
 
@@ -183,11 +173,6 @@ class HiddenToolbar(Gtk.Window):
 
     def show_error_dialog(self, message):
         dialog = Gtk.MessageDialog(self, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK, f"Launcher error:\n{message}")
-        dialog.run()
-        dialog.destroy()
-
-    def show_solution_dialog(self, text):
-        dialog = Gtk.MessageDialog(self, 0, Gtk.MessageType.INFO, Gtk.ButtonsType.OK, text)
         dialog.run()
         dialog.destroy()
 
