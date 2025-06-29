@@ -89,3 +89,13 @@ def scan_development_programs():
 
 def scan_development_programs_background():
     threading.Thread(target=scan_development_programs, daemon=True).start()
+
+def get_button_text(button_id):
+    # Return static text for known button ids
+    if button_id == "terminal":
+        return "Terminal"
+    elif button_id == "filemanager":
+        return "File Manager"
+    elif button_id == "launcher":
+        return "Launcher"
+    return ""

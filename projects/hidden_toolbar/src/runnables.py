@@ -6,7 +6,7 @@ import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
 
-from utils import run_command
+from utils import run_command, get_button_text
 import subprocess
 import threading
 import traceback
@@ -64,7 +64,9 @@ class HiddenToolbar(Gtk.Window):
         inner_box.set_halign(Gtk.Align.CENTER)
         inner_box.set_valign(Gtk.Align.CENTER)
 
-        terminal_button = Gtk.Button()
+        # Use a Gtk.Button with text from utils.py
+        button_text = get_button_text("terminal")
+        terminal_button = Gtk.Button(label=button_text)
         terminal_button.connect("clicked", lambda w: run_command("xterm"))
 
         filemanager_button = Gtk.Button()
