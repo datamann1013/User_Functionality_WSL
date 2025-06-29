@@ -1,14 +1,7 @@
 #!/usr/bin/env python3
 import sys
-
-try:
-    from .src.panel import HiddenToolbar
-    from .src.utils import scan_development_programs_background
-except ImportError:
-    # Fallback for running as a script directly
-    from src.panel import HiddenToolbar
-    from src.utils import scan_development_programs_background
-
+from src.panel import HiddenToolbar
+from src.utils import scan_development_programs_background
 from gi.repository import Gtk
 
 def main():

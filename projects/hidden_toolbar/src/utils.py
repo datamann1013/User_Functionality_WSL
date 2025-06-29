@@ -13,7 +13,6 @@ def get_screen_size():
     return screen.get_width(), screen.get_height()
 
 def run_command(command):
-    import os
     env = os.environ.copy()
     subprocess.Popen(command, shell=True, env=env)
 
@@ -89,5 +88,3 @@ def scan_development_programs():
 
 def scan_development_programs_background():
     threading.Thread(target=scan_development_programs, daemon=True).start()
-
-
