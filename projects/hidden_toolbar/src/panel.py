@@ -3,8 +3,7 @@ import os
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
-
-from utils import run_command
+from .utils import run_command
 import subprocess
 import threading
 
@@ -131,8 +130,7 @@ class HiddenToolbar(Gtk.Window):
                     error_msg = f"Runnables exited with code {proc.returncode}\nSTDOUT:\n{stdout}\nSTDERR:\n{stderr}"
                     GLib.idle_add(self.show_error_dialog, error_msg)
             except Exception as e:
-                import traceback
-                err = f"Failed to launch runnables: {e}\n{traceback.format_exc()}"
+                err = f"Failed to launch runnables: {e}"
                 GLib.idle_add(self.show_error_dialog, err)
         threading.Thread(target=run_runnables, daemon=True).start()
 
