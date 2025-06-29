@@ -64,25 +64,18 @@ class HiddenToolbar(Gtk.Window):
         inner_box.set_halign(Gtk.Align.CENTER)
         inner_box.set_valign(Gtk.Align.CENTER)
 
-        # Use EventBox with a label for each button
-        terminal_event = Gtk.EventBox()
-        terminal_label = Gtk.Label(label="Terminal")
-        terminal_event.add(terminal_label)
-        terminal_event.connect("button-press-event", lambda w, e: run_command("xterm"))
+        terminal_button = Gtk.Button()
+        terminal_button.connect("clicked", lambda w: run_command("xterm"))
 
-        filemanager_event = Gtk.EventBox()
-        filemanager_label = Gtk.Label(label="File Manager")
-        filemanager_event.add(filemanager_label)
-        filemanager_event.connect("button-press-event", lambda w, e: run_command("explorer.exe ~"))
+        filemanager_button = Gtk.Button()
+        filemanager_button.connect("clicked", lambda w: run_command("explorer.exe ~"))
 
-        launcher_event = Gtk.EventBox()
-        launcher_label = Gtk.Label(label="Launcher")
-        launcher_event.add(launcher_label)
-        launcher_event.connect("button-press-event", self.launch_runnables)
+        launcher_button = Gtk.Button()
+        launcher_button.connect("clicked", self.launch_runnables)
 
-        inner_box.pack_start(terminal_event, False, False, 0)
-        inner_box.pack_start(filemanager_event, False, False, 0)
-        inner_box.pack_start(launcher_event, False, False, 0)
+        inner_box.pack_start(terminal_button, False, False, 0)
+        inner_box.pack_start(filemanager_button, False, False, 0)
+        inner_box.pack_start(launcher_button, False, False, 0)
 
         outer_box.pack_start(inner_box, True, True, 0)
 
