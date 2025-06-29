@@ -86,7 +86,27 @@ class HiddenToolbar(Gtk.Window):
                     random_program = (prog_name, prog_path)
 
         if random_program:
-            prog_button = Gtk.Button(label=f"Random Program: {random_program[0]}")
+            from PIL import Image, ImageDraw, ImageFont
+            import io
+            import base64
+            # Generate an image from the program name
+            img = Image.new('RGB', (200, 50), color=(43, 43, 43))
+            d = ImageDraw.Draw(img)
+            try:
+                font = ImageFont.truetype("arial.ttf", 20)
+            except Exception:
+                font = ImageFont.load_default()
+            d.text((10, 10), random_program[0], fill=(255, 255, 255), font=font)
+            buf = io.BytesIO()
+            img.save(buf, format='PNG')
+            buf.seek(0)
+            loader = GdkPixbuf.PixbufLoader.new_with_type('png')
+            loader.write(buf.read())
+            loader.close()
+            pixbuf = loader.get_pixbuf()
+            image = Gtk.Image.new_from_pixbuf(pixbuf)
+            prog_button = Gtk.Button()
+            prog_button.set_image(image)
             prog_button.connect("clicked", lambda w: self.show_program_dialog(random_program[0], random_program[1]))
             inner_box.pack_start(prog_button, False, False, 0)
 
