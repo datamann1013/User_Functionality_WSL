@@ -73,14 +73,23 @@ class HiddenToolbar(Gtk.Window):
         filemanager_button = Gtk.Button()
         filemanager_button.set_image(filemanager_icon)
         filemanager_button.set_tooltip_text("Open File Manager")
-        # Use wslpath to convert Linux home path to Windows path for explorer.exe
+        # Open the user's home directory in the best available Linux file manager, fallback to terminal file manager
         home_dir = os.path.expanduser("~")
-        try:
-            import subprocess
-            win_home = subprocess.check_output(["wslpath", "-w", home_dir], text=True).strip()
-        except Exception:
-            win_home = home_dir  # fallback
-        filemanager_button.connect("clicked", lambda w: run_command(f"explorer.exe {win_home}"))
+        def open_home_folder(_):
+            import shutil
+            # Try graphical file managers first
+            for fm in ("nautilus", "thunar", "pcmanfm", "dolphin", "nemo", "caja"):
+                if shutil.which(fm):
+                    run_command(f"{fm} '{home_dir}'")
+                    return
+            # Try terminal file managers
+            for tfm in ("ranger", "nnn", "mc"):
+                if shutil.which(tfm):
+                    run_command(f"xterm -e {tfm} '{home_dir}'")
+                    return
+            # Fallback: just show ls in xterm
+            run_command(f"xterm -e ls '{home_dir}'")
+        filemanager_button.connect("clicked", open_home_folder)
 
         launcher_button = Gtk.Button()
         launcher_button.set_image(launcher_icon)
