@@ -73,9 +73,13 @@ class HiddenToolbar(Gtk.Window):
         filemanager_button = Gtk.Button()
         filemanager_button.set_image(filemanager_icon)
         filemanager_button.set_tooltip_text("Open File Manager")
-        # Open Windows Explorer in the user's home directory
+        # Convert Linux home path to Windows path for explorer.exe
         home_dir = os.path.expanduser("~")
-        filemanager_button.connect("clicked", lambda w: run_command(f"explorer.exe {home_dir}"))
+        if home_dir.startswith("/home/"):
+            win_home = f"/mnt/c/Users/{os.environ.get('USER') or os.environ.get('USERNAME') or 'administrator'}"
+        else:
+            win_home = home_dir
+        filemanager_button.connect("clicked", lambda w: run_command(f"explorer.exe {win_home}"))
 
         launcher_button = Gtk.Button()
         launcher_button.set_image(launcher_icon)

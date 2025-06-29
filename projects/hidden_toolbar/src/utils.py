@@ -16,7 +16,7 @@ def run_command(command):
     env = os.environ.copy()
     try:
         proc = subprocess.Popen(command, shell=True, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = proc.communicate(timeout=5)
+        stdout, stderr = proc.communicate()  # No timeout
         if proc.returncode != 0:
             print(f"[ERROR] Command failed: {command}\nSTDOUT: {stdout.decode()}\nSTDERR: {stderr.decode()}")
     except Exception as e:
