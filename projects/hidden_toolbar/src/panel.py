@@ -32,12 +32,14 @@ class HiddenToolbar(Gtk.Window):
         visual = screen.get_rgba_visual()
         if visual is not None and self.is_composited():
             self.set_visual(visual)
+        # Set window background to fully transparent to remove black corners
+        self.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA(0, 0, 0, 0))
 
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(b'''
             .rounded-panel {
                 background-color: #2b2b2b;
-                border-radius: 36px 36px 0px 0px;
+                border-radius: 18px 18px 0px 0px;
                 border-width: 0;
                 border: none;
                 box-shadow: none;
