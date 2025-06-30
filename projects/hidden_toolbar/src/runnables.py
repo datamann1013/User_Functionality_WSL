@@ -130,6 +130,7 @@ class HiddenToolbar(Gtk.Window):
 
         self.connect("destroy", Gtk.main_quit)
         self.connect("realize", self.defer_positioning)
+        self.connect("focus-out-event", self._on_focus_out)
         self.show_all()
 
     def defer_positioning(self, widget):
@@ -194,9 +195,11 @@ class HiddenToolbar(Gtk.Window):
         # import subprocess
         # subprocess.Popen(["notify-send", f"{name}", f"{path}"])
 
+    def _on_focus_out(self, widget, event):
+        self.hide()
+        return False
+
 
 if __name__ == "__main__":
     toolbar = HiddenToolbar()
     Gtk.main()
-
-
