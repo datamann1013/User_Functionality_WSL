@@ -87,10 +87,15 @@ class HiddenToolbar(Gtk.Window):
         def open_wsl_root(_):
             distro = os.environ.get("WSL_DISTRO_NAME")
             if distro:
-                path = f"\\\\wsl$\\{distro}\\"
-                run_command(f"explorer.exe {path}")
+                unc_path = f"\\\\wsl$\\{distro}\\"
+                print(f"[DEBUG] Opening Windows Explorer at: {unc_path}")
+                try:
+                    subprocess.Popen(["explorer.exe", unc_path])
+                except Exception as e:
+                    print(f"[ERROR] Could not open explorer.exe: {e}")
             else:
-                run_command("explorer.exe .")  # fallback
+                print("[ERROR] WSL_DISTRO_NAME not set. Opening current directory instead.")
+                run_command("explorer.exe .")
         filemanager_button.connect("clicked", open_wsl_root)
 
         launcher_button = Gtk.Button()
