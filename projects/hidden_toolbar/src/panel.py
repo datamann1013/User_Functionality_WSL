@@ -28,14 +28,16 @@ class HiddenToolbar(Gtk.Window):
         # Try POPUP_MENU type hint to minimize border/shadow in VcXsrv
         self.set_type_hint(Gdk.WindowTypeHint.POPUP_MENU)
         self.set_app_paintable(True)
-        self.set_skip_taskbar_hint(True)
-        self.set_skip_pager_hint(True)
+        screen = self.get_screen()
+        visual = screen.get_rgba_visual()
+        if visual is not None and self.is_composited():
+            self.set_visual(visual)
 
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(b'''
-            window {
+            .rounded-panel {
                 background-color: #2b2b2b;
-                border-radius: 180px 180px 0px 0px;
+                border-radius: 36px 36px 0px 0px;
                 border-width: 0;
                 border: none;
                 box-shadow: none;
@@ -53,12 +55,12 @@ class HiddenToolbar(Gtk.Window):
             css_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
-
         outer_box = Gtk.Box()
         outer_box.set_halign(Gtk.Align.FILL)
         outer_box.set_valign(Gtk.Align.FILL)
         outer_box.set_hexpand(True)
         outer_box.set_vexpand(True)
+        outer_box.get_style_context().add_class('rounded-panel')
         self.add(outer_box)
 
         inner_box = Gtk.Box(spacing=6)
