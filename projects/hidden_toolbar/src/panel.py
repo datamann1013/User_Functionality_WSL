@@ -10,7 +10,6 @@ from utils import run_command
 import subprocess
 import threading
 import traceback
-from .runnables import RunnablesPanel
 
 class HiddenToolbar(Gtk.Window):
     def __init__(self):
@@ -26,7 +25,6 @@ class HiddenToolbar(Gtk.Window):
         self.window_width = 400
         self.window_height = 40
         self.set_default_size(self.window_width, self.window_height)
-        self.runnables_open = False
         # Try POPUP_MENU type hint to minimize border/shadow in VcXsrv
         self.set_type_hint(Gdk.WindowTypeHint.POPUP_MENU)
         self.set_app_paintable(True)
@@ -104,12 +102,7 @@ class HiddenToolbar(Gtk.Window):
         launcher_button.set_image(launcher_icon)
         launcher_button.set_tooltip_text("Open Program Launcher")
         # Launch the correct runnable (the minimal ProgramLauncher window)
-        #launcher_button.connect("clicked", self.launch_runnables)
-
-        # Add the runnables panel, initially hidden
-        self.runnables_panel = RunnablesPanel()
-        self.runnables_panel.hide()
-        outer_box.pack_start(self.runnables_panel, True, True, 0)
+        launcher_button.connect("clicked", self.launch_runnables)
 
         inner_box.pack_start(terminal_button, False, False, 0)
         inner_box.pack_start(filemanager_button, False, False, 0)
@@ -120,17 +113,6 @@ class HiddenToolbar(Gtk.Window):
         self.connect("destroy", Gtk.main_quit)
         self.connect("realize", self.defer_positioning)
         self.show_all()
-
-        def toggle_runnables_panel(widget):
-            if self.runnables_panel.get_visible():
-                self.runnables_panel.hide()
-                self.set_default_size(self.window_width, 40)
-                self.runnables_open = False
-            else:
-                self.runnables_panel.show_all()
-                self.set_default_size(self.window_width, 600)
-                self.runnables_open = True
-        launcher_button.connect("clicked", toggle_runnables_panel)
 
     def defer_positioning(self, widget):
         # Increase delay to 300ms to ensure window is fully realized before moving
