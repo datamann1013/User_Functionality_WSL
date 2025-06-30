@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import sys
-from .src.panel import HiddenToolbar
-from .src.utils import scan_development_programs_background, ensure_x_server
+from projects.hidden_toolbar.src.panel import HiddenToolbar
+from projects.hidden_toolbar.src.utils import scan_development_programs_background, ensure_x_server
 from gi.repository import Gtk
 
 def main():
