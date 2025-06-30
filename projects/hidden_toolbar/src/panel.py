@@ -83,8 +83,8 @@ class HiddenToolbar(Gtk.Window):
         filemanager_button = Gtk.Button()
         filemanager_button.set_image(filemanager_icon)
         filemanager_button.set_tooltip_text("Open File Manager")
-        # Open Windows Explorer in the current working directory
-        filemanager_button.connect("clicked", lambda w: run_command("explorer.exe ."))
+        # Open Windows Explorer in the root folder of the container (WSL distro)
+        filemanager_button.connect("clicked", lambda w: run_command("explorer.exe /"))
 
         launcher_button = Gtk.Button()
         launcher_button.set_image(launcher_icon)
