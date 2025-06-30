@@ -28,30 +28,32 @@ class HiddenToolbar(Gtk.Window):
         # Try POPUP_MENU type hint to minimize border/shadow in VcXsrv
         self.set_type_hint(Gdk.WindowTypeHint.POPUP_MENU)
         # Set window background to fully transparent to remove black corners
+        self.set_app_paintable(True)
         screen = self.get_screen()
         visual = screen.get_rgba_visual()
         if visual is not None and self.is_composited():
             self.set_visual(visual)
-        self.set_app_paintable(True)
+        # Remove black corners by drawing a transparent background
         self.connect("draw", self.on_draw)
-
+        # Allow dynamic color for the panel background
+        self.panel_bg_color = Gdk.RGBA(0.168, 0.168, 0.168, 1.0)  # #2b2b2b
         css_provider = Gtk.CssProvider()
-        css_provider.load_from_data(b'''
-            .rounded-panel {
-                background-color: #2b2b2b;
+        css_provider.load_from_data(f'''
+            .rounded-panel {{
+                background-color: rgba({int(self.panel_bg_color.red*255)}, {int(self.panel_bg_color.green*255)}, {int(self.panel_bg_color.blue*255)}, {self.panel_bg_color.alpha});
                 border-radius: 18px 18px 0px 0px;
                 border-width: 0;
                 border: none;
                 box-shadow: none;
-            }
-            button {
+            }}
+            button {{
                 background-color: transparent;
                 border: none;
                 border-width: 0;
                 box-shadow: none;
                 padding: 2px;
-            }
-        ''')
+            }}
+        '''.encode())
         Gtk.StyleContext.add_provider_for_screen(
             Gdk.Screen.get_default(),
             css_provider,
@@ -174,12 +176,37 @@ class HiddenToolbar(Gtk.Window):
         dialog.destroy()
 
     def on_draw(self, widget, cr):
-        allocation = self.get_allocation()
         cr.set_source_rgba(0, 0, 0, 0)
         cr.set_operator(1)  # cairo.OPERATOR_SOURCE
         cr.paint()
         cr.set_operator(0)  # cairo.OPERATOR_OVER
         return False
+
+    def set_panel_bg_color(self, rgba: Gdk.RGBA):
+        """Dynamically change the panel background color and update CSS."""
+        self.panel_bg_color = rgba
+        css_provider = Gtk.CssProvider()
+        css_provider.load_from_data(f'''
+            .rounded-panel {{
+                background-color: rgba({int(rgba.red*255)}, {int(rgba.green*255)}, {int(rgba.blue*255)}, {rgba.alpha});
+                border-radius: 18px 18px 0px 0px;
+                border-width: 0;
+                border: none;
+                box-shadow: none;
+            }}
+            button {{
+                background-color: transparent;
+                border: none;
+                border-width: 0;
+                box-shadow: none;
+                padding: 2px;
+            }}
+        '''.encode())
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(),
+            css_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
 
 
 if __name__ == "__main__":
