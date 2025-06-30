@@ -25,46 +25,41 @@ class HiddenToolbar(Gtk.Window):
         self.window_width = 400
         self.window_height = 40
         self.set_default_size(self.window_width, self.window_height)
+        self.runnables_open = False
         # Try POPUP_MENU type hint to minimize border/shadow in VcXsrv
         self.set_type_hint(Gdk.WindowTypeHint.POPUP_MENU)
-        # Set window background to fully transparent to remove black corners
         self.set_app_paintable(True)
-        screen = self.get_screen()
-        visual = screen.get_rgba_visual()
-        if visual is not None and self.is_composited():
-            self.set_visual(visual)
-        # Remove black corners by drawing a transparent background
-        self.connect("draw", self.on_draw)
-        # Allow dynamic color for the panel background
-        self.panel_bg_color = Gdk.RGBA(0.168, 0.168, 0.168, 1.0)  # #2b2b2b
+        self.set_skip_taskbar_hint(True)
+        self.set_skip_pager_hint(True)
+
         css_provider = Gtk.CssProvider()
-        css_provider.load_from_data(f'''
-            .rounded-panel {{
-                background-color: rgba({int(self.panel_bg_color.red*255)}, {int(self.panel_bg_color.green*255)}, {int(self.panel_bg_color.blue*255)}, {self.panel_bg_color.alpha});
-                border-radius: 18px 18px 0px 0px;
+        css_provider.load_from_data(b"""
+            window {
+                background-color: #2b2b2b;
+                border-radius: 6px;
                 border-width: 0;
                 border: none;
                 box-shadow: none;
-            }}
-            button {{
+            }
+            button {
                 background-color: transparent;
                 border: none;
                 border-width: 0;
                 box-shadow: none;
                 padding: 2px;
-            }}
-        '''.encode())
+            }
+        """)
         Gtk.StyleContext.add_provider_for_screen(
             Gdk.Screen.get_default(),
             css_provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
+
         outer_box = Gtk.Box()
         outer_box.set_halign(Gtk.Align.FILL)
         outer_box.set_valign(Gtk.Align.FILL)
         outer_box.set_hexpand(True)
         outer_box.set_vexpand(True)
-        outer_box.get_style_context().add_class('rounded-panel')
         self.add(outer_box)
 
         inner_box = Gtk.Box(spacing=6)
@@ -108,7 +103,13 @@ class HiddenToolbar(Gtk.Window):
         launcher_button.set_image(launcher_icon)
         launcher_button.set_tooltip_text("Open Program Launcher")
         # Launch the correct runnable (the minimal ProgramLauncher window)
-        launcher_button.connect("clicked", self.launch_runnables)
+        #launcher_button.connect("clicked", self.launch_runnables)
+
+        # Add the runnables panel, initially hidden
+        from runnables import RunnablesPanel
+        self.runnables_panel = RunnablesPanel()
+        self.runnables_panel.hide()
+        outer_box.pack_start(self.runnables_panel, True, True, 0)
 
         inner_box.pack_start(terminal_button, False, False, 0)
         inner_box.pack_start(filemanager_button, False, False, 0)
@@ -119,6 +120,17 @@ class HiddenToolbar(Gtk.Window):
         self.connect("destroy", Gtk.main_quit)
         self.connect("realize", self.defer_positioning)
         self.show_all()
+
+        def toggle_runnables_panel(widget):
+            if self.runnables_panel.get_visible():
+                self.runnables_panel.hide()
+                self.set_default_size(self.window_width, 40)
+                self.runnables_open = False
+            else:
+                self.runnables_panel.show_all()
+                self.set_default_size(self.window_width, 600)
+                self.runnables_open = True
+        launcher_button.connect("clicked", toggle_runnables_panel)
 
     def defer_positioning(self, widget):
         # Increase delay to 300ms to ensure window is fully realized before moving
@@ -174,39 +186,6 @@ class HiddenToolbar(Gtk.Window):
         dialog = Gtk.MessageDialog(self, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK, f"Launcher error:\n{message}")
         dialog.run()
         dialog.destroy()
-
-    def on_draw(self, widget, cr):
-        cr.set_source_rgba(0, 0, 0, 0)
-        cr.set_operator(1)  # cairo.OPERATOR_SOURCE
-        cr.paint()
-        cr.set_operator(0)  # cairo.OPERATOR_OVER
-        return False
-
-    def set_panel_bg_color(self, rgba: Gdk.RGBA):
-        """Dynamically change the panel background color and update CSS."""
-        self.panel_bg_color = rgba
-        css_provider = Gtk.CssProvider()
-        css_provider.load_from_data(f'''
-            .rounded-panel {{
-                background-color: rgba({int(rgba.red*255)}, {int(rgba.green*255)}, {int(rgba.blue*255)}, {rgba.alpha});
-                border-radius: 18px 18px 0px 0px;
-                border-width: 0;
-                border: none;
-                box-shadow: none;
-            }}
-            button {{
-                background-color: transparent;
-                border: none;
-                border-width: 0;
-                box-shadow: none;
-                padding: 2px;
-            }}
-        '''.encode())
-        Gtk.StyleContext.add_provider_for_screen(
-            Gdk.Screen.get_default(),
-            css_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
-        )
 
 
 if __name__ == "__main__":
