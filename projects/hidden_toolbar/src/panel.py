@@ -21,6 +21,7 @@ class HiddenToolbar(Gtk.Window):
         self.set_opacity(1.0)
         self.set_title("hidden_toolbar")
         self.positioned = False
+        self.runnables_open = False
 
         self.window_width = 400
         self.window_height = 40
@@ -102,7 +103,21 @@ class HiddenToolbar(Gtk.Window):
         launcher_button.set_image(launcher_icon)
         launcher_button.set_tooltip_text("Open Program Launcher")
         # Launch the correct runnable (the minimal ProgramLauncher window)
-        launcher_button.connect("clicked", self.launch_runnables)
+        def toggle_runnables_panel(widget):
+            if self.runnables_panel.get_visible():
+                self.runnables_panel.hide()
+                self.set_default_size(self.window_width, 40)
+                self.runnables_open = False
+                if hasattr(self, '_runnables_click_handler_id'):
+                    self.disconnect(self._runnables_click_handler_id)
+                    del self._runnables_click_handler_id
+            else:
+                self.runnables_panel.show_all()
+                self.set_default_size(self.window_width, 600)
+                self.runnables_open = True
+                # Connect a handler to close runnables if clicking outside
+                self._runnables_click_handler_id = self.connect('button-press-event', self._on_click_outside_runnables)
+        launcher_button.connect("clicked", toggle_runnables_panel)
 
         inner_box.pack_start(terminal_button, False, False, 0)
         inner_box.pack_start(filemanager_button, False, False, 0)
@@ -168,6 +183,17 @@ class HiddenToolbar(Gtk.Window):
         dialog = Gtk.MessageDialog(self, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK, f"Launcher error:\n{message}")
         dialog.run()
         dialog.destroy()
+
+    def _on_click_outside_runnables(self, widget, event):
+        # Only close if runnables is open and click is outside the runnables panel
+        if self.runnables_open and not self.runnables_panel.get_allocation().contains(int(event.x), int(event.y)):
+            self.runnables_panel.hide()
+            self.set_default_size(self.window_width, 40)
+            self.runnables_open = False
+            if hasattr(self, '_runnables_click_handler_id'):
+                self.disconnect(self._runnables_click_handler_id)
+                del self._runnables_click_handler_id
+        return False
 
 
 if __name__ == "__main__":
