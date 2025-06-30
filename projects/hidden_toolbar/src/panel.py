@@ -27,13 +27,13 @@ class HiddenToolbar(Gtk.Window):
         self.set_default_size(self.window_width, self.window_height)
         # Try POPUP_MENU type hint to minimize border/shadow in VcXsrv
         self.set_type_hint(Gdk.WindowTypeHint.POPUP_MENU)
-        self.set_app_paintable(True)
+        # Set window background to fully transparent to remove black corners
         screen = self.get_screen()
         visual = screen.get_rgba_visual()
         if visual is not None and self.is_composited():
             self.set_visual(visual)
-        # Set window background to fully transparent to remove black corners
-        self.override_background_color(Gtk.StateFlags.NORMAL, Gdk.RGBA(0, 0, 0, 0))
+        self.set_app_paintable(True)
+        self.connect("draw", self.on_draw)
 
         css_provider = Gtk.CssProvider()
         css_provider.load_from_data(b'''
@@ -172,6 +172,14 @@ class HiddenToolbar(Gtk.Window):
         dialog = Gtk.MessageDialog(self, 0, Gtk.MessageType.ERROR, Gtk.ButtonsType.OK, f"Launcher error:\n{message}")
         dialog.run()
         dialog.destroy()
+
+    def on_draw(self, widget, cr):
+        allocation = self.get_allocation()
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.set_operator(1)  # cairo.OPERATOR_SOURCE
+        cr.paint()
+        cr.set_operator(0)  # cairo.OPERATOR_OVER
+        return False
 
 
 if __name__ == "__main__":
