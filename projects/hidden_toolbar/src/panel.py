@@ -10,7 +10,6 @@ from utils import run_command
 import subprocess
 import threading
 import traceback
-from runnables import RunnablesPanel
 
 class HiddenToolbar(Gtk.Window):
     def __init__(self):
@@ -102,23 +101,14 @@ class HiddenToolbar(Gtk.Window):
         launcher_button = Gtk.Button()
         launcher_button.set_image(launcher_icon)
         launcher_button.set_tooltip_text("Open Program Launcher")
-        # Toggle the runnables panel instead of opening a new window
-        def toggle_runnables_panel(widget):
-            if self.runnables_panel.get_visible():
-                self.runnables_panel.hide()
-            else:
-                self.runnables_panel.show_all()
-        launcher_button.connect("clicked", toggle_runnables_panel)
+        # Launch the correct runnable (the minimal ProgramLauncher window)
+        launcher_button.connect("clicked", self.launch_runnables)
 
         inner_box.pack_start(terminal_button, False, False, 0)
         inner_box.pack_start(filemanager_button, False, False, 0)
         inner_box.pack_start(launcher_button, False, False, 0)
 
         outer_box.pack_start(inner_box, True, True, 0)
-        # Add the runnables panel, initially hidden
-        self.runnables_panel = RunnablesPanel()
-        self.runnables_panel.hide()
-        outer_box.pack_start(self.runnables_panel, True, True, 0)
 
         self.connect("destroy", Gtk.main_quit)
         self.connect("realize", self.defer_positioning)
