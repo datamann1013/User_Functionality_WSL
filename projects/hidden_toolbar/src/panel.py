@@ -35,7 +35,7 @@ class HiddenToolbar(Gtk.Window):
         css_provider.load_from_data(b'''
             window {
                 background-color: #2b2b2b;
-                border-radius: 6px 6px 0px 0px;
+                border-radius: 18px 18px 0px 0px;
                 border-width: 0;
                 border: none;
                 box-shadow: none;
