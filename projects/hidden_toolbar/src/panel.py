@@ -32,10 +32,10 @@ class HiddenToolbar(Gtk.Window):
         self.set_skip_pager_hint(True)
 
         css_provider = Gtk.CssProvider()
-        css_provider.load_from_data(b"""
+        css_provider.load_from_data(b'''
             window {
                 background-color: #2b2b2b;
-                border-radius: 6px;
+                border-radius: 6px 6px 0px 0px;
                 border-width: 0;
                 border: none;
                 box-shadow: none;
@@ -47,7 +47,7 @@ class HiddenToolbar(Gtk.Window):
                 box-shadow: none;
                 padding: 2px;
             }
-        """)
+        ''')
         Gtk.StyleContext.add_provider_for_screen(
             Gdk.Screen.get_default(),
             css_provider,
