@@ -10,7 +10,7 @@ from utils import run_command
 import subprocess
 import threading
 import traceback
-from runnables import RunnablesPanel
+from .runnables import RunnablesPanel
 
 class HiddenToolbar(Gtk.Window):
     def __init__(self):
