@@ -17,3 +17,15 @@ def log_error(error_code, message=None, exception=None):
     with open(LOG_FILE_PATH, 'a', encoding='utf-8') as f:
         f.write(log_message + '\n')
 
+def generate_error_code(level, origin, component, subcomponent, number):
+    """
+    Generate an error code string.
+    level: 'E', 'W', 'I', etc. (Error, Warning, Info)
+    origin: single letter (e.g., 'A')
+    component: single letter (e.g., 'B')
+    subcomponent: single letter or '#' if not needed
+    number: int or str, up to two digits
+    """
+    if not subcomponent:
+        subcomponent = '#'
+    return f"{level}{origin}{component}{subcomponent}{str(number).zfill(2)}"
