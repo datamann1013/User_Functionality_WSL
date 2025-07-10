@@ -55,7 +55,7 @@ def test_python_exception_logging():
 
 def test_explanation_from_config(monkeypatch):
     # Simulate config explanation
-    monkeypatch.setattr(logger, 'get_explanation', lambda code: 'Config explanation')
+    monkeypatch.setattr(logger, 'get_explanation', lambda code, msg=None: 'Config explanation')
     logger.log_error('EABA12')
     log_file = get_latest_log_file()
     with open(log_file, 'r', encoding='utf-8') as f:
