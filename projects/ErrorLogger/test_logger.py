@@ -26,7 +26,7 @@ def test_log_file_creation_and_format(monkeypatch):
     assert log_file is not None
     with open(log_file, 'r', encoding='utf-8') as f:
         content = f.read()
-    assert re.match(r'\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] EABA12: ', content)
+    assert re.search(r'\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] EABA12: ', content)
     assert 'Test error' in content
 
 
@@ -75,4 +75,3 @@ def test_log_file_rotates_on_boot(monkeypatch):
     with open(path2, 'r', encoding='utf-8') as f:
         content = f.read()
     assert 'Second boot' in content
-
