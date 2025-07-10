@@ -77,13 +77,14 @@ def test_log_file_rotates_on_boot(monkeypatch):
     assert 'Second boot' in content
 
 
-def test_generate_error_code():
-    # Standard case with all fields
-    code = logger.generate_error_code('E', 'A', 'B', 'A', 12)
-    assert code == 'EABA12'
-    # No subcomponent (should use #)
-    code = logger.generate_error_code('W', 'A', 'F', '', 12)
-    assert code == 'WAF#12'
-    # Single digit number (should pad with zero)
-    code = logger.generate_error_code('I', 'A', 'B', 'A', 3)
-    assert code == 'IABA03'
+def test_error_code_zero_logs_python_exception():
+    try:
+        raise ValueError('Test exception for error code 0')
+    except Exception as e:
+        logger.log_error(0, exception=e)
+    log_file = get_latest_log_file()
+    with open(log_file, 'r', encoding='utf-8') as f:
+        content = f.read()
+    assert '00000:' in content  # Check error code 00000 is present
+    assert 'ValueError' in content
+    assert 'Test exception for error code 0' in content
