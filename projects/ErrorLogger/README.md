@@ -16,7 +16,7 @@ A robust, configurable error logging utility for Python projects. It provides st
 
 ### Logging an error
 ```python
-from projects.ErrorLogger import logger
+from ErrorLogger import logger
 logger.log_error('EABA12', message='Something went wrong')
 ```
 
@@ -66,4 +66,3 @@ pytest projects/ErrorLogger/test_logger.py
 
 ---
 For more details, see the code and tests in this module.
-
