@@ -3,6 +3,7 @@ import "./theme.css";
 import Sidebar from "./componens/ModelManager";
 import ChatBox from "./componens/ChatBox";
 import InputArea from "./componens/InputArea";
+import QuickActionsDropdown from "./componens/modals/QuickActionsDropdown";
 
 function App() {
   // Example state for models and selected model
@@ -24,6 +25,8 @@ function App() {
   ]);
   const [selectedModel, setSelectedModel] = useState(models[0].id);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
+  const [confirmAction, setConfirmAction] = useState(null); // {action, onConfirm}
 
   return (
     <div style={{ display: "flex", height: "100vh", background: "var(--chat-bg)" }}>
@@ -48,12 +51,41 @@ function App() {
             <span style={{ fontWeight: 600 }}>{models.find((m) => m.id === selectedModel)?.name}</span>
             <span style={{ marginLeft: 12, fontSize: 12, color: "#aaa" }}>{models.find((m) => m.id === selectedModel)?.version}</span>
           </div>
-          {/* Quick Actions Dropdown placeholder */}
-          <div>
-            {/* TODO: Implement QuickActionsDropdown */}
-            <span style={{ cursor: "pointer", padding: "4px 12px", background: "var(--quickaction-bg)", borderRadius: 4 }}>
+          {/* Quick Actions Dropdown */}
+          <div style={{ position: "relative" }}>
+            <span
+              style={{ cursor: "pointer", padding: "4px 12px", background: "var(--quickaction-bg)", borderRadius: 4 }}
+              onClick={() => setQuickActionsOpen((v) => !v)}
+            >
               Quick Actions ▼
             </span>
+            {quickActionsOpen && (
+              <QuickActionsDropdown
+                onClose={() => setQuickActionsOpen(false)}
+                onAction={(action) => {
+                  if (["restart", "reboot"].includes(action)) {
+                    setConfirmAction({
+                      action,
+                      onConfirm: () => {
+                        setConfirmAction(null);
+                        setQuickActionsOpen(false);
+                        alert(action + " confirmed!");
+                      },
+                    });
+                  } else {
+                    setQuickActionsOpen(false);
+                    alert(action + " triggered!");
+                  }
+                }}
+              />
+            )}
+            {confirmAction && (
+              <div style={{ position: "absolute", right: 0, top: 40, background: "var(--modal-bg)", border: "1px solid var(--modal-border)", borderRadius: 8, padding: 16, zIndex: 100 }}>
+                <div style={{ marginBottom: 12 }}>Are you sure you want to {confirmAction.action}?</div>
+                <button onClick={confirmAction.onConfirm} style={{ background: "var(--sidebar-icon)", color: "#fff", border: "none", borderRadius: 4, padding: "6px 16px", marginRight: 8 }}>Yes</button>
+                <button onClick={() => setConfirmAction(null)} style={{ background: "#444", color: "#fff", border: "none", borderRadius: 4, padding: "6px 16px" }}>Cancel</button>
+              </div>
+            )}
           </div>
         </div>
         {/* Chat area */}
@@ -68,4 +100,3 @@ function App() {
 }
 
 export default App;
-
