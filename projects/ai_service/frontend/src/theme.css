@@ -1,0 +1,29 @@
+:root {
+  --sidebar-bg: #2f3136;
+  --sidebar-icon: #7289da;
+  --sidebar-text: #fff;
+  --sidebar-state-online: #43b581;
+  --sidebar-state-busy: #faa61a;
+  --sidebar-state-error: #f04747;
+  --sidebar-state-offline: #747f8d;
+  --chat-bg: #36393f;
+  --chat-user-bg: #5865f2;
+  --chat-ai-bg: #23272a;
+  --chat-text: #fff;
+  --topbar-bg: #23272a;
+  --quickaction-bg: #23272a;
+  --quickaction-hover: #36393f;
+  --border: #202225;
+  --input-bg: #40444b;
+  --input-text: #fff;
+  --input-border: #202225;
+  --file-attachment-bg: #292b2f;
+  --file-attachment-icon: #7289da;
+  --modal-bg: #2f3136;
+  --modal-border: #23272a;
+  --modal-header-bg: #23272a;
+  --modal-header-text: #fff;
+  --scrollbar-thumb: #202225;
+  --scrollbar-track: #36393f;
+}
+
