@@ -3,6 +3,7 @@ from datetime import datetime
 import json
 import threading
 import sys
+import uuid
 
 LOG_FILE_PATH = None
 LOG_FILE_LOCK = threading.Lock()
@@ -23,9 +24,20 @@ def get_timestamp():
 
 def _init_log_file():
     global LOG_FILE_PATH
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]  # Add milliseconds
-    root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
-    LOG_FILE_PATH = os.path.join(root_dir, f'errorlog_{timestamp}.log')
+    while True:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]  # Add milliseconds
+        root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
+        log_filename = f'errorlog_{timestamp}.log'
+        log_path = os.path.join(root_dir, log_filename)
+        if not os.path.exists(log_path):
+            LOG_FILE_PATH = log_path
+            break
+        # If file exists, append a short uuid
+        log_filename = f'errorlog_{timestamp}_{uuid.uuid4().hex[:6]}.log'
+        log_path = os.path.join(root_dir, log_filename)
+        if not os.path.exists(log_path):
+            LOG_FILE_PATH = log_path
+            break
     with open(LOG_FILE_PATH, 'w', encoding='utf-8') as f:
         f.write(f"Log file created at {get_timestamp()}\n")
     return LOG_FILE_PATH
