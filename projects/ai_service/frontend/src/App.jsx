@@ -29,7 +29,7 @@ function App() {
   const [confirmAction, setConfirmAction] = useState(null); // {action, onConfirm}
 
   return (
-    <div style={{ display: "flex", height: "100vh", background: "var(--chat-bg)" }}>
+    <div style={{ display: "flex", height: "100vh", background: "var(--chat-bg)", width: "100vw", minHeight: 0, minWidth: 0, boxSizing: 'border-box' }}>
       {/* Sidebar */}
       {sidebarOpen && (
         <Sidebar

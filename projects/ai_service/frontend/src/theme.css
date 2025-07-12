@@ -1,3 +1,12 @@
+html, body {
+  height: 100%;
+  width: 100vw;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
 :root {
   --sidebar-bg: #2f3136;
   --sidebar-icon: #7289da;
@@ -26,4 +35,3 @@
   --scrollbar-thumb: #202225;
   --scrollbar-track: #36393f;
 }
-
