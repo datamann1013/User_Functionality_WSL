@@ -39,3 +39,17 @@ def release_model():
     sched.release(model_id)
     return jsonify({'released': model_id})
 
+@inference_bp.route('/inference/run', methods=['POST'])
+def run_inference():
+    data = request.get_json()
+    # Simulate model selection
+    sched = get_scheduler()
+    model = sched.next()
+    if not model:
+        return jsonify({'error': 'No available model'}), 503
+    # Simulate inference result
+    prompt = data.get('prompt', '')
+    result = f"[Simulated response from model {model['id']}: '{prompt[:30]}...']"
+    # Release model after use
+    sched.release(model['id'])
+    return jsonify({'model_id': model['id'], 'result': result})
