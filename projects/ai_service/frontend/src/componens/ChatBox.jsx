@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import InputArea from "./InputArea";
 // For markdown rendering, you can use 'react-markdown' and 'react-syntax-highlighter' if available
 // import ReactMarkdown from 'react-markdown';
 // import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
