@@ -44,17 +44,31 @@ function App() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
         {/* Top bar */}
         <div style={{ background: "var(--topbar-bg)", color: "var(--modal-header-text)", height: 48, display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid var(--border)", padding: "0 16px" }}>
-          <div>
-            <button onClick={() => setSidebarOpen((v) => !v)} style={{ marginRight: 12 }}>
-              {sidebarOpen ? "⏴" : "⏵"}
-            </button>
+          <div style={{ display: "flex", alignItems: "center" }}>
+            {!sidebarOpen && (
+              <button onClick={() => setSidebarOpen(true)} style={{ marginRight: 12, background: "none", border: "none", color: "var(--sidebar-text)", fontSize: 18, cursor: "pointer", verticalAlign: "middle" }}>⏵</button>
+            )}
             <span style={{ fontWeight: 600 }}>{models.find((m) => m.id === selectedModel)?.name}</span>
             <span style={{ marginLeft: 12, fontSize: 12, color: "#aaa" }}>{models.find((m) => m.id === selectedModel)?.version}</span>
           </div>
           {/* Quick Actions Dropdown */}
           <div style={{ position: "relative" }}>
+            {quickActionsOpen && (
+              <div
+                style={{
+                  position: "fixed",
+                  top: 0,
+                  left: 0,
+                  width: "100vw",
+                  height: "100vh",
+                  zIndex: 99,
+                  background: "transparent",
+                }}
+                onClick={() => setQuickActionsOpen(false)}
+              />
+            )}
             <span
-              style={{ cursor: "pointer", padding: "4px 12px", background: "var(--quickaction-bg)", borderRadius: 4 }}
+              style={{ cursor: "pointer", padding: "4px 12px", background: "var(--quickaction-bg)", borderRadius: 4, position: "relative", zIndex: 100 }}
               onClick={() => setQuickActionsOpen((v) => !v)}
             >
               Quick Actions ▼
@@ -80,10 +94,25 @@ function App() {
               />
             )}
             {confirmAction && (
-              <div style={{ position: "absolute", right: 0, top: 40, background: "var(--modal-bg)", border: "1px solid var(--modal-border)", borderRadius: 8, padding: 16, zIndex: 100 }}>
-                <div style={{ marginBottom: 12 }}>Are you sure you want to {confirmAction.action}?</div>
-                <button onClick={confirmAction.onConfirm} style={{ background: "var(--sidebar-icon)", color: "#fff", border: "none", borderRadius: 4, padding: "6px 16px", marginRight: 8 }}>Yes</button>
-                <button onClick={() => setConfirmAction(null)} style={{ background: "#444", color: "#fff", border: "none", borderRadius: 4, padding: "6px 16px" }}>Cancel</button>
+              <div style={{
+                position: "fixed",
+                top: 0,
+                left: 0,
+                width: "100vw",
+                height: "100vh",
+                background: "rgba(0,0,0,0.4)",
+                zIndex: 200,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center"
+              }}>
+                <div style={{ background: "var(--modal-bg)", border: "1px solid var(--modal-border)", borderRadius: 8, padding: 24, minWidth: 320, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ marginBottom: 12, textAlign: "center" }}>Are you sure you want to {confirmAction.action}?</div>
+                  <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+                    <button onClick={confirmAction.onConfirm} style={{ background: "var(--sidebar-icon)", color: "#fff", border: "none", borderRadius: 4, padding: "6px 16px" }}>Yes</button>
+                    <button onClick={() => setConfirmAction(null)} style={{ background: "#444", color: "#fff", border: "none", borderRadius: 4, padding: "6px 16px" }}>Cancel</button>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -95,6 +124,12 @@ function App() {
         {/* Input area */}
         <InputArea modelId={selectedModel} />
       </div>
+      {/* Sidebar collapsed arrow */}
+      {!sidebarOpen && (
+        <div style={{ width: 32, background: "var(--sidebar-bg)", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", borderRight: "1px solid var(--border)" }} onClick={() => setSidebarOpen(true)}>
+          <span style={{ color: "var(--sidebar-text)", fontSize: 18 }}>⏴</span>
+        </div>
+      )}
     </div>
   );
 }

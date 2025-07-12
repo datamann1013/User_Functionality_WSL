@@ -13,7 +13,7 @@ function ModelManager({ models, selectedModel, setSelectedModel, setModels, onCo
 
   return (
     <aside style={{ width: 240, background: "var(--sidebar-bg)", color: "var(--sidebar-text)", display: "flex", flexDirection: "column", borderRight: "1px solid var(--border)", minWidth: 180 }}>
-      <div style={{ padding: 16, borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ height: 48, padding: 16, borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "space-between", boxSizing: "border-box" }}>
         <span style={{ fontWeight: 700, fontSize: 16 }}>Models</span>
         <button onClick={onCollapse} style={{ background: "none", border: "none", color: "var(--sidebar-text)", fontSize: 18, cursor: "pointer" }}>⏴</button>
       </div>
@@ -50,4 +50,3 @@ function ModelManager({ models, selectedModel, setSelectedModel, setModels, onCo
 }
 
 export default ModelManager;
-
