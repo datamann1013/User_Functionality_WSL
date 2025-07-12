@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import InputArea from "./InputArea";
 // For markdown rendering, you can use 'react-markdown' and 'react-syntax-highlighter' if available
 // import ReactMarkdown from 'react-markdown';
 // import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -135,10 +134,6 @@ function ChatBox({ modelId }) {
         </div>
       ))}
       <Modal />
-      {/* Input area at the bottom */}
-      <div style={{ marginTop: 16 }}>
-        <InputArea modelId={modelId} onSend={handleSend} />
-      </div>
     </div>
   );
 }

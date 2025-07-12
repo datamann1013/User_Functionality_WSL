@@ -2,8 +2,8 @@ import React, { useState } from "react";
 import "./theme.css";
 import Sidebar from "./componens/ModelManager";
 import ChatBox from "./componens/ChatBox";
-import InputArea from "./componens/InputArea";
 import QuickActionsDropdown from "./componens/modals/QuickActionsDropdown";
+import InputArea from "./componens/InputArea";
 
 function App() {
   // Example state for models and selected model
@@ -121,7 +121,7 @@ function App() {
         <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
           <ChatBox modelId={selectedModel} />
         </div>
-        {/* Input area */}
+        {/* Input area at the bottom */}
         <InputArea modelId={selectedModel} />
       </div>
       {/* Sidebar collapsed arrow */}
