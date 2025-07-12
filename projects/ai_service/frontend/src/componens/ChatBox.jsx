@@ -30,15 +30,20 @@ function ChatBox({ modelId }) {
       whiteSpace: "pre-wrap",
       wordBreak: "break-word",
       position: "relative",
-      cursor: msg.type === "code" && msg.text.split("\n").length > 20 ? "pointer" : "default",
+      cursor: msg.type === "code" && msg.text && msg.text.split("\n").length > 20 ? "pointer" : "default",
     };
-    // File attachment
-    if (msg.type === "file") {
+    // File reference
+    if (msg.file) {
       return (
-        <div style={bubbleStyle} onClick={() => setModalContent(msg)}>
+        <div style={bubbleStyle}>
           <span style={{ marginRight: 8, color: "var(--file-attachment-icon)" }}>📄</span>
-          <span>{msg.filename}</span>
-          <span style={{ marginLeft: 8, fontSize: 12, color: "#aaa" }}>{msg.filetype}</span>
+          <span>{msg.file.name || msg.file}</span>
+          {msg.file.type && <span style={{ marginLeft: 8, fontSize: 12, color: "#aaa" }}>{msg.file.type}</span>}
+          {msg.metadata && Object.keys(msg.metadata).length > 0 && (
+            <span style={{ marginLeft: 12, fontSize: 12, color: "#43b581", background: "#23272a", borderRadius: 4, padding: "2px 6px" }}>
+              {Object.entries(msg.metadata).map(([k, v]) => `${k}: ${v}`).join(", ")}
+            </span>
+          )}
         </div>
       );
     }
@@ -65,7 +70,16 @@ function ChatBox({ modelId }) {
       );
     }
     // Plain text
-    return <div style={bubbleStyle}>{msg.text}</div>;
+    return (
+      <div style={bubbleStyle}>
+        {msg.text}
+        {msg.metadata && Object.keys(msg.metadata).length > 0 && (
+          <span style={{ marginLeft: 12, fontSize: 12, color: "#43b581", background: "#23272a", borderRadius: 4, padding: "2px 6px" }}>
+            {Object.entries(msg.metadata).map(([k, v]) => `${k}: ${v}`).join(", ")}
+          </span>
+        )}
+      </div>
+    );
   }
 
   // Modal for long code or file

@@ -12,11 +12,13 @@ const SLASH_COMMANDS = [
   "/locate",
 ];
 
-function InputArea({ modelId }) {
+function InputArea({ modelId, onSend }) {
   const [value, setValue] = useState("");
   const [showCommands, setShowCommands] = useState(false);
   const [filteredCommands, setFilteredCommands] = useState(SLASH_COMMANDS);
   const [fileDrag, setFileDrag] = useState(false);
+  const [file, setFile] = useState(null);
+  const [metadata, setMetadata] = useState("");
   const textareaRef = useRef();
 
   // Handle input change and slash command logic
@@ -36,15 +38,34 @@ function InputArea({ modelId }) {
     e.preventDefault();
     setFileDrag(false);
     const files = Array.from(e.dataTransfer.files);
-    // TODO: handle file upload logic
-    alert("File(s) uploaded: " + files.map(f => f.name).join(", "));
+    if (files.length > 0) {
+      setFile(files[0]);
+    }
   }
 
   // Handle file picker
   function handleFileChange(e) {
     const files = Array.from(e.target.files);
-    // TODO: handle file upload logic
-    alert("File(s) uploaded: " + files.map(f => f.name).join(", "));
+    if (files.length > 0) {
+      setFile(files[0]);
+    }
+  }
+
+  // Handle send
+  async function handleSend() {
+    if (!value.trim() && !file) return;
+    let fileRef = null;
+    if (file) {
+      // Simulate upload, in real app upload to server and get URL/ID
+      fileRef = { name: file.name, type: file.type, size: file.size };
+    }
+    const metaObj = metadata ? { tag: metadata } : {};
+    if (onSend) {
+      onSend({ text: value, file: fileRef, metadata: metaObj });
+    }
+    setValue("");
+    setFile(null);
+    setMetadata("");
   }
 
   // Multiline auto-expand (up to 3 lines)
@@ -55,56 +76,34 @@ function InputArea({ modelId }) {
   }
 
   return (
-    <div
-      style={{
-        background: "var(--input-bg)",
-        borderTop: "1px solid var(--input-border)",
-        padding: 12,
-        display: "flex",
-        alignItems: "flex-end",
-        position: "relative",
-      }}
-      onDragOver={e => { e.preventDefault(); setFileDrag(true); }}
-      onDragLeave={e => { e.preventDefault(); setFileDrag(false); }}
-      onDrop={handleDrop}
-    >
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <textarea
         ref={textareaRef}
         value={value}
         onChange={handleChange}
-        onInput={handleInput}
-        rows={1}
-        style={{
-          flex: 1,
-          resize: "none",
-          minHeight: 32,
-          maxHeight: 60,
-          background: "var(--input-bg)",
-          color: "var(--input-text)",
-          border: "none",
-          outline: "none",
-          fontSize: 16,
-          borderRadius: 6,
-          padding: "8px 12px",
-        }}
-        placeholder="Type a message or / for commands..."
+        placeholder="Type a message..."
+        style={{ resize: "none", width: "100%", minHeight: 40, background: "var(--input-bg)", color: "var(--input-text)", border: "1px solid var(--input-border)", borderRadius: 4, padding: "8px 10px" }}
+        onDrop={handleDrop}
+        onDragOver={e => { e.preventDefault(); setFileDrag(true); }}
+        onDragLeave={e => { e.preventDefault(); setFileDrag(false); }}
       />
+      {file && (
+        <div style={{ color: "var(--file-attachment-icon)", fontSize: 14 }}>
+          Attached: {file.name} <button onClick={() => setFile(null)} style={{ marginLeft: 8 }}>Remove</button>
+        </div>
+      )}
       <input
-        type="file"
-        style={{ display: "none" }}
-        id="file-upload"
-        multiple
-        onChange={handleFileChange}
+        type="text"
+        value={metadata}
+        onChange={e => setMetadata(e.target.value)}
+        placeholder="Add a tag or metadata (optional)"
+        style={{ width: "100%", background: "var(--input-bg)", color: "var(--input-text)", border: "1px solid var(--input-border)", borderRadius: 4, padding: "6px 10px" }}
       />
-      <label htmlFor="file-upload" style={{ marginLeft: 8, cursor: "pointer", color: "var(--sidebar-icon)", fontSize: 22 }} title="Attach file">
-        📎
-      </label>
-      <button
-        style={{ marginLeft: 8, background: "var(--sidebar-icon)", color: "#fff", border: "none", borderRadius: 4, padding: "8px 18px", fontWeight: 600, fontSize: 16, cursor: "pointer" }}
-        onClick={() => { setValue(""); }}
-      >
-        Send
-      </button>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input type="file" style={{ display: "none" }} id="file-upload" onChange={handleFileChange} />
+        <label htmlFor="file-upload" style={{ background: "var(--file-attachment-bg)", color: "var(--file-attachment-icon)", borderRadius: 4, padding: "6px 12px", cursor: "pointer" }}>Attach File</label>
+        <button onClick={handleSend} style={{ background: "var(--sidebar-icon)", color: "#fff", border: "none", borderRadius: 4, padding: "8px 20px", fontWeight: 600 }}>Send</button>
+      </div>
       {/* Slash command suggestion box */}
       {showCommands && filteredCommands.length > 0 && (
         <div style={{
@@ -137,4 +136,3 @@ function InputArea({ modelId }) {
 }
 
 export default InputArea;
-
