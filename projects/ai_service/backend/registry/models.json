@@ -1,7 +1,4 @@
-// Model Registry Format Proposal
-// Each entry represents a model with versioning, tags, and metadata.
-// Example:
-/*
+
 [
   {
     "id": "mistral-7b-v1",
@@ -31,6 +28,6 @@
     }
   }
 ]
-*/
+
 []
 
