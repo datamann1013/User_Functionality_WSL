@@ -2,6 +2,7 @@ import React, { useState } from "react";
 // For markdown rendering, you can use 'react-markdown' and 'react-syntax-highlighter' if available
 // import ReactMarkdown from 'react-markdown';
 // import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import InputArea from "./InputArea";
 
 // Dummy chat data for demonstration
 const initialMessages = [
@@ -134,6 +135,9 @@ function ChatBox({ modelId }) {
         </div>
       ))}
       <Modal />
+      <div style={{ marginTop: 16 }}>
+        <InputArea modelId={modelId} onSend={handleSend} />
+      </div>
     </div>
   );
 }
