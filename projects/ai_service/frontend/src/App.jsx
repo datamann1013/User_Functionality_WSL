@@ -3,6 +3,7 @@ import "./theme.css";
 import Sidebar from "./componens/ModelManager";
 import ChatBox from "./componens/ChatBox";
 import QuickActionsDropdown from "./componens/modals/QuickActionsDropdown";
+import InputArea from "./componens/InputArea";
 
 function App() {
   // Example state for models and selected model
