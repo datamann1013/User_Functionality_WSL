@@ -2,6 +2,7 @@ import os
 import json
 import subprocess
 import webbrowser
+import requests
 
 REGISTRY_PATH = os.path.join(os.path.dirname(__file__), '../backend/registry/models.json')
 MODELS_DIR = os.path.join(os.path.dirname(__file__), '../backend/models')
@@ -13,6 +14,30 @@ DEFAULT_MODEL = {
     "version": "v1.2.3"
 }
 HUGGINGFACE_MODEL_URL = "https://huggingface.co/mistralai/Mistral-7B-v0.1/resolve/main/pytorch_model.bin"
+ERRORLOGGER_SERVICE_URL = os.environ.get('ERRORLOGGER_SERVICE_URL', 'http://localhost:5001/log')
+
+def is_wsl():
+    # Detect if running in WSL
+    try:
+        with open('/proc/version', 'r') as f:
+            return 'microsoft' in f.read().lower()
+    except Exception:
+        return False
+
+def log_error_to_service(error_code, message=None, exception=None, extra=None):
+    """
+    Send an error log to the ErrorLogger service via HTTP POST.
+    """
+    payload = {
+        'error_code': error_code,
+        'message': message,
+        'exception': exception,
+        'extra': extra
+    }
+    try:
+        requests.post(ERRORLOGGER_SERVICE_URL, json=payload, timeout=2)
+    except Exception as e:
+        print(f"[ErrorLogger Service Unreachable] {e}")
 
 def ensure_model_files(model):
     model_dir = os.path.join(MODELS_DIR, model['id'])
@@ -22,9 +47,21 @@ def ensure_model_files(model):
         print(f"Model directory or model file for {model['id']} not found. Downloading from HuggingFace...")
         os.makedirs(model_dir, exist_ok=True)
         if not token:
-            print("HuggingFace access token (HF_TOKEN) not found in environment.")
-            print("Opening browser to HuggingFace token page. Please create a token and set it as HF_TOKEN, then rerun this script.")
-            webbrowser.open("https://huggingface.co/settings/tokens")
+            msg = "HuggingFace access token (HF_TOKEN) not found in environment."
+            print(msg)
+            log_error_to_service(
+                error_code="SETUP01",
+                message=msg,
+                exception="User did not set HF_TOKEN."
+            )
+            print("Please open this URL in your browser to create a token:")
+            print("  https://huggingface.co/settings/tokens\n")
+            print("After creating a token, run: export HF_TOKEN=your_token_here and rerun this script.")
+            if not is_wsl():
+                try:
+                    webbrowser.open("https://huggingface.co/settings/tokens")
+                except Exception:
+                    pass
             exit(1)
         # Download the model file using wget with the token
         try:
@@ -33,7 +70,13 @@ def ensure_model_files(model):
             ], check=True)
             print(f"Model {model['id']} downloaded and set up.")
         except Exception as e:
-            print(f"Failed to download model: {e}")
+            err_msg = f"Failed to download model: {e}"
+            print(err_msg)
+            log_error_to_service(
+                error_code="SETUP02",
+                message=err_msg,
+                exception=str(e)
+            )
     else:
         print(f"Model directory and model file for {model['id']} already exist.")
 

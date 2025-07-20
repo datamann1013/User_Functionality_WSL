@@ -8,7 +8,8 @@ setup(
     packages=find_packages(),
     install_requires=[
         "Flask",
-        "Werkzeug"
+        "Werkzeug",
+        "requests"
     ],
     include_package_data=True,
     python_requires=">=3.7",
