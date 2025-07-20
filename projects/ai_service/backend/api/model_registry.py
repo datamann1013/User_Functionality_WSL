@@ -1,11 +1,14 @@
 from flask import Blueprint, jsonify, request, abort
 import os
 import json
+import sys
 
 mnf = "Model not found"
 registry_bp = Blueprint('registry', __name__)
 
 MODELS_PATH = os.path.join(os.path.dirname(__file__), '../registry/models.json')
+
+DEBUG_MODE = hasattr(sys, 'argv') and any(arg in ('--debug', '-DEBUG') for arg in sys.argv)
 
 def load_models():
     if not os.path.exists(MODELS_PATH):
@@ -22,10 +25,14 @@ def save_models(models):
 
 @registry_bp.route('/registry/models', methods=['GET'])
 def list_models():
+    if DEBUG_MODE:
+        print("[DEBUG] /registry/models GET called")
     return jsonify(load_models())
 
 @registry_bp.route('/registry/models/<model_id>', methods=['GET'])
 def get_model(model_id):
+    if DEBUG_MODE:
+        print(f"[DEBUG] /registry/models/{model_id} GET called")
     models = load_models()
     for m in models:
         if str(m.get('id')) == str(model_id):
@@ -34,6 +41,8 @@ def get_model(model_id):
 
 @registry_bp.route('/registry/models', methods=['POST'])
 def add_model():
+    if DEBUG_MODE:
+        print("[DEBUG] /registry/models POST called")
     models = load_models()
     data = request.get_json()
     if not data or 'id' not in data:
@@ -46,6 +55,8 @@ def add_model():
 
 @registry_bp.route('/registry/models/<model_id>', methods=['PUT'])
 def update_model(model_id):
+    if DEBUG_MODE:
+        print(f"[DEBUG] /registry/models/{model_id} PUT called")
     models = load_models()
     data = request.get_json()
     for i, m in enumerate(models):
@@ -57,6 +68,8 @@ def update_model(model_id):
 
 @registry_bp.route('/registry/models/<model_id>', methods=['DELETE'])
 def delete_model(model_id):
+    if DEBUG_MODE:
+        print(f"[DEBUG] /registry/models/{model_id} DELETE called")
     models = load_models()
     for i, m in enumerate(models):
         if str(m.get('id')) == str(model_id):
@@ -67,6 +80,8 @@ def delete_model(model_id):
 
 @registry_bp.route('/registry/models/<model_id>/savepoint', methods=['POST'])
 def create_savepoint(model_id):
+    if DEBUG_MODE:
+        print(f"[DEBUG] /registry/models/{model_id}/savepoint POST called")
     models = load_models()
     data = request.get_json()
     for m in models:
@@ -92,6 +107,8 @@ def create_savepoint(model_id):
 
 @registry_bp.route('/registry/models/<model_id>/savepoints', methods=['GET'])
 def list_savepoints(model_id):
+    if DEBUG_MODE:
+        print(f"[DEBUG] /registry/models/{model_id}/savepoints GET called")
     models = load_models()
     for m in models:
         if str(m.get('id')) == str(model_id):

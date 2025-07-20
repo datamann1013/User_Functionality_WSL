@@ -2,6 +2,7 @@ import sys
 import os
 import requests
 import subprocess
+import argparse
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
 
 from flask import Flask, jsonify, request
@@ -22,12 +23,24 @@ def log_error_to_service(error_code, message=None, exception=None, extra=None):
     except Exception as e:
         print(f"[ErrorLogger Service Unreachable] {e}")
 
+# Parse debug flag from command line
+parser = argparse.ArgumentParser()
+parser.add_argument('--debug', '-DEBUG', action='store_true', help='Enable debug output')
+args, unknown = parser.parse_known_args()
+DEBUG_MODE = args.debug
+if DEBUG_MODE:
+    print("[DEBUG] Debug mode enabled.")
+
 # Ensure at least one model is downloaded and set up before starting the app
 try:
+    if DEBUG_MODE:
+        print("[DEBUG] Running initial_ai_downloader.py to ensure model setup...")
     subprocess.run([
         sys.executable,
         os.path.join(os.path.dirname(__file__), '../bootstrap/initial_ai_downloader.py')
     ], check=True)
+    if DEBUG_MODE:
+        print("[DEBUG] Model setup script completed.")
 except subprocess.CalledProcessError as e:
     print("\n[Startup Error] Model setup failed. Please resolve the above issue and restart the backend.")
     sys.exit(1)
@@ -38,7 +51,8 @@ app.register_blueprint(inference_bp, url_prefix="/api")
 
 @app.errorhandler(Exception)
 def handle_exception(e):
-    # Log error to ErrorLogger service
+    if DEBUG_MODE:
+        print(f"[DEBUG] Unhandled exception: {repr(e)} at {request.method} {request.path}")
     log_error_to_service(0, exception=f"{request.method} {request.path} | {repr(e)}")
     response = {
         'error': 'Internal Server Error',
@@ -49,7 +63,11 @@ def handle_exception(e):
 
 @app.route('/health', methods=['GET'])
 def health_check():
+    if DEBUG_MODE:
+        print("[DEBUG] /health endpoint called.")
     return jsonify({'status': 'ok'}), 200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    if DEBUG_MODE:
+        print("[DEBUG] Starting Flask app...")
+    app.run(host='0.0.0.0', port=5000, debug=DEBUG_MODE)

@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 import threading
 import time
+import sys
 
 training_bp = Blueprint('training', __name__)
 
@@ -16,8 +17,12 @@ def run_training_job(job_id, model_id, params):
             job['result'] = f"Model {model_id} trained with params {params}"
             break
 
+DEBUG_MODE = hasattr(sys, 'argv') and any(arg in ('--debug', '-DEBUG') for arg in sys.argv)
+
 @training_bp.route('/training/jobs', methods=['POST'])
 def start_training():
+    if DEBUG_MODE:
+        print("[DEBUG] /training/jobs POST called")
     data = request.get_json()
     model_id = data.get('model_id')
     params = data.get('params', {})
@@ -35,5 +40,6 @@ def start_training():
 
 @training_bp.route('/training/jobs', methods=['GET'])
 def list_training_jobs():
+    if DEBUG_MODE:
+        print("[DEBUG] /training/jobs GET called")
     return jsonify(TRAINING_JOBS)
-
