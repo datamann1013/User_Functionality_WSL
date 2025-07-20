@@ -23,10 +23,14 @@ def log_error_to_service(error_code, message=None, exception=None, extra=None):
         print(f"[ErrorLogger Service Unreachable] {e}")
 
 # Ensure at least one model is downloaded and set up before starting the app
-subprocess.run([
-    sys.executable,
-    os.path.join(os.path.dirname(__file__), '../bootstrap/initial_ai_downloader.py')
-], check=True)
+try:
+    subprocess.run([
+        sys.executable,
+        os.path.join(os.path.dirname(__file__), '../bootstrap/initial_ai_downloader.py')
+    ], check=True)
+except subprocess.CalledProcessError as e:
+    print("\n[Startup Error] Model setup failed. Please resolve the above issue and restart the backend.")
+    sys.exit(1)
 
 app = Flask(__name__)
 app.register_blueprint(registry_bp)
