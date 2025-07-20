@@ -2,6 +2,7 @@ import os
 import json
 import webbrowser
 import requests
+from huggingface_hub import snapshot_download
 
 REGISTRY_PATH = os.path.join(os.path.dirname(__file__), '../backend/registry/models.json')
 MODELS_DIR = os.path.join(os.path.dirname(__file__), '../backend/models')
@@ -37,25 +38,19 @@ def log_error_to_service(error_code, message=None, exception=None, extra=None):
     except Exception as e:
         print(f"[ErrorLogger Service Unreachable] {e}")
 
-def download_model(model_url, model_path):
+def download_model(model_id, model_dir):
     """
-    Download the model file from the given URL to the specified path if it does not exist.
+    Download the full HuggingFace model repository to the specified directory if it does not exist.
     """
-    if os.path.exists(model_path):
-        print(f"Model file already exists at {model_path}")
+    if os.path.exists(model_dir) and os.path.isdir(model_dir) and os.listdir(model_dir):
+        print(f"Model directory already exists at {model_dir}")
         return
-    print(f"Downloading model from {model_url} to {model_path}...")
+    print(f"Downloading HuggingFace model repository for {model_id} to {model_dir}...")
     try:
-        response = requests.get(model_url, stream=True)
-        response.raise_for_status()
-        os.makedirs(os.path.dirname(model_path), exist_ok=True)
-        with open(model_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-        print(f"Model downloaded successfully to {model_path}")
+        snapshot_download(repo_id=model_id, local_dir=model_dir, local_dir_use_symlinks=False)
+        print(f"Model repository downloaded successfully to {model_dir}")
     except Exception as e:
-        print(f"Failed to download model: {e}")
+        print(f"Failed to download model repository: {e}")
         log_error_to_service('MODEL_DOWNLOAD_FAILED', str(e))
 
 def ensure_online_model():
@@ -65,11 +60,11 @@ def ensure_online_model():
         json.dump(models, f, indent=2)
     print(f"models.json overwritten with only the default model: {models}")
 
-    # Download the model file if not present
-    model_url = "https://huggingface.co/mistralai/Mistral-7B-v0.1"  # TODO: Replace with actual model URL
-    model_path = os.path.join(MODELS_DIR, "mistral-7b-v1.bin")
+    # Download the full model repository if not present
+    model_id = "mistralai/Mistral-7B-v0.1"  # HuggingFace repo id
+    model_dir = os.path.join(MODELS_DIR, "mistral-7b-v1")
     os.makedirs(MODELS_DIR, exist_ok=True)
-    download_model(model_url, model_path)
+    download_model(model_id, model_dir)
 
 if __name__ == "__main__":
     ensure_online_model()
