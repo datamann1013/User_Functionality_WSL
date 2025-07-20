@@ -1,12 +1,11 @@
-
 [
   {
     "id": "mistral-7b-v1",
     "name": "Mistral 7B",
     "type": "assistant",
-    "format": "gguf",
-    "path": "/models/mistral-7b-v1.gguf",
-    "source": "https://huggingface.co/mistralai/Mistral-7B-v0.1",
+    "format": "pytorch",
+    "path": "/models/mistral-7b-v1",
+    "source": "mistralai/Mistral-7B-v0.1",
     "tags": ["general", "default"],
     "versions": [
       {
@@ -25,10 +24,9 @@
     "current_version": "1.1",
     "metadata": {
       "params": 7000000000,
-      "backend": "llama.cpp"
+      "backend": "transformers"
     }
   }
 ]
 
 []
-
