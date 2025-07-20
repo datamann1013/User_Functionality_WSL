@@ -37,26 +37,39 @@ def log_error_to_service(error_code, message=None, exception=None, extra=None):
     except Exception as e:
         print(f"[ErrorLogger Service Unreachable] {e}")
 
+def download_model(model_url, model_path):
+    """
+    Download the model file from the given URL to the specified path if it does not exist.
+    """
+    if os.path.exists(model_path):
+        print(f"Model file already exists at {model_path}")
+        return
+    print(f"Downloading model from {model_url} to {model_path}...")
+    try:
+        response = requests.get(model_url, stream=True)
+        response.raise_for_status()
+        os.makedirs(os.path.dirname(model_path), exist_ok=True)
+        with open(model_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+        print(f"Model downloaded successfully to {model_path}")
+    except Exception as e:
+        print(f"Failed to download model: {e}")
+        log_error_to_service('MODEL_DOWNLOAD_FAILED', str(e))
+
 def ensure_online_model():
-    if not os.path.exists(REGISTRY_PATH):
-        print(f"models.json not found, creating new registry at {REGISTRY_PATH}")
-        models = [DEFAULT_MODEL]
-    else:
-        with open(REGISTRY_PATH, 'r', encoding='utf-8') as f:
-            try:
-                models = json.load(f)
-            except Exception:
-                models = []
-        online = any(m.get('state') == 'online' for m in models)
-        if not online:
-            print("No online models found. Adding default model.")
-            models.append(DEFAULT_MODEL)
-        else:
-            print("At least one online model already present.")
+    # Always overwrite models.json with only the DEFAULT_MODEL
+    models = [DEFAULT_MODEL]
     with open(REGISTRY_PATH, 'w', encoding='utf-8') as f:
         json.dump(models, f, indent=2)
-    print(f"models.json updated. Current models: {models}")
-    # Model files are now handled by setup_models.py
+    print(f"models.json overwritten with only the default model: {models}")
+
+    # Download the model file if not present
+    model_url = "https://huggingface.co/mistralai/Mistral-7B-v0.1"  # TODO: Replace with actual model URL
+    model_path = os.path.join(MODELS_DIR, "mistral-7b-v1.bin")
+    os.makedirs(MODELS_DIR, exist_ok=True)
+    download_model(model_url, model_path)
 
 if __name__ == "__main__":
     ensure_online_model()
