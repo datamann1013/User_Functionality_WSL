@@ -1,5 +1,5 @@
 from flask import Flask, jsonify
-from api.model_registry import registry_bp
+from projects.ai_service.backend.api.model_registry import registry_bp
 from ErrorLogger.decorators import flask_error_handler
 
 app = Flask(__name__)
