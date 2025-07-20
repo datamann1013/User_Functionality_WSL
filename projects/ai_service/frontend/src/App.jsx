@@ -120,8 +120,8 @@ function App() {
         <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
           <ChatBox modelId={selectedModel} />
         </div>
-        {/* Input area at the bottom (removed to avoid double input bars) */}
-        {/* <InputArea modelId={selectedModel} /> */}
+        {/* Input area at the bottom */}
+        <InputArea modelId={selectedModel} />
       </div>
       {/* Sidebar collapsed arrow */}
       {!sidebarOpen && (

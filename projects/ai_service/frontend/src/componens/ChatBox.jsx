@@ -135,9 +135,9 @@ function ChatBox({ modelId }) {
         </div>
       ))}
       <Modal />
-      <div style={{ marginTop: 16 }}>
+      {/*<div style={{ marginTop: 16 }}>
         <InputArea modelId={modelId} onSend={handleSend} />
-      </div>
+      </div>*/}
     </div>
   );
 }
