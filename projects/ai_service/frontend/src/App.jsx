@@ -1,12 +1,10 @@
 import React, { useState } from "react";
 import "./theme.css";
 import Sidebar from "./componens/ModelManager";
-import ChatBox from "./componens/ChatBox";
 import QuickActionsDropdown from "./componens/modals/QuickActionsDropdown";
 import InputArea from "./componens/InputArea";
 
 function App() {
-  // Example state for models and selected model
   const [models, setModels] = useState([
     {
       id: "mistral-7b-v1",
@@ -23,17 +21,21 @@ function App() {
       version: "v0.9.1",
     },
   ]);
+  const [selectedModel, setSelectedModel] = useState(models[0].id);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
+  const [confirmAction, setConfirmAction] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [modalContent, setModalContent] = useState(null);
 
   async function handleSend(msg) {
-    // Add user message
     const userMsg = { ...msg, sender: "user", id: Date.now() + Math.random() };
     setMessages((prev) => [...prev, userMsg]);
-    // Call backend for AI response
     try {
       const res = await fetch("/api/inference/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: msg.text, modelId }),
+        body: JSON.stringify({ prompt: msg.text, modelId: selectedModel }),
       });
       const data = await res.json();
       setMessages((prev) => [
@@ -47,10 +49,84 @@ function App() {
       ]);
     }
   }
-  const [selectedModel, setSelectedModel] = useState(models[0].id);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
-  const [confirmAction, setConfirmAction] = useState(null); // {action, onConfirm}
+
+  function renderBubble(msg) {
+    const isUser = msg.sender === "user";
+    const bubbleStyle = {
+      background: isUser ? "var(--chat-user-bg)" : "var(--chat-ai-bg)",
+      color: "var(--chat-text)",
+      alignSelf: isUser ? "flex-end" : "flex-start",
+      borderRadius: 12,
+      padding: "10px 16px",
+      margin: "6px 0",
+      maxWidth: "70%",
+      whiteSpace: "pre-wrap",
+      wordBreak: "break-word",
+      position: "relative",
+      cursor: msg.type === "code" && msg.text && msg.text.split("\n").length > 20 ? "pointer" : "default",
+    };
+    if (msg.file) {
+      return (
+        <div style={bubbleStyle}>
+          <span style={{ marginRight: 8, color: "var(--file-attachment-icon)" }}>📄</span>
+          <span>{msg.file.name || msg.file}</span>
+          {msg.file.type && <span style={{ marginLeft: 8, fontSize: 12, color: "#aaa" }}>{msg.file.type}</span>}
+          {msg.metadata && Object.keys(msg.metadata).length > 0 && (
+            <span style={{ marginLeft: 12, fontSize: 12, color: "#43b581", background: "#23272a", borderRadius: 4, padding: "2px 6px" }}>
+              {Object.entries(msg.metadata).map(([k, v]) => `${k}: ${v}`).join(", ")}
+            </span>
+          )}
+        </div>
+      );
+    }
+    if (msg.type === "code") {
+      const lines = msg.text.split("\n").length;
+      if (lines > 20) {
+        return (
+          <div style={bubbleStyle} onClick={() => setModalContent(msg)}>
+            <span style={{ fontStyle: "italic", color: "#aaa" }}>[Long code block, click to expand]</span>
+          </div>
+        );
+      }
+      return (
+        <pre style={{ ...bubbleStyle, fontFamily: "monospace", background: "#18191c" }}>{msg.text}</pre>
+      );
+    }
+    if (msg.type === "markdown") {
+      return (
+        <div style={bubbleStyle}>{msg.text}</div>
+      );
+    }
+    return (
+      <div style={bubbleStyle}>
+        {msg.text}
+        {msg.metadata && Object.keys(msg.metadata).length > 0 && (
+          <span style={{ marginLeft: 12, fontSize: 12, color: "#43b581", background: "#23272a", borderRadius: 4, padding: "2px 6px" }}>
+            {Object.entries(msg.metadata).map(([k, v]) => `${k}: ${v}`).join(", ")}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  function Modal() {
+    if (!modalContent) return null;
+    return (
+      <div style={{ position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh", background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setModalContent(null)}>
+        <div style={{ background: "var(--modal-bg)", border: "1px solid var(--modal-border)", borderRadius: 8, padding: 24, minWidth: 400, maxWidth: 800, maxHeight: "80vh", overflow: "auto" }} onClick={e => e.stopPropagation()}>
+          {modalContent.type === "file" ? (
+            <div>
+              <h3>{modalContent.filename}</h3>
+              <pre style={{ background: "#18191c", color: "#fff", padding: 12 }}>{modalContent.text || "[File content preview here]"}</pre>
+            </div>
+          ) : (
+            <pre style={{ background: "#18191c", color: "#fff", padding: 12 }}>{modalContent.text}</pre>
+          )}
+          <button onClick={() => setModalContent(null)} style={{ marginTop: 16, background: "var(--sidebar-icon)", color: "#fff", border: "none", borderRadius: 4, padding: "6px 16px" }}>Close</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", height: "100vh", background: "var(--chat-bg)", width: "100vw", minHeight: 0, minWidth: 0, boxSizing: 'border-box' }}>
@@ -142,11 +218,16 @@ function App() {
           </div>
         </div>
         {/* Chat area */}
-        <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
-          <ChatBox modelId={selectedModel} />
+        <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", padding: 24 }}>
+          {messages.map((msg) => (
+            <div key={msg.id} style={{ display: "flex", flexDirection: "column", alignItems: msg.sender === "user" ? "flex-end" : "flex-start" }}>
+              {renderBubble(msg)}
+            </div>
+          ))}
+          <Modal />
         </div>
         {/* Input area at the bottom */}
-        <InputArea modelId={modelId} onSend={handleSend} />
+        <InputArea modelId={selectedModel} onSend={handleSend} />
       </div>
       {/* Sidebar collapsed arrow */}
       {!sidebarOpen && (
