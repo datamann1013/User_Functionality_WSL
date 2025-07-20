@@ -5,6 +5,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../.
 
 from flask import Flask, jsonify, request
 from projects.ai_service.backend.api.model_registry import registry_bp
+from projects.ai_service.backend.api.inference import inference_bp
 
 ERRORLOGGER_SERVICE_URL = os.environ.get('ERRORLOGGER_SERVICE_URL', 'http://localhost:5001/log')
 
@@ -22,6 +23,7 @@ def log_error_to_service(error_code, message=None, exception=None, extra=None):
 
 app = Flask(__name__)
 app.register_blueprint(registry_bp)
+app.register_blueprint(inference_bp, url_prefix="/api")
 
 @app.errorhandler(Exception)
 def handle_exception(e):
