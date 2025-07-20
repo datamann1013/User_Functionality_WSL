@@ -122,7 +122,7 @@ function App() {
           <ChatBox modelId={selectedModel} />
         </div>
         {/* Input area at the bottom */}
-        <InputArea modelId={selectedModel} />
+        <InputArea modelId={modelId} onSend={handleSend} />
       </div>
       {/* Sidebar collapsed arrow */}
       {!sidebarOpen && (
