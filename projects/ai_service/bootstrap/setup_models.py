@@ -1,7 +1,7 @@
 import os
 import json
 import requests
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), '../backend/models')
 REGISTRY_PATH = os.path.join(os.path.dirname(__file__), '../backend/registry/models.json')
@@ -76,9 +76,11 @@ def ensure_model_downloaded():
         token = os.environ.get("HF_TOKEN")
         if not token:
             raise RuntimeError("HuggingFace access token (HF_TOKEN) not found in environment.")
-        # Download model and tokenizer
-        AutoModelForCausalLM.from_pretrained(repo_id, cache_dir=model_dir, use_auth_token=token)
-        AutoTokenizer.from_pretrained(repo_id, cache_dir=model_dir, use_auth_token=token)
+        # Use pipeline to trigger download as in HuggingFace docs
+        pipe = pipeline("text-generation", model=repo_id, token=token, cache_dir=model_dir)
+        # Also download model and tokenizer directly for backend compatibility
+        AutoModelForCausalLM.from_pretrained(repo_id, cache_dir=model_dir, token=token)
+        AutoTokenizer.from_pretrained(repo_id, cache_dir=model_dir, token=token)
         print(f"Model {model_id} downloaded and set up at {model_dir}.")
 
 if __name__ == "__main__":
