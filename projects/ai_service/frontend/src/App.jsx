@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import "./theme.css";
 import Sidebar from "./componens/ModelManager";
 import QuickActionsDropdown from "./componens/modals/QuickActionsDropdown";
@@ -27,10 +27,27 @@ function App() {
   const [confirmAction, setConfirmAction] = useState(null);
   const [messages, setMessages] = useState([]);
   const [modalContent, setModalContent] = useState(null);
+  const [connecting, setConnecting] = useState(true);
+  const [thinking, setThinking] = useState(false);
+
+  // On mount, check backend connection
+  useEffect(() => {
+    async function checkBackend() {
+      try {
+        await fetch("/health");
+        setConnecting(false);
+      } catch {
+        setConnecting(true);
+      }
+    }
+    checkBackend();
+  }, []);
 
   async function handleSend(msg) {
-    const userMsg = { ...msg, sender: "user", id: Date.now() + Math.random() };
-    setMessages((prev) => [...prev, userMsg]);
+    if (connecting) return;
+    setThinking(true);
+    setMessages((prev) => [...prev, { ...msg, sender: "user", id: Date.now() + Math.random() }]);
+    setMessages((prev) => [...prev, { sender: "ai", text: "[thinking]", id: Date.now() + Math.random() }]);
     try {
       const res = await fetch("/api/inference/run", {
         method: "POST",
@@ -39,15 +56,16 @@ function App() {
       });
       const data = await res.json();
       setMessages((prev) => [
-        ...prev,
+        ...prev.slice(0, -1), // Remove the last [thinking] message
         { sender: "ai", text: data.result, id: Date.now() + Math.random() },
       ]);
     } catch (e) {
       setMessages((prev) => [
-        ...prev,
+        ...prev.slice(0, -1),
         { sender: "ai", text: "[Error: Could not reach backend]", id: Date.now() + Math.random() },
       ]);
     }
+    setThinking(false);
   }
 
   function renderBubble(msg) {
@@ -219,15 +237,19 @@ function App() {
         </div>
         {/* Chat area */}
         <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column", padding: 24 }}>
-          {messages.map((msg) => (
-            <div key={msg.id} style={{ display: "flex", flexDirection: "column", alignItems: msg.sender === "user" ? "flex-end" : "flex-start" }}>
-              {renderBubble(msg)}
-            </div>
-          ))}
+          {connecting ? (
+            <div style={{ color: "#aaa", textAlign: "center", marginTop: 40, fontSize: 18 }}>Connecting...</div>
+          ) : (
+            messages.map((msg) => (
+              <div key={msg.id} style={{ display: "flex", flexDirection: "column", alignItems: msg.sender === "user" ? "flex-end" : "flex-start" }}>
+                {renderBubble(msg)}
+              </div>
+            ))
+          )}
           <Modal />
         </div>
         {/* Input area at the bottom */}
-        <InputArea modelId={selectedModel} onSend={handleSend} />
+        <InputArea modelId={selectedModel} onSend={handleSend} disabled={connecting || thinking} />
       </div>
       {/* Sidebar collapsed arrow */}
       {!sidebarOpen && (
