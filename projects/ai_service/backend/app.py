@@ -1,3 +1,7 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
+
 from flask import Flask, jsonify
 from projects.ai_service.backend.api.model_registry import registry_bp
 from ErrorLogger.decorators import flask_error_handler
