@@ -34,10 +34,10 @@ if DEBUG_MODE:
 # Ensure at least one model is downloaded and set up before starting the app
 try:
     if DEBUG_MODE:
-        print("[DEBUG] Running initial_ai_downloader.py to ensure model setup...")
+        print("[DEBUG] Running setup_models.py to ensure model setup...")
     subprocess.run([
         sys.executable,
-        os.path.join(os.path.dirname(__file__), '../bootstrap/initial_ai_downloader.py')
+        os.path.join(os.path.dirname(__file__), '../bootstrap/setup_models.py')
     ], check=True)
     if DEBUG_MODE:
         print("[DEBUG] Model setup script completed.")
