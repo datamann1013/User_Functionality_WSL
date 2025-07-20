@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-from .logger import log_error
+from logger import log_error
 
 app = Flask(__name__)
 
@@ -14,4 +14,3 @@ def log():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5001)
-
