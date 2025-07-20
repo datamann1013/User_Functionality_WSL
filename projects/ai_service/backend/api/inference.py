@@ -2,6 +2,9 @@ from flask import Blueprint, jsonify, request
 from ..core.scheduler import RoundRobinScheduler
 from ..api.model_registry import load_models
 import threading
+import os
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
 
 inference_bp = Blueprint('inference', __name__)
 
@@ -39,17 +42,35 @@ def release_model():
     sched.release(model_id)
     return jsonify({'released': model_id})
 
+# Cache for loaded models
+MODEL_CACHE = {}
+
+def get_model_and_tokenizer(model_id):
+    if model_id in MODEL_CACHE:
+        return MODEL_CACHE[model_id]
+    model_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../models', model_id))
+    tokenizer = AutoTokenizer.from_pretrained(model_dir)
+    model = AutoModelForCausalLM.from_pretrained(model_dir)
+    MODEL_CACHE[model_id] = (model, tokenizer)
+    return model, tokenizer
+
 @inference_bp.route('/inference/run', methods=['POST'])
 def run_inference():
     data = request.get_json()
-    # Simulate model selection
     sched = get_scheduler()
-    model = sched.next()
-    if not model:
+    model_info = sched.next()
+    if not model_info:
         return jsonify({'error': 'No available model'}), 503
-    # Simulate inference result
+    model_id = model_info['id']
     prompt = data.get('prompt', '')
-    result = f"[Simulated response from model {model['id']}: '{prompt[:30]}...']"
-    # Release model after use
-    sched.release(model['id'])
-    return jsonify({'model_id': model['id'], 'result': result})
+    try:
+        model, tokenizer = get_model_and_tokenizer(model_id)
+        input_ids = tokenizer(prompt, return_tensors="pt").input_ids
+        with torch.no_grad():
+            output = model.generate(input_ids, max_new_tokens=64, do_sample=True)
+        result = tokenizer.decode(output[0], skip_special_tokens=True)
+    except Exception as e:
+        sched.release(model_id)
+        return jsonify({'error': f'Inference failed: {str(e)}'}), 500
+    sched.release(model_id)
+    return jsonify({'model_id': model_id, 'result': result})
