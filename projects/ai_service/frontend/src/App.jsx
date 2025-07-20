@@ -3,7 +3,6 @@ import "./theme.css";
 import Sidebar from "./componens/ModelManager";
 import ChatBox from "./componens/ChatBox";
 import QuickActionsDropdown from "./componens/modals/QuickActionsDropdown";
-import InputArea from "./componens/InputArea";
 
 function App() {
   // Example state for models and selected model
@@ -121,8 +120,8 @@ function App() {
         <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
           <ChatBox modelId={selectedModel} />
         </div>
-        {/* Input area at the bottom */}
-        <InputArea modelId={selectedModel} />
+        {/* Input area at the bottom (removed to avoid double input bars) */}
+        {/* <InputArea modelId={selectedModel} /> */}
       </div>
       {/* Sidebar collapsed arrow */}
       {!sidebarOpen && (
