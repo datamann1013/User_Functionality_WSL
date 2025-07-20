@@ -4,42 +4,13 @@ import React, { useState } from "react";
 // import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import InputArea from "./InputArea";
 
-// Dummy chat data for demonstration
-const initialMessages = [
-  { id: 1, sender: "user", text: "Hello!", type: "text" },
-  { id: 2, sender: "ai", text: "Hi! How can I help you?", type: "text" },
-  { id: 3, sender: "user", text: "```js\nconsole.log('test');\n```", type: "code", language: "js" },
-  { id: 4, sender: "ai", text: "Here is a markdown example:\n\n**Bold** and _italic_!", type: "markdown" },
-  { id: 5, sender: "user", text: "file.md", type: "file", filetype: "md", filename: "file.md" },
-];
+
 
 function ChatBox({ modelId }) {
   const [messages, setMessages] = useState([]);
   const [modalContent, setModalContent] = useState(null);
 
-  async function handleSend(msg) {
-    // Add user message
-    const userMsg = { ...msg, sender: "user", id: Date.now() + Math.random() };
-    setMessages((prev) => [...prev, userMsg]);
-    // Call backend for AI response
-    try {
-      const res = await fetch("/api/inference/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: msg.text, modelId }),
-      });
-      const data = await res.json();
-      setMessages((prev) => [
-        ...prev,
-        { sender: "ai", text: data.result, id: Date.now() + Math.random() },
-      ]);
-    } catch (e) {
-      setMessages((prev) => [
-        ...prev,
-        { sender: "ai", text: "[Error: Could not reach backend]", id: Date.now() + Math.random() },
-      ]);
-    }
-  }
+
 
   // Render a chat bubble
   function renderBubble(msg) {

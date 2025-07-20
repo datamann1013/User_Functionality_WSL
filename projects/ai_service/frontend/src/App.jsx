@@ -23,6 +23,30 @@ function App() {
       version: "v0.9.1",
     },
   ]);
+
+  async function handleSend(msg) {
+    // Add user message
+    const userMsg = { ...msg, sender: "user", id: Date.now() + Math.random() };
+    setMessages((prev) => [...prev, userMsg]);
+    // Call backend for AI response
+    try {
+      const res = await fetch("/api/inference/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: msg.text, modelId }),
+      });
+      const data = await res.json();
+      setMessages((prev) => [
+        ...prev,
+        { sender: "ai", text: data.result, id: Date.now() + Math.random() },
+      ]);
+    } catch (e) {
+      setMessages((prev) => [
+        ...prev,
+        { sender: "ai", text: "[Error: Could not reach backend]", id: Date.now() + Math.random() },
+      ]);
+    }
+  }
   const [selectedModel, setSelectedModel] = useState(models[0].id);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
