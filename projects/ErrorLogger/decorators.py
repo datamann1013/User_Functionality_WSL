@@ -1,7 +1,10 @@
 from functools import wraps
 from flask import request, jsonify, current_app
 from werkzeug.exceptions import HTTPException
-from .logger import log_error
+import os
+from .logger import log_error_remote
+
+ERRORLOGGER_SERVICE_URL = os.environ.get('ERRORLOGGER_SERVICE_URL', 'http://localhost:5001/log')
 
 # Flask error handler for unhandled exceptions
 
@@ -9,8 +12,8 @@ def flask_error_handler(e):
     if isinstance(e, HTTPException):
         # Return the HTTPException's response so Flask can handle it
         return e.get_response()
-    # Log with request context
-    log_error(0, exception=f"{request.method} {request.path} | {repr(e)}")
+    # Send error to ErrorLogger service
+    log_error_remote(0, exception=f"{request.method} {request.path} | {repr(e)}")
     response = {
         'error': 'Internal Server Error',
         'message': str(e),
@@ -27,7 +30,7 @@ def log_exceptions(error_code):
             try:
                 return func(*args, **kwargs)
             except Exception as e:
-                log_error(error_code, exception=f"{request.method} {request.path} | {repr(e)}")
+                log_error_remote(error_code, exception=f"{request.method} {request.path} | {repr(e)}")
                 response = {
                     'error': 'Application Error',
                     'message': str(e),

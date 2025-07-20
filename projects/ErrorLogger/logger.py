@@ -4,6 +4,7 @@ import json
 import threading
 import sys
 import uuid
+import requests
 
 LOG_FILE_PATH = None
 LOG_FILE_LOCK = threading.Lock()
@@ -58,6 +59,19 @@ def log_error(error_code, message=None, exception=None):
     with LOG_FILE_LOCK:
         with open(LOG_FILE_PATH, 'a', encoding='utf-8') as f:
             f.write(log_message + '\n')
+
+def log_error_remote(error_code, message=None, exception=None, extra=None):
+    payload = {
+        'error_code': error_code,
+        'message': message,
+        'exception': exception,
+        'extra': extra
+    }
+    try:
+        requests.post(ERRORLOGGER_SERVICE_URL, json=payload, timeout=2)
+    except Exception as e:
+        # Fallback to local log if remote fails
+        log_error(error_code, message=message, exception=exception)
 
 def generate_error_code(level, origin, component, subcomponent, number):
     """
