@@ -1,6 +1,7 @@
 import sys
 import os
 import requests
+import subprocess
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
 
 from flask import Flask, jsonify, request
@@ -20,6 +21,12 @@ def log_error_to_service(error_code, message=None, exception=None, extra=None):
         requests.post(ERRORLOGGER_SERVICE_URL, json=payload, timeout=2)
     except Exception as e:
         print(f"[ErrorLogger Service Unreachable] {e}")
+
+# Ensure at least one model is downloaded and set up before starting the app
+subprocess.run([
+    sys.executable,
+    os.path.join(os.path.dirname(__file__), '../bootstrap/initial_ai_downloader.py')
+], check=True)
 
 app = Flask(__name__)
 app.register_blueprint(registry_bp)
