@@ -3,6 +3,7 @@ import json
 import webbrowser
 import requests
 import sys
+from projects.ErrorLogger.error_codes import ERROR_CODE_DEFINITIONS
 
 REGISTRY_PATH = os.path.join(os.path.dirname(__file__), '../backend/registry/models.json')
 MODELS_DIR = os.path.join(os.path.dirname(__file__), '../backend/models')
@@ -20,20 +21,6 @@ REQUIRED_FILES = [
     "config.json"         # Example config file
 ]
 
-ERROR_CODE_DEFINITIONS = {
-    "IABS1": "Setup model script started.",
-    "IABS2": "All required model files present.",
-    "EABS1": "Missing required model files.",
-    "EABS2": "Failed to download model file.",
-    "IABS3": "Model file downloaded successfully.",
-    "E00000": "Python exception occurred.",
-}
-
-MODEL_FILE_URLS = {
-    "mistral-7b-v1.bin": "https://huggingface.co/mistralai/Mistral-7B-v0.1/resolve/main/pytorch_model.bin",
-    "config.json": "https://huggingface.co/mistralai/Mistral-7B-v0.1/resolve/main/config.json"
-}
-
 def is_wsl():
     # Detect if running in WSL
     try:
@@ -48,7 +35,7 @@ def log_error_to_service(error_code, message=None, exception=None, extra=None):
     """
     payload = {
         'error_code': error_code,
-        'message': message,
+        'message': message or get_error_explanation(error_code),
         'exception': exception,
         'extra': extra
     }
@@ -70,19 +57,19 @@ def check_model_files(model_dir):
 def download_model_file(model_dir, fname):
     url = MODEL_FILE_URLS.get(fname)
     if not url:
-        log_error_to_service("EABS2", message=f"No download URL for {fname}", extra={"file": fname})
+        log_error_to_service("EABS2", message=get_error_explanation("EABS2"), extra={"file": fname})
         return False
     try:
-        log_error_to_service("IABS1", message=f"Downloading {fname} from {url}", extra={"file": fname})
+        log_error_to_service("IABS1", message=get_error_explanation("IABS1"), extra={"file": fname, "url": url})
         response = requests.get(url, stream=True, timeout=30)
         response.raise_for_status()
         with open(os.path.join(model_dir, fname), 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-        log_error_to_service("IABS3", message=f"Downloaded {fname}", extra={"file": fname})
+        log_error_to_service("IABS3", message=get_error_explanation("IABS3"), extra={"file": fname})
         return True
     except Exception as e:
-        log_error_to_service("EABS2", message=f"Failed to download {fname}", exception=str(e), extra={"file": fname, "url": url})
+        log_error_to_service("EABS2", message=get_error_explanation("EABS2"), exception=str(e), extra={"file": fname, "url": url})
         return False
 
 def ensure_online_model(debug=False):
