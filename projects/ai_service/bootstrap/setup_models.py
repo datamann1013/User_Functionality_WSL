@@ -31,6 +31,11 @@ DEFAULT_MODEL = {
 }
 ERRORLOGGER_SERVICE_URL = os.environ.get('ERRORLOGGER_SERVICE_URL', 'http://localhost:5001/log')
 
+MODEL_FILE_URLS = {
+    "mistral-7b-v1.bin": "https://huggingface.co/mistralai/Mistral-7B-v0.1/resolve/main/pytorch_model.bin",
+    "config.json": "https://huggingface.co/mistralai/Mistral-7B-v0.1/resolve/main/config.json"
+}
+
 REQUIRED_FILES = [
     "mistral-7b-v1.bin",  # Example model file
     "config.json"         # Example config file
