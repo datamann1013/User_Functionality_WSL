@@ -3,7 +3,7 @@ import "./theme.css";
 import Sidebar from "./componens/ModelManager";
 import QuickActionsDropdown from "./componens/modals/QuickActionsDropdown";
 import InputArea from "./componens/InputArea";
-import { logFrontendError } from "./utils/errorLogger";
+import { logFrontendError, getErrorExplanation } from "./utils/errorLogger";
 
 function App() {
   const [models, setModels] = useState([
@@ -57,13 +57,15 @@ function App() {
       });
       const data = await res.json();
       console.log("Transmission received:", data); // Log response
+      logFrontendError({ error: null, info: getErrorExplanation("IAFX1"), extra: data, error_code: "IAFX1" });
       setMessages((prev) => [
         ...prev.slice(0, -1), // Remove the last [thinking] message
         { sender: "ai", text: data.result, id: Date.now() + Math.random() },
       ]);
+      logFrontendError({ error: null, info: getErrorExplanation("IAFX2"), extra: data, error_code: "IAFX2" });
     } catch (e) {
       console.error("Transmission error:", e);
-      logFrontendError({ error: e, info: "Error in handleSend", extra: msg });
+      logFrontendError({ error: e, info: getErrorExplanation("EAFX1"), extra: msg, error_code: "EAFX1" });
       setMessages((prev) => [
         ...prev.slice(0, -1),
         { sender: "ai", text: "[Error: Could not reach backend]", id: Date.now() + Math.random() },
