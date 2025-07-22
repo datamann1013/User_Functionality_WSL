@@ -1,4 +1,20 @@
+import sys
 import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+try:
+    from projects.ErrorLogger.error_codes import ERROR_CODE_DEFINITIONS
+except ImportError:
+    # Fallback: local copy
+    ERROR_CODE_DEFINITIONS = {
+        "IABS1": "Setup model script started.",
+        "IABS2": "All required model files present.",
+        "EABS1": "Missing required model files.",
+        "EABS2": "Failed to download model file.",
+        "IABS3": "Model file downloaded successfully.",
+        "E00000": "Python exception occurred.",
+        "IAXX1": "Health check called.",
+    }
+
 import json
 import webbrowser
 import requests
