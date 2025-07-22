@@ -76,7 +76,9 @@ def check_model_files(model_dir):
 
 def download_model_file(model_dir, fname):
     url = MODEL_FILE_URLS.get(fname)
+    print(f"Attempting to download {fname} from {url}")
     if not url:
+        print(f"No download URL for {fname}")
         log_error_to_service("EABS2", message=get_error_explanation("EABS2"), extra={"file": fname})
         return False
     try:
@@ -86,9 +88,11 @@ def download_model_file(model_dir, fname):
         with open(os.path.join(model_dir, fname), 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
+        print(f"Downloaded {fname} successfully.")
         log_error_to_service("IABS3", message=get_error_explanation("IABS3"), extra={"file": fname})
         return True
     except Exception as e:
+        print(f"Failed to download {fname}: {e}")
         log_error_to_service("EABS2", message=get_error_explanation("EABS2"), exception=str(e), extra={"file": fname, "url": url})
         return False
 
