@@ -3,6 +3,7 @@ import "./theme.css";
 import Sidebar from "./componens/ModelManager";
 import QuickActionsDropdown from "./componens/modals/QuickActionsDropdown";
 import InputArea from "./componens/InputArea";
+import { logFrontendError } from "./utils/errorLogger";
 
 function App() {
   const [models, setModels] = useState([
@@ -55,11 +56,14 @@ function App() {
         body: JSON.stringify({ prompt: msg.text, modelId: selectedModel }),
       });
       const data = await res.json();
+      console.log("Transmission received:", data); // Log response
       setMessages((prev) => [
         ...prev.slice(0, -1), // Remove the last [thinking] message
         { sender: "ai", text: data.result, id: Date.now() + Math.random() },
       ]);
     } catch (e) {
+      console.error("Transmission error:", e);
+      logFrontendError({ error: e, info: "Error in handleSend", extra: msg });
       setMessages((prev) => [
         ...prev.slice(0, -1),
         { sender: "ai", text: "[Error: Could not reach backend]", id: Date.now() + Math.random() },
