@@ -79,27 +79,32 @@ def get_model_and_tokenizer(model_id):
 
 @inference_bp.route('/inference/run', methods=['POST'])
 def run_inference():
-    data = request.get_json()
-    sched = get_scheduler()
-    model_info = sched.next()
-    if not model_info:
-        log_error_to_service("EABB2", message=get_error_explanation("EABB2"), extra=data)
-        return jsonify({'error': 'No available model'}), 503
-    model_id = model_info['id']
-    prompt = data.get('prompt', '')
-    if os.environ.get('DEBUG_MODE', '0') == '1':
-        log_error_to_service("IABB1", message=get_error_explanation("IABB1"), extra={"model_id": model_id, "prompt": prompt})
     try:
-        model, tokenizer = get_model_and_tokenizer(model_id)
-        input_ids = tokenizer(prompt, return_tensors="pt").input_ids
-        with torch.no_grad():
-            output = model.generate(input_ids, max_new_tokens=64, do_sample=True)
-        result = tokenizer.decode(output[0], skip_special_tokens=True)
+        data = request.get_json()
+        sched = get_scheduler()
+        model_info = sched.next()
+        if not model_info:
+            log_error_to_service("EABB2", message=get_error_explanation("EABB2"), extra=data)
+            return jsonify({'error': get_error_explanation("EABB2"), 'code': "EABB2"}), 503
+        model_id = model_info['id']
+        prompt = data.get('prompt', '')
         if os.environ.get('DEBUG_MODE', '0') == '1':
-            log_error_to_service("IABB2", message=get_error_explanation("IABB2"), extra={"model_id": model_id, "result": result})
-    except Exception as e:
+            log_error_to_service("IABB1", message=get_error_explanation("IABB1"), extra={"model_id": model_id, "prompt": prompt})
+        try:
+            model, tokenizer = get_model_and_tokenizer(model_id)
+            input_ids = tokenizer(prompt, return_tensors="pt").input_ids
+            with torch.no_grad():
+                output = model.generate(input_ids, max_new_tokens=64, do_sample=True)
+            result = tokenizer.decode(output[0], skip_special_tokens=True)
+            if os.environ.get('DEBUG_MODE', '0') == '1':
+                log_error_to_service("IABB2", message=get_error_explanation("IABB2"), extra={"model_id": model_id, "result": result})
+        except Exception as e:
+            sched.release(model_id)
+            log_error_to_service("EABB1", message=get_error_explanation("EABB1"), exception=str(e), extra={"model_id": model_id, "prompt": prompt})
+            return jsonify({'error': get_error_explanation("EABB1"), 'code': "EABB1"}), 500
         sched.release(model_id)
-        log_error_to_service("EABB1", message=get_error_explanation("EABB1"), exception=str(e), extra={"model_id": model_id, "prompt": prompt})
-        return jsonify({'error': f'Inference failed: {str(e)}'}), 500
-    sched.release(model_id)
-    return jsonify({'model_id': model_id, 'result': result})
+        return jsonify({'model_id': model_id, 'result': result})
+    except Exception as e:
+        # Catch any unexpected errors in the endpoint itself
+        log_error_to_service("E00000", message=get_error_explanation("E00000"), exception=str(e))
+        return jsonify({'error': get_error_explanation("E00000"), 'code': "E00000"}), 500

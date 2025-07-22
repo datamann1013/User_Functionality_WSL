@@ -64,19 +64,29 @@ app.register_blueprint(inference_bp, url_prefix="/api")
 
 @app.errorhandler(Exception)
 def handle_exception(e):
+    # Catch all unhandled exceptions in Flask app
+    error_code = getattr(e, 'error_code', 'E00000')
+    explanation = get_error_explanation(error_code)
+    log_error_to_service(error_code, message=explanation, exception=str(e), extra={"path": request.path, "method": request.method})
     if DEBUG_MODE:
         print(f"[DEBUG] Unhandled exception: {repr(e)} at {request.method} {request.path}")
-    log_error_to_service(0, exception=f"{request.method} {request.path} | {repr(e)}")
+    # Try to gently deal with the error: return a generic error response
     response = {
         'error': 'Internal Server Error',
-        'message': str(e),
-        'code': '00000'
+        'message': explanation,
+        'code': error_code
     }
     return jsonify(response), 500
 
 @app.route('/health', methods=['GET'])
 def health():
-    if DEBUG_MODE:
-        log_error_to_service("IAXX1", message=get_error_explanation("IAXX1"))
-        print("[DEBUG] /health endpoint called.")
-    return jsonify({'status': 'ok'})
+    try:
+        if DEBUG_MODE:
+            log_error_to_service("IAXX1", message=get_error_explanation("IAXX1"))
+            print("[DEBUG] /health endpoint called.")
+        return jsonify({'status': 'ok'})
+    except Exception as e:
+        error_code = getattr(e, 'error_code', 'E00000')
+        explanation = get_error_explanation(error_code)
+        log_error_to_service(error_code, message=explanation, exception=str(e))
+        return jsonify({'error': explanation, 'code': error_code}), 500
