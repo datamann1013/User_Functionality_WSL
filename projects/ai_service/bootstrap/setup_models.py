@@ -19,7 +19,6 @@ import json
 import webbrowser
 import requests
 import sys
-from projects.ErrorLogger.error_codes import ERROR_CODE_DEFINITIONS
 
 REGISTRY_PATH = os.path.join(os.path.dirname(__file__), '../backend/registry/models.json')
 MODELS_DIR = os.path.join(os.path.dirname(__file__), '../backend/models')
