@@ -49,7 +49,7 @@ try:
     subprocess.run([
         sys.executable,
         os.path.join(os.path.dirname(__file__), '../bootstrap/setup_models.py'),
-        "--debug"
+        "--debug" if DEBUG_MODE else ""
     ], check=True)
     if DEBUG_MODE:
         print("[DEBUG] Model setup script completed.")
@@ -90,3 +90,7 @@ def health():
         explanation = get_error_explanation(error_code)
         log_error_to_service(error_code, message=explanation, exception=str(e))
         return jsonify({'error': explanation, 'code': error_code}), 500
+
+# Add this at the end to run the Flask server
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=DEBUG_MODE)
