@@ -6,11 +6,12 @@ ERROR_CODE_DEFINITIONS = {
     # Setup/Model
     "IABS1": "Setup model script started.",
     "IABS2": "All required model files present.",
-    "EABS3": "Missing Hugging Face access token.",
+    "IABS3": "Model file downloaded successfully.",
     "IABS4": "Using Hugging Face Hub API for download.",
+    "IABS5": "Gated model access detected.",
     "EABS1": "Missing required model files.",
     "EABS2": "Failed to download model file.",
-    "IABS3": "Model file downloaded successfully.",
+    "EABS3": "Missing Hugging Face access token.",
     # Backend/Inference
     "IABB1": "Inference request received.",
     "IABB2": "Inference response sent.",

@@ -5,7 +5,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 try:
     from projects.ErrorLogger.error_codes import ERROR_CODE_DEFINITIONS
 except ImportError:
-    # Fallback: local copy
     ERROR_CODE_DEFINITIONS = {
         "IABS1": "Setup model script started.",
         "IABS2": "All required model files present.",
@@ -16,11 +15,12 @@ except ImportError:
         "IAXX1": "Health check called.",
         "IABS4": "Using Hugging Face Hub API for download.",
         "EABS3": "Missing Hugging Face access token.",
+        "IABS5": "Gated model access detected.",
     }
 
 import json
 import requests
-from huggingface_hub import HfApi, HfFolder, snapshot_download
+from huggingface_hub import HfApi, HfFolder, snapshot_download, login
 from transformers import AutoConfig
 
 REGISTRY_PATH = os.path.join(os.path.dirname(__file__), '../backend/registry/models.json')
@@ -38,7 +38,6 @@ MODEL_HF_ID = "mistralai/Mistral-7B-v0.1"
 
 
 def is_wsl():
-    # Detect if running in WSL
     try:
         with open('/proc/version', 'r') as f:
             return 'microsoft' in f.read().lower()
@@ -47,9 +46,6 @@ def is_wsl():
 
 
 def log_error_to_service(error_code, message=None, exception=None, extra=None):
-    """
-    Send an error log to the ErrorLogger service via HTTP POST.
-    """
     payload = {
         'error_code': error_code,
         'message': message or get_error_explanation(error_code),
@@ -70,26 +66,35 @@ def check_model_files(model_dir):
     """Check for essential model files accounting for sharding"""
     missing = []
 
-    # Check for config.json
     config_path = os.path.join(model_dir, "config.json")
     if not os.path.exists(config_path):
         missing.append("config.json")
 
-    # Check for either single model file or sharded files
-    pytorch_model_path = os.path.join(model_dir, "pytorch_model.bin")
-    pytorch_index_path = os.path.join(model_dir, "pytorch_model.bin.index.json")
+    # Check for model files (handle sharded or single file)
+    has_model_files = any(
+        fname.startswith("pytorch_model") and
+        (fname.endswith(".bin") or fname.endswith(".index.json"))
+        for fname in os.listdir(model_dir)
+    )
 
-    if not (os.path.exists(pytorch_model_path) and not os.path.exists(pytorch_index_path)):
-        # Check for any shard files
-        has_shards = any(
-            fname.startswith("pytorch_model-") and fname.endswith(".bin")
-            for fname in os.listdir(model_dir)
-        )
-
-        if not has_shards:
-            missing.append("model weights (pytorch_model.bin or shards)")
+    if not has_model_files:
+        missing.append("pytorch_model.bin or shards")
 
     return missing
+
+
+def ensure_model_access(token):
+    """Verify we have access to the gated model"""
+    api = HfApi()
+    try:
+        model_info = api.model_info(MODEL_HF_ID, token=token)
+        if getattr(model_info, 'gated', False):
+            print("✅ Access verified to gated model")
+            log_error_to_service("IABS5", message="Gated model access verified")
+        return True
+    except Exception as e:
+        print(f"❌ Access verification failed: {str(e)}")
+        return False
 
 
 def download_model_with_hf(model_dir, debug=False):
@@ -101,7 +106,6 @@ def download_model_with_hf(model_dir, debug=False):
         # Get Hugging Face token
         hf_token = os.environ.get("HF_API_TOKEN")
         if not hf_token:
-            # Check if user is logged in via CLI
             hf_token = HfFolder.get_token()
 
         if not hf_token:
@@ -110,9 +114,18 @@ def download_model_with_hf(model_dir, debug=False):
             print("1. Visit https://huggingface.co/settings/tokens")
             print("2. Create access token (with read permissions)")
             print("3. Accept model terms at: https://huggingface.co/mistralai/Mistral-7B-v0.1")
+            print("   (You MUST click 'Agree and access repository')")
             print("4. Set token as environment variable:")
             print("   export HF_API_TOKEN='your_token_here'")
             print("\nAlternatively, run: huggingface-cli login")
+            return False
+
+        # Verify model access
+        print("🔒 Verifying access to gated model...")
+        if not ensure_model_access(hf_token):
+            print("\nACCESS DENIED: You haven't accepted the model terms")
+            print("Visit https://huggingface.co/mistralai/Mistral-7B-v0.1")
+            print("and click 'Agree and access repository'")
             return False
 
         # Download model
@@ -132,6 +145,11 @@ def download_model_with_hf(model_dir, debug=False):
         return True
     except Exception as e:
         print(f"Failed to download model: {str(e)}")
+        if "Access to model" in str(e) and "is restricted" in str(e):
+            print("\nACCESS ISSUE: Please verify:")
+            print("1. You've accepted terms at: https://huggingface.co/mistralai/Mistral-7B-v0.1")
+            print("2. Your access token is valid")
+            print("3. You're using the same account that accepted the terms")
         log_error_to_service("EABS2", message=get_error_explanation("EABS2"), exception=str(e))
         return False
 
@@ -158,22 +176,20 @@ def ensure_online_model(debug=False):
         log_error_to_service("EABS1", message=get_error_explanation("EABS1"))
         print("Attempting to download model...")
 
-        # Download using Hugging Face Hub API
         success = download_model_with_hf(model_dir, debug=debug)
 
         if success:
-            # Re-check after download
             missing_files = check_model_files(model_dir)
             if missing_files:
+                print(f"⚠️ Still missing files: {missing_files}")
                 log_error_to_service("EABS1", message=get_error_explanation("EABS1"))
-                print(f"Still missing files: {missing_files}")
             else:
+                print(f"✅ All required files present for {DEFAULT_MODEL['id']}")
                 log_error_to_service("IABS2", message=get_error_explanation("IABS2"))
-                print(f"All required files present for {DEFAULT_MODEL['id']}")
         else:
-            print("Download failed. Please check token and model access")
+            print("❌ Download failed. Please fix the access issues above")
     else:
-        print(f"All required files present for {DEFAULT_MODEL['id']}")
+        print(f"✅ All required files present for {DEFAULT_MODEL['id']}")
         log_error_to_service("IABS2", message=get_error_explanation("IABS2"))
 
 
