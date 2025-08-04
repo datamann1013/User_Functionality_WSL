@@ -21,8 +21,11 @@ ERROR_CODE_DEFINITIONS = {
     # ===== Backend/Inference =====
     "IABB1": "Inference request received",
     "IABB2": "Inference response sent",
-    "EABB1": "Inference failed",
+    "EABB1": "Inference failed - model loading issue",
     "EABB2": "No available model for inference",
+    "EABB3": "Model loading failed - unsupported format",
+    "EABB4": "Inference timeout",
+    "IABS6": "Model loaded successfully",
 
     # ===== Frontend =====
     "IAFX1": "Frontend transmission received",

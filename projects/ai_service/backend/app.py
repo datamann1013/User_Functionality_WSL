@@ -61,6 +61,7 @@ except subprocess.CalledProcessError as e:
 app = Flask(__name__)
 app.register_blueprint(registry_bp)
 app.register_blueprint(inference_bp, url_prefix="/api")
+app.config['MODELS_DIR'] = os.path.abspath(os.path.join(os.path.dirname(__file__), 'models'))
 
 @app.errorhandler(Exception)
 def handle_exception(e):

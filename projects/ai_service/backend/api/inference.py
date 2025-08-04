@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request
 from ..core.scheduler import RoundRobinScheduler
 from ..api.model_registry import load_models
+from flask import current_app
 import threading
 import os
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -14,6 +15,11 @@ scheduler = None
 scheduler_lock = threading.Lock()
 
 ERRORLOGGER_SERVICE_URL = os.environ.get('ERRORLOGGER_SERVICE_URL', 'http://localhost:5001/log')
+
+@inference_bp.route('/generate', methods=['POST'])
+def generate():
+    model_id = request.json.get('model_id')
+    model_path = os.path.join(current_app.config['MODELS_DIR'], model_id)
 
 try:
     from projects.ErrorLogger.error_codes import ERROR_CODE_DEFINITIONS
