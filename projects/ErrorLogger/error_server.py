@@ -1,5 +1,11 @@
+import os
 from flask import Flask, request, jsonify
-from .logger import log_error
+import sys
+import argparse
+
+# Add parent directory to path for proper imports
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from logger import log_error
 
 app = Flask(__name__)
 
@@ -32,4 +38,8 @@ def health_check():
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    args = parser.parse_args()
+
+    app.run(host='0.0.0.0', port=5001, debug=args.debug)
