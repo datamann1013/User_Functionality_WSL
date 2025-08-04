@@ -62,6 +62,7 @@ app = Flask(__name__)
 app.register_blueprint(registry_bp)
 app.register_blueprint(inference_bp, url_prefix="/api")
 app.config['MODELS_DIR'] = os.path.abspath(os.path.join(os.path.dirname(__file__), 'models'))
+app.config['REGISTRY_PATH'] = os.path.abspath(os.path.join(os.path.dirname(__file__), 'registry/models.json'))
 
 @app.errorhandler(Exception)
 def handle_exception(e):

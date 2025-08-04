@@ -18,6 +18,24 @@ ERROR_CODE_DEFINITIONS = {
     "EABS2": "Failed to download model file",
     "EABS3": "Missing Hugging Face access token",
 
+     # ===== Model Registry Errors =====
+    "EMR01": "Failed to load model registry",
+    "EMR02": "Failed to save model registry",
+    "EMR03": "Failed to list models",
+    "EMR04": "Model not found",
+    "EMR05": "Failed to retrieve model details",
+    "EMR06": "Invalid model data format",
+    "EMR07": "Model ID already exists",
+    "EMR08": "Failed to save new model",
+    "EMR09": "Failed to add model to registry",
+    "EMR10": "Invalid update data",
+    "EMR11": "Model not found for update",
+    "EMR12": "Failed to save model update",
+    "EMR13": "Failed to update model",
+    "EMR14": "Model not found for deletion",
+    "EMR15": "Failed to save after deletion",
+    "EMR16": "Failed to delete model",
+
     # ===== Backend/Inference =====
     "IABB1": "Inference request received",
     "IABB2": "Inference response sent",
