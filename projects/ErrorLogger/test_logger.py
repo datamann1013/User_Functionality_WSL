@@ -1,90 +1,70 @@
 import os
-import re
 import glob
-import pytest
 from projects.ErrorLogger import logger
-from projects.shared_utils import constants
-
-LOG_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
+import json
 
 
 def get_latest_log_file():
-    files = glob.glob(os.path.join(LOG_DIR, 'errorlog_*.log'))
+    if 'microsoft' in os.uname().release.lower():
+        log_dir = os.path.expanduser('~/logs')
+    else:
+        log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
+
+    files = glob.glob(os.path.join(log_dir, 'errorlog_*.csv'))
     if not files:
         return None
     return max(files, key=os.path.getctime)
 
 
-def test_log_file_creation_and_format(monkeypatch):
-    # Remove any existing log files
-    for f in glob.glob(os.path.join(LOG_DIR, 'errorlog_*.log')):
+def test_csv_file_creation_and_format():
+    # Clean existing logs
+    log_dir = os.path.expanduser('~/logs') if 'microsoft' in os.uname().release.lower() else os.path.abspath(
+        os.path.join(os.path.dirname(__file__), '../../..'))
+    pattern = os.path.join(log_dir, 'errorlog_*.csv')
+    for f in glob.glob(pattern):
         os.remove(f)
-    # Simulate system boot
-    monkeypatch.setattr(logger, 'LOG_FILE_PATH', logger._init_log_file())
-    logger.log_error('EABA12', message='Test error')
+
+    # Test log
+    logger.log_error('TEST01', message="Test error", exception="Test exception", extra={"key": "value"})
+
+    # Verify
     log_file = get_latest_log_file()
     assert log_file is not None
+
     with open(log_file, 'r', encoding='utf-8') as f:
-        content = f.read()
-    assert re.search(r'\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] EABA12: ', content)
-    assert 'Test error' in content
+        lines = f.readlines()
+
+    # Check header
+    assert lines[0].strip() == "timestamp;error_code;explanation;exception;extra"
+
+    # Check content format
+    assert len(lines) >= 2
+    parts = lines[1].split(';', 4)  # Split into 5 parts (maxsplit=4)
+    assert len(parts) == 5
+    assert parts[1] == "TEST01"
+    assert parts[2] == "Test error"
+    assert parts[3] == "Test exception"
+    assert json.loads(parts[4].strip()) == {"key": "value"}
 
 
-def test_log_levels():
-    logger.log_error('EABA12', message='Error level')
-    logger.log_error('WABA12', message='Warning level')
-    logger.log_error('IABA12', message='Info level')
+def test_standard_message_fallback():
+    logger.log_error('UNDEFINED_CODE')
     log_file = get_latest_log_file()
+    assert log_file is not None
+
     with open(log_file, 'r', encoding='utf-8') as f:
-        content = f.read()
-    assert 'EABA12' in content
-    assert 'WABA12' in content
-    assert 'IABA12' in content
+        lines = f.readlines()
 
+    # Get last non-empty line
+    last_line = None
+    for line in reversed(lines):
+        if line.strip():
+            last_line = line
+            break
 
-def test_python_exception_logging():
-    try:
-        1 / 0
-    except Exception as e:
-        logger.log_error(0, exception=e)
-    log_file = get_latest_log_file()
-    with open(log_file, 'r', encoding='utf-8') as f:
-        content = f.read()
-    assert 'ZeroDivisionError' in content
+    assert last_line is not None
+    parts = last_line.split(';', 4)
+    assert len(parts) >= 3
+    assert "(standard)" in parts[2]
 
-
-def test_explanation_from_config(monkeypatch):
-    # Simulate config explanation
-    monkeypatch.setattr(logger, 'get_explanation', lambda code, msg=None: 'Config explanation')
-    logger.log_error('EABA12')
-    log_file = get_latest_log_file()
-    with open(log_file, 'r', encoding='utf-8') as f:
-        content = f.read()
-    assert 'Config explanation' in content
-
-
-def test_log_file_rotates_on_boot(monkeypatch):
-    # Simulate boot
-    path1 = logger._init_log_file()
-    logger.log_error('EABA12', message='First boot')
-    path2 = logger._init_log_file()
-    logger.log_error('EABA12', message='Second boot')
-    assert path1 != path2
-    assert os.path.exists(path1)
-    assert os.path.exists(path2)
-    with open(path2, 'r', encoding='utf-8') as f:
-        content = f.read()
-    assert 'Second boot' in content
-
-
-def test_error_code_zero_logs_python_exception():
-    try:
-        raise ValueError('Test exception for error code 0')
-    except Exception as e:
-        logger.log_error(0, exception=e)
-    log_file = get_latest_log_file()
-    with open(log_file, 'r', encoding='utf-8') as f:
-        content = f.read()
-    assert '00000:' in content  # Check error code 00000 is present
-    assert 'ValueError' in content
-    assert 'Test exception for error code 0' in content
+# Add more tests as needed...

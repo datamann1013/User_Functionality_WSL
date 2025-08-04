@@ -5,6 +5,10 @@ import threading
 import sys
 import uuid
 import requests
+from platform import uname
+
+# Add this missing environment variable definition
+ERRORLOGGER_SERVICE_URL = os.environ.get('ERRORLOGGER_SERVICE_URL', 'http://localhost:5001/log')
 
 LOG_FILE_PATH = None
 LOG_FILE_LOCK = threading.Lock()
@@ -32,7 +36,7 @@ def _init_log_file():
     while True:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
         # Use WSL-friendly path if detected
-        if 'microsoft' in os.uname().release.lower():
+        if 'microsoft' in uname().release.lower():
             root_dir = os.path.expanduser('~/logs')
             os.makedirs(root_dir, exist_ok=True)
         else:
@@ -56,7 +60,9 @@ def _init_log_file():
     return LOG_FILE_PATH
 
 
-_init_log_file()
+# Initialize log file at module load
+if LOG_FILE_PATH is None:
+    _init_log_file()
 
 
 def get_explanation(error_code, message=None):
@@ -83,6 +89,10 @@ def log_error(error_code, message=None, exception=None, extra=None):
     log_line = f"{timestamp};{error_code};{explanation};{exception_str};{extra_str}"
 
     with LOG_FILE_LOCK:
+        # Ensure file path is initialized
+        if LOG_FILE_PATH is None:
+            _init_log_file()
+
         with open(LOG_FILE_PATH, 'a', encoding='utf-8') as f:
             f.write(log_line + '\n')
 
@@ -98,7 +108,7 @@ def log_error_remote(error_code, message=None, exception=None, extra=None):
     try:
         # Synchronous call with timeout
         response = requests.post(
-            ERRORLOGGER_SERVICE_URL,
+            ERRORLOGGER_SERVICE_URL,  # Now defined
             json=payload,
             timeout=5
         )

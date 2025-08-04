@@ -1,68 +1,105 @@
-# ErrorLogger
+# ErrorLogger v1.1
 
-A robust, configurable error logging utility for Python projects. It provides structured error codes, log file rotation, and automatic interception of uncaught exceptions.
+Advanced error logging system for WSL-based development environments with structured error codes and CSV logging.
 
 ## Features
-- **Structured error codes**: Codes like `EABA12` (level, origin, component, subcomponent, number)
-- **Log levels**: Error, Warning, Info, etc. (first letter of code)
-- **Component tracking**: Origin, component, subcomponent, and error number
-- **Automatic log file rotation**: New log file with timestamp (to milliseconds) on each boot
-- **Configurable explanations**: Explanations for error codes from a JSON config file
-- **Python exception logging**: All uncaught exceptions are logged with code `00000`
-- **Thread-safe logging**: Uses a lock to prevent race conditions
-- **Tested**: Comprehensive pytest suite
+- **Structured Error Codes**: `[Type][Origin][Component][Subcomponent][Number]`
+  - Type: E=Error, W=Warning, I=Info
+  - Origin: A=AI Service, F=Frontend, B=Backend
+  - Component: S=Setup, B=Backend, F=Frontend
+  - Subcomponent: Specific module (A=API, M=Model, etc)
+- **CSV Log Format**: Semicolon-delimited for easy database import
+- **Standard Messages**: Automatic fallback with "(standard)" tag
+- **WSL Optimized**: Special path handling for WSL environments
+- **Sync Logging**: Guaranteed log delivery with response validation
+
+## Log Format
+```csv
+timestamp;error_code;explanation;exception;extra
+```
+
+Example:
+```
+2023-08-04 15:30:22;EABS1;Missing required model files;FileNotFoundError;{"missing_files": ["model.bin"]}
+```
+
+## Error Code Structure
+| Segment       | Values      | Description                     |
+|---------------|-------------|---------------------------------|
+| Type (1 char) | E, W, I     | Error, Warning, Info           |
+| Origin (1)    | A, F, B     | AI Service, Frontend, Backend  |
+| Component (1) | S, B, F, X  | Setup, Backend, Frontend, General |
+| Subcomponent  | A-Z, #      | Specific module or # for general |
+| Number (2)    | 00-99       | Unique error ID                |
+
+Example: `EABS1` = Error + AI Service + Backend + Setup + ID 01
+
+## Installation
+```bash
+pip install -e ./projects/ErrorLogger
+```
 
 ## Usage
-
-### Logging an error
+### Python Logging
 ```python
-from ErrorLogger import logger
-logger.log_error('EABA12', message='Something went wrong')
-```
+from ErrorLogger.logger import log_error_remote
 
-### Logging a warning or info
-```python
-logger.log_error('WABA12', message='This is a warning')
-logger.log_error('IABA12', message='Just info')
-```
-
-### Logging a Python exception
-```python
 try:
-    1 / 0
+    # Your code here
 except Exception as e:
-    logger.log_error(0, exception=e)  # Will log with code 00000
+    log_error_remote(
+        "EABB1",
+        message="Inference failed",
+        exception=str(e),
+        extra={"model": "opt-6.7b"}
+    )
 ```
 
-### Automatic interception of uncaught exceptions
-Any uncaught exception will be logged automatically with code `00000` and full traceback.
+### React Logging (Frontend)
+```javascript
+// errorLogger.js
+export function logReactError(code, message, error, extra) {
+  fetch('http://localhost:5001/log', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      error_code: code,
+      message: message,
+      exception: error.toString(),
+      extra: extra
+    })
+  });
+}
 
-### Error code generation
-```python
-code = logger.generate_error_code('E', 'A', 'B', 'A', 12)  # 'EABA12'
-code = logger.generate_error_code('W', 'A', 'F', '', 12)   # 'WAF#12'
-```
-
-### Explanations from config
-Add explanations for error codes in `config.json`:
-```json
-{
-  "EABA12": "AI service backend API error"
+// Usage
+try {
+  // Component logic
+} catch (error) {
+  logReactError('EAFX1', 'UI render failed', error, {component: 'ChatWindow'});
 }
 ```
 
-## Log file location
-A new log file is created in the project root on each boot, named like `errorlog_YYYYMMDD_HHMMSS_mmm.log`.
+### Starting Service
+```bash
+error-logger  # Starts on port 5001
+```
 
 ## Testing
-Run all tests with:
-```
+```bash
 pytest projects/ErrorLogger/test_logger.py
 ```
 
-## Extending
-- Add new error code components in `constants.py`.
-- Add new explanations in `config.json`.
+## Viewing Logs
+Logs are stored in `~/logs/` (WSL) or project root (other systems):
+```bash
+# WSL
+tail -f ~/logs/errorlog_*.csv
 
----
-For more details, see the code and tests in this module.
+# Other
+tail -f errorlog_*.csv
+```
+
+## Adding New Error Codes
+1. Edit `error_codes.py`
+2. Add new codes with explanations
+3. Follow naming convention

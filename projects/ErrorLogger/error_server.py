@@ -3,6 +3,9 @@ from .logger import log_error
 
 app = Flask(__name__)
 
+# Disable CSRF protection since this is an API-only service
+app.config['WTF_CSRF_ENABLED'] = False
+
 
 @app.route('/log', methods=['POST'])
 def log_endpoint():
