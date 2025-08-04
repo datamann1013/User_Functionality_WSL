@@ -6,6 +6,8 @@ ERROR_CODE_DEFINITIONS = {
     # Setup/Model
     "IABS1": "Setup model script started.",
     "IABS2": "All required model files present.",
+    "EABS3": "Missing Hugging Face access token.",
+    "IABS4": "Using Hugging Face Hub API for download.",
     "EABS1": "Missing required model files.",
     "EABS2": "Failed to download model file.",
     "IABS3": "Model file downloaded successfully.",
