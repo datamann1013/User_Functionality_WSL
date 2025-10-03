@@ -35,37 +35,97 @@ def load_config():
     
     return config
 
+import os
+from datetime import datetime, timedelta
+import json
+import threading
+import sys
+import uuid
+import requests
+import glob
+from platform import uname
+
 CONFIG = load_config()
 ERROR_EXPLANATIONS = CONFIG['error_explanations']
 ERRORLOGGER_SERVICE_URL = os.environ.get('ERRORLOGGER_SERVICE_URL', CONFIG['service']['remote_url'])
 
 LOG_FILE_PATH = None
 LOG_FILE_LOCK = threading.Lock()
+LAST_CLEANUP_CHECK = None
 
 
 def get_timestamp():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
+def get_log_directory():
+    """Get the appropriate log directory within the project structure"""
+    # Get the User_Functionality_WSL project root directory
+    # From ErrorLogger/__file__ go up to projects/, then up to project root
+    current_file = os.path.abspath(__file__)
+    errorlogger_dir = os.path.dirname(current_file)  # projects/ErrorLogger/
+    projects_dir = os.path.dirname(errorlogger_dir)  # projects/
+    project_root = os.path.dirname(projects_dir)     # User_Functionality_WSL/
+    
+    log_dir = os.path.join(project_root, 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    return log_dir
+
+
+def cleanup_old_logs():
+    """Remove log files older than retention period"""
+    global LAST_CLEANUP_CHECK
+    
+    # Only check once per day to avoid overhead
+    now = datetime.now()
+    if LAST_CLEANUP_CHECK and (now - LAST_CLEANUP_CHECK).days < 1:
+        return
+    
+    LAST_CLEANUP_CHECK = now
+    retention_days = CONFIG['logging']['log_retention_days']
+    cutoff_date = now - timedelta(days=retention_days)
+    
+    log_dir = get_log_directory()
+    pattern = os.path.join(log_dir, 'errorlog_*.csv')
+    
+    for log_file in glob.glob(pattern):
+        try:
+            file_time = datetime.fromtimestamp(os.path.getmtime(log_file))
+            if file_time < cutoff_date:
+                os.remove(log_file)
+        except OSError:
+            pass  # Ignore errors (file might be in use, etc.)
+
+
+def should_rotate_log():
+    """Check if current log file should be rotated based on size"""
+    if not LOG_FILE_PATH or not os.path.exists(LOG_FILE_PATH):
+        return False
+    
+    try:
+        file_size_mb = os.path.getsize(LOG_FILE_PATH) / (1024 * 1024)
+        max_size_mb = CONFIG['logging']['max_log_file_size_mb']
+        return file_size_mb >= max_size_mb
+    except OSError:
+        return False
+
+
 def _init_log_file():
     global LOG_FILE_PATH
+    
+    log_dir = get_log_directory()
+    
     while True:
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        # Use WSL-friendly path if detected
-        if 'microsoft' in uname().release.lower():
-            root_dir = os.path.expanduser('~/logs')
-            os.makedirs(root_dir, exist_ok=True)
-        else:
-            root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
-
         log_filename = f'errorlog_{timestamp}.csv'
-        log_path = os.path.join(root_dir, log_filename)
+        log_path = os.path.join(log_dir, log_filename)
+        
         if not os.path.exists(log_path):
             LOG_FILE_PATH = log_path
             break
         # If file exists, append a short uuid
         log_filename = f'errorlog_{timestamp}_{uuid.uuid4().hex[:6]}.csv'
-        log_path = os.path.join(root_dir, log_filename)
+        log_path = os.path.join(log_dir, log_filename)
         if not os.path.exists(log_path):
             LOG_FILE_PATH = log_path
             break
@@ -111,9 +171,16 @@ def log_error(error_code, message=None, exception=None, extra=None):
             print(f"  Exception: {exception_str}")
 
     with LOG_FILE_LOCK:
+        # Check if we need to rotate the log file
+        if should_rotate_log():
+            _init_log_file()
+        
         # Ensure file path is initialized
         if LOG_FILE_PATH is None:
             _init_log_file()
+
+        # Periodic cleanup of old logs (low overhead check)
+        cleanup_old_logs()
 
         with open(LOG_FILE_PATH, 'a', encoding='utf-8') as f:
             f.write(log_line + '\n')
@@ -154,6 +221,32 @@ def generate_error_code(level, origin, component, subcomponent, number):
     if not subcomponent:
         subcomponent = '#'
     return f"{level}{origin}{component}{subcomponent}{str(number).zfill(2)}"
+
+
+def get_log_rotation_status():
+    """Get current log rotation status for monitoring/debugging"""
+    status = {
+        'current_log_file': LOG_FILE_PATH,
+        'log_directory': get_log_directory(),
+        'rotation_enabled': True,
+        'max_file_size_mb': CONFIG['logging']['max_log_file_size_mb'],
+        'retention_days': CONFIG['logging']['log_retention_days'],
+        'last_cleanup_check': LAST_CLEANUP_CHECK
+    }
+    
+    if LOG_FILE_PATH and os.path.exists(LOG_FILE_PATH):
+        status['current_file_size_mb'] = round(os.path.getsize(LOG_FILE_PATH) / (1024 * 1024), 2)
+        status['will_rotate_soon'] = should_rotate_log()
+    else:
+        status['current_file_size_mb'] = 0
+        status['will_rotate_soon'] = False
+    
+    # Count log files in directory
+    log_dir = get_log_directory()
+    pattern = os.path.join(log_dir, 'errorlog_*.csv')
+    status['total_log_files'] = len(glob.glob(pattern))
+    
+    return status
 
 
 def _exception_hook(exc_type, exc_value, exc_traceback):

@@ -60,6 +60,11 @@ The logger uses `config.json` for settings. Example configuration:
 }
 ```
 
+**Log Rotation**: Automatic size-based rotation with time-based cleanup
+- Files rotate when they reach `max_log_file_size_mb` (default: 10MB)
+- Old files auto-delete after `log_retention_days` (default: 30 days)
+- Cleanup runs once daily (low overhead)
+
 **Fallback**: If `config.json` is missing or incomplete, the system automatically falls back to `error_codes.py` definitions.
 
 **Debug Mode**: Set `enable_console_debug: true` in config or use `DEBUG=1` environment variable for console output.
@@ -115,13 +120,27 @@ pytest projects/ErrorLogger/test_logger.py
 ```
 
 ## Viewing Logs
-Logs are stored in `~/logs/` (WSL) or project root (other systems):
+Logs are stored in the `logs/` directory within the project:
 ```bash
-# WSL
-tail -f ~/logs/errorlog_*.csv
+# View all logs
+tail -f logs/errorlog_*.csv
 
-# Other
-tail -f errorlog_*.csv
+# View latest log file only
+tail -f $(ls -t logs/errorlog_*.csv | head -1)
+
+# View logs from project root
+cd /path/to/User_Functionality_WSL
+tail -f logs/errorlog_*.csv
+```
+
+## Log Rotation Monitoring
+```python
+from ErrorLogger.logger import get_log_rotation_status
+
+status = get_log_rotation_status()
+print(f"Current file: {status['current_file_size_mb']}MB")
+print(f"Will rotate: {status['will_rotate_soon']}")
+print(f"Total files: {status['total_log_files']}")
 ```
 
 ## Adding New Error Codes
