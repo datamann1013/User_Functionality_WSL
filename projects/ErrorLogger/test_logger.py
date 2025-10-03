@@ -17,12 +17,15 @@ def get_latest_log_file():
 
 
 def test_csv_file_creation_and_format():
-    # Clean existing logs
+    # Clean existing logs and reset logger state
     log_dir = os.path.expanduser('~/logs') if 'microsoft' in os.uname().release.lower() else os.path.abspath(
         os.path.join(os.path.dirname(__file__), '../../..'))
     pattern = os.path.join(log_dir, 'errorlog_*.csv')
     for f in glob.glob(pattern):
         os.remove(f)
+
+    # Reset the logger's log file path to force reinitialization
+    logger.LOG_FILE_PATH = None
 
     # Test log
     logger.log_error('TEST01', message="Test error", exception="Test exception", extra={"key": "value"})
@@ -66,5 +69,25 @@ def test_standard_message_fallback():
     parts = last_line.split(';', 4)
     assert len(parts) >= 3
     assert "(standard)" in parts[2]
+
+
+def test_config_integration():
+    """Test that configuration is loaded properly"""
+    # Test that CONFIG is loaded
+    assert hasattr(logger, 'CONFIG')
+    assert 'error_explanations' in logger.CONFIG
+    assert 'logging' in logger.CONFIG
+    assert 'service' in logger.CONFIG
+    
+    # Test that error explanations work
+    assert len(logger.CONFIG['error_explanations']) > 0
+    
+    # Test a known error code
+    explanation = logger.get_explanation('EABS1')
+    assert explanation == "Missing required model files"
+    
+    # Test fallback for unknown code
+    explanation = logger.get_explanation('UNKNOWN123')
+    assert "(standard)" in explanation
 
 # Add more tests as needed...

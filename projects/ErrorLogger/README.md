@@ -39,6 +39,31 @@ Example: `EABS1` = Error + AI Service + Backend + Setup + ID 01
 pip install -e ./projects/ErrorLogger
 ```
 
+## Configuration
+The logger uses `config.json` for settings. Example configuration:
+```json
+{
+  "error_explanations": {
+    "EABS1": "Missing required model files",
+    "EABB1": "Inference failed - model loading issue"
+  },
+  "logging": {
+    "enable_console_debug": false,
+    "log_retention_days": 30,
+    "max_log_file_size_mb": 10
+  },
+  "service": {
+    "remote_url": "http://localhost:5001/log",
+    "timeout_seconds": 5,
+    "retry_attempts": 1
+  }
+}
+```
+
+**Fallback**: If `config.json` is missing or incomplete, the system automatically falls back to `error_codes.py` definitions.
+
+**Debug Mode**: Set `enable_console_debug: true` in config or use `DEBUG=1` environment variable for console output.
+
 ## Usage
 ### Python Logging
 ```python

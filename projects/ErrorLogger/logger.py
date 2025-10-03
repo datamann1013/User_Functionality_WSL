@@ -7,24 +7,40 @@ import uuid
 import requests
 from platform import uname
 
-# Add this missing environment variable definition
-ERRORLOGGER_SERVICE_URL = os.environ.get('ERRORLOGGER_SERVICE_URL', 'http://localhost:5001/log')
+# Load configuration with fallback
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config.json')
+
+def load_config():
+    """Load config with fallback to error_codes.py"""
+    config = {
+        'error_explanations': {},
+        'logging': {'enable_console_debug': False, 'log_retention_days': 30, 'max_log_file_size_mb': 10},
+        'service': {'remote_url': 'http://localhost:5001/log', 'timeout_seconds': 5, 'retry_attempts': 1}
+    }
+    
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+                config.update(json.load(f))
+        except (json.JSONDecodeError, IOError):
+            pass  # Use defaults
+    
+    # Fallback to error_codes.py if no explanations in config
+    if not config['error_explanations']:
+        try:
+            from .error_codes import ERROR_CODE_DEFINITIONS
+            config['error_explanations'] = ERROR_CODE_DEFINITIONS
+        except ImportError:
+            pass
+    
+    return config
+
+CONFIG = load_config()
+ERROR_EXPLANATIONS = CONFIG['error_explanations']
+ERRORLOGGER_SERVICE_URL = os.environ.get('ERRORLOGGER_SERVICE_URL', CONFIG['service']['remote_url'])
 
 LOG_FILE_PATH = None
 LOG_FILE_LOCK = threading.Lock()
-
-# Load explanations from config file (JSON)
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config.json')
-
-
-def load_explanations():
-    if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return {}
-
-
-ERROR_EXPLANATIONS = load_explanations()
 
 
 def get_timestamp():
@@ -88,6 +104,12 @@ def log_error(error_code, message=None, exception=None, extra=None):
     # CSV format: timestamp;error_code;explanation;exception;extra
     log_line = f"{timestamp};{error_code};{explanation};{exception_str};{extra_str}"
 
+    # Console debug output if enabled
+    if CONFIG['logging']['enable_console_debug'] or os.getenv('DEBUG'):
+        print(f"[{timestamp}] {error_code}: {explanation}")
+        if exception_str:
+            print(f"  Exception: {exception_str}")
+
     with LOG_FILE_LOCK:
         # Ensure file path is initialized
         if LOG_FILE_PATH is None:
@@ -106,11 +128,12 @@ def log_error_remote(error_code, message=None, exception=None, extra=None):
         'extra': extra
     }
     try:
-        # Synchronous call with timeout
+        # Use config settings for timeout and retry
+        timeout = CONFIG['service']['timeout_seconds']
         response = requests.post(
-            ERRORLOGGER_SERVICE_URL,  # Now defined
+            ERRORLOGGER_SERVICE_URL,
             json=payload,
-            timeout=5
+            timeout=timeout
         )
 
         if response.status_code != 200:

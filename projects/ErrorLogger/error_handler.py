@@ -1,5 +1,5 @@
 from .error_codes import ERROR_CODE_DEFINITIONS
-from .logger import log_error_remote
+from .logger import log_error_remote, CONFIG
 import sys
 import traceback
 
@@ -9,7 +9,11 @@ def get_error_explanation(error_code, custom_message=None):
     if custom_message:
         return custom_message
 
-    explanation = ERROR_CODE_DEFINITIONS.get(error_code)
+    # Try config first, then error_codes.py
+    explanation = CONFIG['error_explanations'].get(error_code)
+    if not explanation:
+        explanation = ERROR_CODE_DEFINITIONS.get(error_code)
+    
     if explanation:
         return explanation
 
