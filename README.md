@@ -14,7 +14,7 @@ independently or together.
 
 ```bash
 # One-command setup and start
-./install.sh && ./start_ai_service.sh
+./projects/ai_service/start_ai_service.sh
 ```
 
 🎯 **See [QUICK_START.md](QUICK_START.md) for detailed instructions**
