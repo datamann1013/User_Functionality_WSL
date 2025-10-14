@@ -298,10 +298,6 @@ body {
   border-top-left-radius: 4px;
 }
 
-.message.user .message-content {
-  background-color: var(--primary-purple);
-}
-
 .message-text {
   line-height: 1.5;
   white-space: pre-wrap;
@@ -629,14 +625,6 @@ body {
   margin-bottom: 1rem;
 }
 
-.message.user {
-  justify-content: flex-end;
-}
-
-.message.ai {
-  justify-content: flex-start;
-}
-
 .message-content {
   max-width: 70%;
   padding: 1rem 1.5rem;
@@ -645,15 +633,7 @@ body {
   white-space: pre-wrap;
 }
 
-.message.user .message-content {
-  background: #3b82f6;
-  color: white;
-}
 
-.message.ai .message-content {
-  background: #374151;
-  color: #f3f4f6;
-}
 
 .input-area {
   padding: 1.5rem 2rem;
