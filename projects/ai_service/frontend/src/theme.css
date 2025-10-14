@@ -171,18 +171,20 @@ body {
 }
 
 .status {
-  padding: 2px 8px;
-  border-radius: 2px;
+  padding: 5px 0 3px 0 !important;
+  border-radius: 3px;
   font-weight: 500;
   text-transform: capitalize;
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1;
-  width: 50px;
+  width: 55px;
   text-align: center;
-  height: 16px;
+  height: 22px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  box-sizing: border-box;
+  border: none !important;
 }
 
 .status.idle {
