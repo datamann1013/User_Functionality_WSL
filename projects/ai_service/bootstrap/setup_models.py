@@ -1,9 +1,10 @@
 import sys
 import os
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+# Import error codes with fallback
 try:
-    from projects.ErrorLogger.error_codes import ERROR_CODE_DEFINITIONS
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+    from ErrorLogger.error_codes import ERROR_CODE_DEFINITIONS
 except ImportError:
     ERROR_CODE_DEFINITIONS = {
         "IABS1": "Setup model script started.",
@@ -24,16 +25,16 @@ from transformers import AutoConfig
 REGISTRY_PATH = os.path.join(os.path.dirname(__file__), '../backend/registry/models.json')
 MODELS_DIR = os.path.join(os.path.dirname(__file__), '../backend/models')
 DEFAULT_MODEL = {
-    "id": "opt-6.7b",
-    "name": "OPT 6.7B",
+    "id": "gpt2",
+    "name": "GPT-2 (Small)",
     "icon": "🤖",
     "state": "online",
     "version": "v1.0"
 }
 ERRORLOGGER_SERVICE_URL = os.environ.get('ERRORLOGGER_SERVICE_URL', 'http://localhost:5001/log')
 
-# Use a publicly accessible model that doesn't require authentication
-MODEL_HF_ID = "facebook/opt-6.7b"
+# Use a small, fast-downloading model for testing
+MODEL_HF_ID = "gpt2"  # This is much smaller (~500MB) than OPT-6.7B (~13GB)
 
 
 def is_wsl():
@@ -108,6 +109,15 @@ def download_model_with_hf(model_dir, debug=False):
         return False
 
 
+def save_registry_with_default(debug=False):
+    """Save registry with default model (without downloading)"""
+    os.makedirs(os.path.dirname(REGISTRY_PATH), exist_ok=True)
+    with open(REGISTRY_PATH, 'w', encoding='utf-8') as f:
+        json.dump([DEFAULT_MODEL], f, indent=2)
+    if debug:
+        print(f"Registry saved at {REGISTRY_PATH} with default model")
+
+
 def ensure_online_model(debug=False):
     models = [DEFAULT_MODEL]
     with open(REGISTRY_PATH, 'w', encoding='utf-8') as f:
@@ -149,4 +159,10 @@ def ensure_online_model(debug=False):
 
 if __name__ == "__main__":
     debug = "--debug" in sys.argv
-    ensure_online_model(debug=debug)
+    skip_download = "--skip-download" in sys.argv
+    
+    if skip_download:
+        print("⚠️  Model download skipped. Only setting up registry.")
+        save_registry_with_default(debug=debug)
+    else:
+        ensure_online_model(debug=debug)

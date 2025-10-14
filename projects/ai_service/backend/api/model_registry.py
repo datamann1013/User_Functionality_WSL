@@ -1,8 +1,19 @@
 from flask import Blueprint, jsonify, request, current_app
 import os
+import sys
 import json
 import logging
-from projects.ErrorLogger.logger import log_error_remote
+
+# Import ErrorLogger with fallback
+try:
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
+    from ErrorLogger.logger import log_error_remote
+except ImportError:
+    # Fallback if ErrorLogger not available
+    def log_error_remote(error_code, message=None, exception=None, extra=None):
+        print(f"[ERROR] {error_code}: {message or 'Unknown error'}")
+        if exception:
+            print(f"[EXCEPTION] {exception}")
 
 # Create Blueprint
 registry_bp = Blueprint('registry', __name__)

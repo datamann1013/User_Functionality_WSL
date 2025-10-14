@@ -3,6 +3,20 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# AI Service Platform specific
+.service_pids
+*.log
+errorlog_*.csv
+projects/ai_service/backend/models/
+projects/ai_service/backend/cache/
+projects/ai_service/frontend/node_modules/
+projects/ai_service/frontend/build/
+projects/ai_service/frontend/.eslintcache
+
+# Environment files (keep .example files)
+.env
+!.env.example
+
 # C extensions
 *.so
 

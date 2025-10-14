@@ -1,0 +1,2 @@
+{"timestamp":"2025-10-14T16:29:01.232029","error_code":"AI_SERVICE_STARTUP","message":"AI Service starting up","exception":null,"extra":{},"service":"ai_service"}
+{"timestamp":"2025-10-14T16:29:02.070792","error_code":"AI_HEALTH_CHECK","message":"Health check requested","exception":null,"extra":{},"service":"ai_service"}

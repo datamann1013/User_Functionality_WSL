@@ -2,6 +2,10 @@ import os
 from flask import Flask, request, jsonify
 import sys
 import argparse
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Add parent directory to path for proper imports
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -42,4 +46,9 @@ if __name__ == '__main__':
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     args = parser.parse_args()
 
-    app.run(host='0.0.0.0', port=5001, debug=args.debug)
+    # Get configuration from environment
+    host = os.environ.get('ERRORLOGGER_HOST', '0.0.0.0')
+    port = int(os.environ.get('ERRORLOGGER_PORT', '5001'))
+    debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true' or args.debug
+
+    app.run(host=host, port=port, debug=debug)

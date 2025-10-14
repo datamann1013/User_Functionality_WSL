@@ -1,9 +1,20 @@
 import os
+import sys
 import torch
 from flask import Blueprint, request, jsonify, current_app
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-from projects.ErrorLogger.logger import log_error_remote
 import logging
+
+# Import ErrorLogger with fallback
+try:
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
+    from ErrorLogger.logger import log_error_remote
+except ImportError:
+    # Fallback if ErrorLogger not available
+    def log_error_remote(error_code, message=None, exception=None, extra=None):
+        print(f"[ERROR] {error_code}: {message or 'Unknown error'}")
+        if exception:
+            print(f"[EXCEPTION] {exception}")
 
 inference_bp = Blueprint('inference', __name__)
 

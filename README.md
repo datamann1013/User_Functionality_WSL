@@ -5,6 +5,35 @@
 This repository is a growing set of small, focused systems that improve the experience of using
 Linux under Windows. Each tool lives in its own folder under `projects/`, and can be used 
 independently or together.
+
+---
+
+## 🚀 Quick Start - AI Service Platform
+
+**New!** Complete AI service platform with chat interface and error logging:
+
+```bash
+# One-command setup and start
+./install.sh && ./start_ai_service.sh
+```
+
+🎯 **See [QUICK_START.md](QUICK_START.md) for detailed instructions**
+
+---
+
+## 🧩 What You'll Find Here
+
+- 🤖 [ai_service/](projects/ai_service/) — Complete AI platform with chat interface, model management, and API
+- 🔍 [ErrorLogger/](projects/ErrorLogger/) — Centralized error logging and monitoring system  
+- 🪟 [hidden_toolbar/](projects/hidden_toolbar/README.md) — A hover-activated launcher bump for Openbox
+
+---ionality WSL
+
+**A modular collection of quality-of-life tools for users combining Windows and Linux (WSL2).**
+
+This repository is a growing set of small, focused systems that improve the experience of using
+Linux under Windows. Each tool lives in its own folder under `projects/`, and can be used 
+independently or together.
 ---
 
 ## 🧩 What You’ll Find Here

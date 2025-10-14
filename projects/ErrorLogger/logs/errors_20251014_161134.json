@@ -1,0 +1,2 @@
+{"timestamp": "2025-10-14T16:11:34.004012", "error_code": "MVP_CHAT_REQUEST", "message": "Chat request received: \"Hello, AI!...\"", "exception": null, "extra": {"service": "ai_backend_mvp"}}
+{"timestamp": "2025-10-14T16:11:34.006859", "error_code": "MVP_CHAT_RESPONSE", "message": "Response generated: \"Hello! I'm the AI Service MVP. How can I help you ...\"", "exception": null, "extra": {"service": "ai_backend_mvp"}}
