@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
-AI Service Backend
-Connects to existing ErrorLogger service for logging
+AI Service Backend - Simplified
+Connects to ErrorLogger service for logging
 """
 import os
 import sys
-import json
 import random
 import argparse
 import requests
 from datetime import datetime
-from flask import Flask, request, jsonify, send_from_directory, render_template_string
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 
@@ -23,9 +22,6 @@ CORS(app)  # Enable CORS for frontend
 # Configuration
 ERRORLOGGER_URL = os.environ.get('ERRORLOGGER_SERVICE_URL', 'http://127.0.0.1:5001/log')
 SERVICE_NAME = 'ai_service'
-MODELS_FILE = os.path.join(os.path.dirname(__file__), 'models.json')
-FRONTEND_BUILD_DIR = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'build')
-FRONTEND_STATIC_DIR = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'build', 'static')
 
 # Error logging helper
 def log_to_errorlogger(error_code, message=None, exception=None, extra=None):
@@ -44,100 +40,44 @@ def log_to_errorlogger(error_code, message=None, exception=None, extra=None):
         # Fail silently if ErrorLogger unavailable
         return False
 
-# Mock AI responses for MVP
+# Mock AI responses for demonstration
 MOCK_RESPONSES = [
     "I'm an AI assistant running in demonstration mode. How can I help you?",
     "This is a test response from the AI service backend.",
-    "Hello! I'm here to demonstrate the AI service functionality.",
-    "I understand you're testing the system. Everything appears to be working correctly.",
-    "Welcome to the AI service! This is a simulated response for testing.",
-    "Thank you for testing the AI backend. The service is operational.",
+    "I'm here to demonstrate the chat functionality. What would you like to know?",
+    "The AI service is working correctly and integrated with error logging.",
+    "Thanks for testing the system! Everything appears to be functioning properly."
 ]
-
-# Model management
-def load_models():
-    """Load models from JSON file"""
-    try:
-        if os.path.exists(MODELS_FILE):
-            with open(MODELS_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-    except Exception as e:
-        log_to_errorlogger('AI_MODEL_LOAD_ERROR', f'Failed to load models: {e}', e)
-    
-    # Default model
-    return [{
-        'id': 'demo-assistant',
-        'name': 'Demo Assistant',
-        'icon': '🤖',
-        'state': 'online',
-        'version': '1.0.0',
-        'description': 'Demonstration AI assistant'
-    }]
-
-def save_models(models):
-    """Save models to JSON file"""
-    try:
-        with open(MODELS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(models, f, indent=2)
-        return True
-    except Exception as e:
-        log_to_errorlogger('AI_MODEL_SAVE_ERROR', f'Failed to save models: {e}', e)
-        return False
-
-# Initialize models
-if not os.path.exists(MODELS_FILE):
-    save_models(load_models())
-
-# Frontend serving routes
-@app.route('/')
-def serve_frontend():
-    """Serve the React frontend"""
-    try:
-        if os.path.exists(os.path.join(FRONTEND_BUILD_DIR, 'index.html')):
-            return send_from_directory(FRONTEND_BUILD_DIR, 'index.html')
-        else:
-            return jsonify({'error': 'Frontend not built. Run: cd frontend && npm run build'}), 404
-    except Exception as e:
-        log_to_errorlogger('FRONTEND_SERVE_ERROR', f'Failed to serve frontend: {e}', e)
-        return jsonify({'error': 'Frontend not available'}), 500
-
-@app.route('/static/<path:filename>')
-def serve_static(filename):
-    """Serve static files for React frontend"""
-    try:
-        return send_from_directory(FRONTEND_STATIC_DIR, filename)
-    except Exception:
-        return jsonify({'error': 'Static file not found'}), 404
 
 @app.route('/api/log-frontend-error', methods=['POST'])
 def log_frontend_error():
-    """Log errors from frontend to ErrorLogger"""
+    """Receive error logs from frontend and forward to ErrorLogger"""
     try:
         data = request.get_json()
-        error_code = data.get('error_code', 'FRONTEND_ERROR')
-        message = data.get('message', 'Frontend error')
-        extra = data.get('extra', {})
-        exception = data.get('exception')
         
-        # Add frontend context
-        extra.update({
-            'source': 'frontend',
-            'user_agent': request.headers.get('User-Agent', ''),
-            'ip': request.remote_addr
-        })
+        # Forward to ErrorLogger with frontend context
+        success = log_to_errorlogger(
+            error_code=data.get('error_code', 'FRONTEND_ERROR'),
+            message=data.get('message', 'Frontend error occurred'),
+            exception=data.get('exception'),
+            extra={
+                **data.get('extra', {}),
+                'source': 'frontend'
+            }
+        )
         
-        log_to_errorlogger(error_code, message, exception, extra)
-        return jsonify({'status': 'logged'})
-        
+        if success:
+            return jsonify({'status': 'logged'})
+        else:
+            return jsonify({'status': 'failed', 'reason': 'ErrorLogger unavailable'}), 503
+            
     except Exception as e:
-        log_to_errorlogger('FRONTEND_LOG_ERROR', f'Failed to log frontend error: {e}', e)
-        return jsonify({'error': 'Failed to log error'}), 500
+        print(f"Error processing frontend log: {e}")
+        return jsonify({'error': 'Failed to process error log'}), 500
 
 @app.route('/health', methods=['GET'])
 def health():
-    """Health check endpoint"""
-    log_to_errorlogger('AI_HEALTH_CHECK', 'Health check requested')
-    
+    """Health check endpoint"""    
     # Check ErrorLogger connectivity
     errorlogger_status = 'disconnected'
     try:
@@ -151,20 +91,8 @@ def health():
         'status': 'ok',
         'service': SERVICE_NAME,
         'timestamp': datetime.now().isoformat(),
-        'models_available': len(load_models()),
         'errorlogger_status': errorlogger_status
     })
-
-@app.route('/api/models', methods=['GET'])
-def list_models():
-    """List available models"""
-    try:
-        models = load_models()
-        log_to_errorlogger('AI_MODELS_LISTED', f'{len(models)} models retrieved')
-        return jsonify(models)
-    except Exception as e:
-        log_to_errorlogger('AI_MODELS_ERROR', 'Failed to list models', e)
-        return jsonify({'error': 'Failed to list models'}), 500
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
@@ -172,13 +100,13 @@ def chat():
     try:
         data = request.get_json()
         message = data.get('message', '').strip()
-        model_id = data.get('model_id', 'demo-assistant')
+        agent_id = data.get('agent_id', 'assistant-1')
         
         if not message:
             return jsonify({'error': 'Message is required'}), 400
         
         log_to_errorlogger('AI_CHAT_REQUEST', f'Chat request: "{message[:50]}..."', 
-                          extra={'model_id': model_id, 'message_length': len(message)})
+                          extra={'agent_id': agent_id, 'message_length': len(message)})
         
         # Generate contextual response
         message_lower = message.lower()
@@ -193,50 +121,19 @@ def chat():
         
         result = {
             'response': response,
-            'model_id': model_id,
+            'agent_id': agent_id,
             'timestamp': datetime.now().isoformat(),
             'mode': 'demonstration'
         }
         
         log_to_errorlogger('AI_CHAT_RESPONSE', f'Response sent: "{response[:50]}..."',
-                          extra={'model_id': model_id, 'response_length': len(response)})
+                          extra={'agent_id': agent_id, 'response_length': len(response)})
         
         return jsonify(result)
         
     except Exception as e:
         log_to_errorlogger('AI_CHAT_ERROR', 'Chat request failed', e)
         return jsonify({'error': 'Chat request failed', 'details': str(e)}), 500
-
-@app.route('/api/inference', methods=['POST'])
-def inference():
-    """Inference endpoint for direct model interaction"""
-    try:
-        data = request.get_json()
-        prompt = data.get('prompt', '').strip()
-        model_id = data.get('model_id', 'demo-assistant')
-        
-        if not prompt:
-            return jsonify({'error': 'Prompt is required'}), 400
-        
-        log_to_errorlogger('AI_INFERENCE_REQUEST', f'Inference request: "{prompt[:50]}..."',
-                          extra={'model_id': model_id, 'prompt_length': len(prompt)})
-        
-        # Mock inference response
-        response_text = f"[Demo Response] {random.choice(MOCK_RESPONSES)}"
-        
-        result = {
-            'generated_text': response_text,
-            'model_id': model_id,
-            'timestamp': datetime.now().isoformat(),
-            'mode': 'demonstration'
-        }
-        
-        log_to_errorlogger('AI_INFERENCE_RESPONSE', f'Inference completed for model: {model_id}')
-        return jsonify(result)
-        
-    except Exception as e:
-        log_to_errorlogger('AI_INFERENCE_ERROR', 'Inference failed', e)
-        return jsonify({'error': 'Inference failed', 'details': str(e)}), 500
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='AI Service Backend')
@@ -249,7 +146,6 @@ if __name__ == '__main__':
     print(f"🤖 Starting AI Service Backend")
     print(f"   Host: {args.host}:{args.port}")
     print(f"   ErrorLogger: {ERRORLOGGER_URL}")
-    print(f"   Models: {len(load_models())} available")
     
     # Test ErrorLogger connection
     if log_to_errorlogger('AI_SERVICE_STARTUP', 'AI Service starting up'):

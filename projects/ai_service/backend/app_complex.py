@@ -10,18 +10,22 @@ import random
 import argparse
 import requests
 from datetime import datetime
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory, render_template_string
+from flask_cors import CORS
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
+CORS(app)  # Enable CORS for frontend
 
 # Configuration
 ERRORLOGGER_URL = os.environ.get('ERRORLOGGER_SERVICE_URL', 'http://127.0.0.1:5001/log')
 SERVICE_NAME = 'ai_service'
 MODELS_FILE = os.path.join(os.path.dirname(__file__), 'models.json')
+FRONTEND_BUILD_DIR = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'build')
+FRONTEND_STATIC_DIR = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'build', 'static')
 
 # Error logging helper
 def log_to_errorlogger(error_code, message=None, exception=None, extra=None):
@@ -83,6 +87,51 @@ def save_models(models):
 # Initialize models
 if not os.path.exists(MODELS_FILE):
     save_models(load_models())
+
+# Frontend serving routes
+@app.route('/')
+def serve_frontend():
+    """Serve the React frontend"""
+    try:
+        if os.path.exists(os.path.join(FRONTEND_BUILD_DIR, 'index.html')):
+            return send_from_directory(FRONTEND_BUILD_DIR, 'index.html')
+        else:
+            return jsonify({'error': 'Frontend not built. Run: cd frontend && npm run build'}), 404
+    except Exception as e:
+        log_to_errorlogger('FRONTEND_SERVE_ERROR', f'Failed to serve frontend: {e}', e)
+        return jsonify({'error': 'Frontend not available'}), 500
+
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    """Serve static files for React frontend"""
+    try:
+        return send_from_directory(FRONTEND_STATIC_DIR, filename)
+    except Exception:
+        return jsonify({'error': 'Static file not found'}), 404
+
+@app.route('/api/log-frontend-error', methods=['POST'])
+def log_frontend_error():
+    """Log errors from frontend to ErrorLogger"""
+    try:
+        data = request.get_json()
+        error_code = data.get('error_code', 'FRONTEND_ERROR')
+        message = data.get('message', 'Frontend error')
+        extra = data.get('extra', {})
+        exception = data.get('exception')
+        
+        # Add frontend context
+        extra.update({
+            'source': 'frontend',
+            'user_agent': request.headers.get('User-Agent', ''),
+            'ip': request.remote_addr
+        })
+        
+        log_to_errorlogger(error_code, message, exception, extra)
+        return jsonify({'status': 'logged'})
+        
+    except Exception as e:
+        log_to_errorlogger('FRONTEND_LOG_ERROR', f'Failed to log frontend error: {e}', e)
+        return jsonify({'error': 'Failed to log error'}), 500
 
 @app.route('/health', methods=['GET'])
 def health():
