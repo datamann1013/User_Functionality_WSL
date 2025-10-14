@@ -47,14 +47,14 @@ function App() {
     {
       id: "assistant-1",
       name: "General Assistant",
-      status: "online",
+      status: "idle",
       lastActive: new Date().toISOString(),
       avatar: null
     },
     {
       id: "code-helper",
       name: "Code Helper",
-      status: "idle",
+      status: "busy",
       lastActive: new Date(Date.now() - 1800000).toISOString(), // 30 min ago
       avatar: null
     },
@@ -246,11 +246,11 @@ function App() {
                 <div className="agent-info">
                   <div className="agent-name">{agent.name}</div>
                   <div className="agent-meta">
-                    <span className={`status ${agent.status}`}>
-                      {agent.status}
-                    </span>
                     <span className="downtime">
                       {calculateDowntime(agent.lastActive)}
+                    </span>
+                    <span className={`status ${agent.status}`}>
+                      {agent.status}
                     </span>
                   </div>
                 </div>

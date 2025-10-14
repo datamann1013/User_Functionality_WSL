@@ -78,7 +78,7 @@ body {
 
 /* Agents Sidebar */
 .agents-sidebar {
-  width: 300px;
+  width: 350px;
   background-color: var(--mid-grey);
   border-right: 1px solid var(--border-grey);
   display: flex;
@@ -94,9 +94,9 @@ body {
 .agent-item {
   display: flex;
   align-items: center;
-  padding: 12px;
-  margin-bottom: 8px;
-  border-radius: 8px;
+  padding: 16px 12px;
+  margin-bottom: 4px;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
   background-color: transparent;
@@ -125,60 +125,73 @@ body {
 }
 
 .agent-avatar {
-  width: 48px;
-  height: 48px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 600;
-  font-size: 18px;
+  font-size: 14px;
   color: white;
-  margin-right: 12px;
+  margin-right: 8px;
   flex-shrink: 0;
 }
 
 .create-avatar {
   background-color: var(--border-grey) !important;
-  font-size: 24px;
+  font-size: 16px;
   color: var(--text-medium);
 }
 
 .agent-info {
   flex: 1;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .agent-name {
   font-weight: 500;
   color: var(--text-light);
-  margin-bottom: 4px;
   text-overflow: ellipsis;
   white-space: nowrap;
   overflow: hidden;
+  flex: 1;
+  font-size: 14px;
 }
 
 .agent-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 12px;
+  gap: 6px;
+  font-size: 10px;
+  flex-shrink: 0;
 }
 
 .status {
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: 2px 8px;
+  border-radius: 2px;
   font-weight: 500;
   text-transform: capitalize;
+  font-size: 9px;
+  line-height: 1;
+  width: 50px;
+  text-align: center;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.status.online {
+.status.idle {
   background-color: var(--online);
   color: white;
 }
 
-.status.idle {
-  background-color: var(--idle);
+.status.busy {
+  background-color: var(--error);
   color: white;
 }
 
@@ -194,6 +207,7 @@ body {
 
 .downtime {
   color: var(--text-dim);
+  font-size: 9px;
 }
 
 /* Chat Main Area */
