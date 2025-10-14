@@ -5,11 +5,13 @@ import json
 
 
 def get_latest_log_file():
-    if 'microsoft' in os.uname().release.lower():
-        log_dir = os.path.expanduser('~/logs')
-    else:
-        log_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
-
+    # Get project root and logs directory (same logic as logger.py)
+    current_file = os.path.abspath(__file__)
+    errorlogger_dir = os.path.dirname(current_file)  # projects/ErrorLogger/
+    projects_dir = os.path.dirname(errorlogger_dir)  # projects/
+    project_root = os.path.dirname(projects_dir)     # User_Functionality_WSL/
+    log_dir = os.path.join(project_root, 'logs')
+    
     files = glob.glob(os.path.join(log_dir, 'errorlog_*.csv'))
     if not files:
         return None
@@ -17,12 +19,19 @@ def get_latest_log_file():
 
 
 def test_csv_file_creation_and_format():
-    # Clean existing logs
-    log_dir = os.path.expanduser('~/logs') if 'microsoft' in os.uname().release.lower() else os.path.abspath(
-        os.path.join(os.path.dirname(__file__), '../../..'))
+    # Clean existing logs and reset logger state - use same logic as get_latest_log_file
+    current_file = os.path.abspath(__file__)
+    errorlogger_dir = os.path.dirname(current_file)
+    projects_dir = os.path.dirname(errorlogger_dir)
+    project_root = os.path.dirname(projects_dir)
+    log_dir = os.path.join(project_root, 'logs')
+    
     pattern = os.path.join(log_dir, 'errorlog_*.csv')
     for f in glob.glob(pattern):
         os.remove(f)
+
+    # Reset the logger's log file path to force reinitialization
+    logger.LOG_FILE_PATH = None
 
     # Test log
     logger.log_error('TEST01', message="Test error", exception="Test exception", extra={"key": "value"})
@@ -66,5 +75,52 @@ def test_standard_message_fallback():
     parts = last_line.split(';', 4)
     assert len(parts) >= 3
     assert "(standard)" in parts[2]
+
+
+def test_config_integration():
+    """Test that configuration is loaded properly"""
+    # Test that CONFIG is loaded
+    assert hasattr(logger, 'CONFIG')
+    assert 'error_explanations' in logger.CONFIG
+    assert 'logging' in logger.CONFIG
+    assert 'service' in logger.CONFIG
+    
+    # Test that error explanations work
+    assert len(logger.CONFIG['error_explanations']) > 0
+    
+    # Test a known error code
+    explanation = logger.get_explanation('EABS1')
+    assert explanation == "Missing required model files"
+    
+    # Test fallback for unknown code
+    explanation = logger.get_explanation('UNKNOWN123')
+    assert "(standard)" in explanation
+
+
+def test_log_rotation_status():
+    """Test log rotation status reporting"""
+    # Reset logger state
+    logger.LOG_FILE_PATH = None
+    
+    # Create a log entry to initialize
+    logger.log_error('TEST_ROTATION', message="Testing rotation status")
+    
+    # Get rotation status
+    status = logger.get_log_rotation_status()
+    
+    # Verify status structure
+    assert 'current_log_file' in status
+    assert 'log_directory' in status
+    assert 'max_file_size_mb' in status
+    assert 'retention_days' in status
+    assert 'current_file_size_mb' in status
+    assert 'will_rotate_soon' in status
+    assert 'total_log_files' in status
+    
+    # Verify reasonable values
+    assert status['max_file_size_mb'] > 0
+    assert status['retention_days'] > 0
+    assert status['current_file_size_mb'] >= 0
+    assert status['total_log_files'] >= 1  # At least the file we just created
 
 # Add more tests as needed...
