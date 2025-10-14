@@ -1,8 +1,6 @@
 #!/bin/bash
-"""
-ErrorLogger Service Startup Script
-Standalone service for modular architecture
-"""
+# ErrorLogger Service Startup Script
+# Standalone service for modular architecture
 
 set -e
 

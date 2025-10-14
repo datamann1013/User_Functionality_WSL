@@ -1,8 +1,6 @@
 #!/bin/bash
-"""
-AI Service Startup Script (Modular Architecture)
-Connects to existing ErrorLogger service
-"""
+# AI Service Startup Script (Modular Architecture)
+# Connects to existing ErrorLogger service
 
 set -e
 

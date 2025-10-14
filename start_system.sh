@@ -1,8 +1,6 @@
 #!/bin/bash
-"""
-Main System Startup Script
-Modular Architecture - Start ErrorLogger and AI Service
-"""
+# Main System Startup Script
+# Modular Architecture - Start ErrorLogger and AI Service
 
 set -e
 
@@ -26,25 +24,30 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 # Parse command line arguments
 START_ERRORLOGGER=true
 START_AI_SERVICE=true
+START_FRONTEND=false
 BACKGROUND=false
 
 show_help() {
     echo "Usage: $0 [OPTIONS]"
-    echo "Start the modular system with ErrorLogger and AI Service"
+    echo "Start the modular system with ErrorLogger, AI Service, and Frontend"
     echo ""
     echo "Options:"
     echo "  --no-errorlogger  Don't start ErrorLogger service"
     echo "  --no-ai-service   Don't start AI Service"
+    echo "  --no-frontend     Don't start Frontend (default)"
+    echo "  --with-frontend   Start Frontend development server"
     echo "  --errorlogger-only Start only ErrorLogger service"
     echo "  --ai-service-only Start only AI Service"
+    echo "  --frontend-only   Start only Frontend"
     echo "  --background      Start services in background"
     echo "  --help            Show this help"
     echo ""
     echo "Examples:"
-    echo "  $0                      # Start both services"
-    echo "  $0 --errorlogger-only   # Start only ErrorLogger"
-    echo "  $0 --ai-service-only    # Start only AI Service"
-    echo "  $0 --background         # Start both in background"
+    echo "  $0                        # Start ErrorLogger and AI Service"
+    echo "  $0 --with-frontend        # Start all three services"
+    echo "  $0 --errorlogger-only     # Start only ErrorLogger"
+    echo "  $0 --frontend-only        # Start only Frontend"
+    echo "  $0 --background           # Start services in background"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -57,14 +60,30 @@ while [[ $# -gt 0 ]]; do
             START_AI_SERVICE=false
             shift
             ;;
+        --no-frontend)
+            START_FRONTEND=false
+            shift
+            ;;
+        --with-frontend)
+            START_FRONTEND=true
+            shift
+            ;;
         --errorlogger-only)
             START_ERRORLOGGER=true
             START_AI_SERVICE=false
+            START_FRONTEND=false
             shift
             ;;
         --ai-service-only)
             START_ERRORLOGGER=false
             START_AI_SERVICE=true
+            START_FRONTEND=false
+            shift
+            ;;
+        --frontend-only)
+            START_ERRORLOGGER=false
+            START_AI_SERVICE=false
+            START_FRONTEND=true
             shift
             ;;
         --background|-bg)
@@ -147,6 +166,19 @@ start_ai_service() {
     ./start_ai_service.sh
 }
 
+# Start Frontend
+start_frontend() {
+    log_info "🌐 Starting Frontend..."
+    
+    cd "$PROJECT_ROOT/projects/ai_service/frontend"
+    if [[ $BACKGROUND == true ]]; then
+        log_info "Starting frontend build only (background mode)..."
+        ./start_frontend.sh --build-only
+    else
+        ./start_frontend.sh
+    fi
+}
+
 # Main function
 main() {
     log_info "🚀 Starting Modular System"
@@ -155,7 +187,15 @@ main() {
     # Check virtual environment
     check_venv
     
-    if [[ $START_ERRORLOGGER == true ]] && [[ $START_AI_SERVICE == true ]]; then
+    if [[ $START_ERRORLOGGER == true ]] && [[ $START_AI_SERVICE == true ]] && [[ $START_FRONTEND == true ]]; then
+        log_info "Starting ErrorLogger, AI Service, and Frontend..."
+        start_errorlogger
+        sleep 2  # Give ErrorLogger time to start
+        start_ai_service &
+        AI_PID=$!
+        sleep 3  # Give AI Service time to start
+        start_frontend
+    elif [[ $START_ERRORLOGGER == true ]] && [[ $START_AI_SERVICE == true ]]; then
         log_info "Starting both ErrorLogger and AI Service..."
         start_errorlogger
         sleep 2  # Give ErrorLogger time to start
@@ -173,6 +213,9 @@ main() {
     elif [[ $START_AI_SERVICE == true ]]; then
         log_info "Starting AI Service only..."
         start_ai_service
+    elif [[ $START_FRONTEND == true ]]; then
+        log_info "Starting Frontend only..."
+        start_frontend
     else
         log_error "No services selected to start!"
         show_help

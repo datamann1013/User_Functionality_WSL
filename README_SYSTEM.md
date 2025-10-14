@@ -22,6 +22,14 @@ A modular system with AI Service and ErrorLogger components designed for efficie
 - Connects to existing ErrorLogger service for logging
 - REST API for chat, inference, and model management
 - Health checks and service status monitoring
+- Serves React frontend (built) or simple HTML interface
+
+#### Frontend (`projects/ai_service/frontend/`)
+- React-based web interface for the AI Service
+- Integrates with ErrorLogger for frontend error tracking
+- Discord-like chat interface
+- Model management and switching
+- Development server with hot reload
 
 ## Quick Start
 
@@ -33,14 +41,20 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 ### 2. Start the System
 ```bash
-# Start both services
+# Start ErrorLogger and AI Service (backend only)
 ./start_system.sh
+
+# Start all services including Frontend
+./start_system.sh --with-frontend
 
 # Start only ErrorLogger
 ./start_system.sh --errorlogger-only
 
 # Start only AI Service (ErrorLogger should be running)
 ./start_system.sh --ai-service-only
+
+# Start only Frontend (backend services should be running)
+./start_system.sh --frontend-only
 
 # Start services in background
 ./start_system.sh --background
@@ -62,6 +76,14 @@ cd projects/ai_service
 ./start_ai_service.sh
 ```
 
+#### Frontend
+```bash
+cd projects/ai_service/frontend
+./start_frontend.sh                    # Development server
+./start_frontend.sh --build-only       # Build for production
+./start_frontend.sh --production        # Build and exit
+```
+
 ## API Endpoints
 
 ### ErrorLogger Service (Port 5001)
@@ -71,10 +93,18 @@ cd projects/ai_service
 - `GET /services` - List registered services
 
 ### AI Service (Port 5000)
+- `GET /` - Serve React frontend (or simple HTML fallback)
 - `GET /health` - Health check with ErrorLogger status
 - `GET /api/models` - List available models
 - `POST /api/chat` - Chat interface
 - `POST /api/inference` - Direct model inference
+- `POST /api/log-frontend-error` - Log frontend errors to ErrorLogger
+
+### Frontend (Port 3000 - Development)
+- React development server with hot reload
+- Proxies API calls to backend
+- Automatic error logging to ErrorLogger service
+- Available at: http://localhost:3000 (dev) or http://localhost:5000 (built)
 
 ## Testing
 
@@ -124,9 +154,17 @@ curl http://127.0.0.1:5000/api/models
 
 ### AI Service
 - Flask >= 2.3.0
+- Flask-CORS >= 4.0.0
 - requests >= 2.31.0
 - python-dotenv >= 1.0.0
 - psutil >= 5.9.0
+
+### Frontend
+- Node.js >= 16.0.0
+- React >= 18.2.0
+- react-scripts >= 5.0.1
+- react-markdown >= 8.0.7
+- react-syntax-highlighter >= 15.5.0
 
 ## Development Notes
 

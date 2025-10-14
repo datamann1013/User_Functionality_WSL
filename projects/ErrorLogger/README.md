@@ -1,6 +1,6 @@
 # ErrorLogger v1.1
 
-Advanced error logging system for WSL-based development environments with structured error codes and CSV logging.
+Error logging system for WSL-based development environments with structured error codes and CSV logging.
 
 ## Features
 - **Structured Error Codes**: `[Type][Origin][Component][Subcomponent][Number]`
