@@ -109,6 +109,152 @@ cleanup() {
 # Set trap for cleanup
 trap cleanup EXIT INT TERM
 
+# Setup environment and dependencies
+setup_environment() {
+    log_info "🔧 Setting up environment and dependencies..."
+    
+    # Check Python installation
+    if ! command -v python3 >/dev/null 2>&1; then
+        log_error "Python3 not found. Installing Python3..."
+        if command -v apt >/dev/null 2>&1; then
+            sudo apt update && sudo apt install -y python3 python3-pip python3-venv
+        elif command -v yum >/dev/null 2>&1; then
+            sudo yum install -y python3 python3-pip
+        elif command -v pacman >/dev/null 2>&1; then
+            sudo pacman -S python python-pip
+        else
+            log_error "Could not install Python3. Please install manually."
+            return 1
+        fi
+    fi
+    
+    # Check Node.js installation
+    if ! command -v node >/dev/null 2>&1; then
+        log_info "Node.js not found. Installing Node.js..."
+        if command -v apt >/dev/null 2>&1; then
+            # Ubuntu/Debian
+            log_info "Installing Node.js via package manager..."
+            sudo apt update
+            sudo apt install -y nodejs npm
+        elif command -v yum >/dev/null 2>&1; then
+            # CentOS/RHEL/Fedora
+            log_info "Installing Node.js via package manager..."
+            sudo yum install -y nodejs npm
+        elif command -v dnf >/dev/null 2>&1; then
+            # Fedora
+            log_info "Installing Node.js via package manager..."
+            sudo dnf install -y nodejs npm
+        elif command -v pacman >/dev/null 2>&1; then
+            # Arch Linux
+            log_info "Installing Node.js via package manager..."
+            sudo pacman -S nodejs npm
+        elif command -v curl >/dev/null 2>&1; then
+            # Try NodeSource installation
+            log_info "Installing Node.js via NodeSource..."
+            curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
+            sudo apt-get install -y nodejs
+        else
+            log_error "Could not install Node.js automatically. Please install manually:"
+            log_info "  Visit: https://nodejs.org/"
+            log_info "  Or use your package manager:"
+            log_info "    Ubuntu/Debian: sudo apt install nodejs npm"
+            log_info "    CentOS/RHEL: sudo yum install nodejs npm"
+            log_info "    Fedora: sudo dnf install nodejs npm"
+            log_info "    Arch: sudo pacman -S nodejs npm"
+            return 1
+        fi
+        
+        # Verify installation
+        if ! command -v node >/dev/null 2>&1; then
+            log_error "Node.js installation failed"
+            return 1
+        fi
+        log_success "✅ Node.js installed successfully ($(node --version))"
+    else
+        log_success "✅ Node.js already installed ($(node --version))"
+    fi
+    
+    # Check npm
+    if ! command -v npm >/dev/null 2>&1; then
+        log_info "npm not found. Installing npm..."
+        if command -v apt >/dev/null 2>&1; then
+            sudo apt install -y npm
+        elif command -v yum >/dev/null 2>&1; then
+            sudo yum install -y npm
+        elif command -v pacman >/dev/null 2>&1; then
+            sudo pacman -S npm
+        fi
+    fi
+    
+    # Create virtual environment if it doesn't exist
+    if [[ ! -d "$VENV_DIR" ]]; then
+        log_info "Creating Python virtual environment at: $VENV_DIR"
+        python3 -m venv "$VENV_DIR"
+        if [[ $? -ne 0 ]]; then
+            log_error "Failed to create virtual environment"
+            return 1
+        fi
+        log_success "✅ Virtual environment created"
+    else
+        log_success "✅ Virtual environment already exists"
+    fi
+    
+    # Activate virtual environment and upgrade pip
+    log_info "Activating virtual environment and updating pip..."
+    source "$VENV_DIR/bin/activate"
+    pip install --upgrade pip setuptools wheel
+    
+    # Install Python dependencies for ErrorLogger
+    log_info "Installing ErrorLogger dependencies..."
+    cd "$PROJECT_ROOT/projects/ErrorLogger"
+    if [[ -f "requirements.txt" ]]; then
+        pip install -r requirements.txt
+        log_success "✅ ErrorLogger dependencies installed"
+    fi
+    
+    # Install Python dependencies for Backend
+    log_info "Installing Backend dependencies..."
+    cd "$BACKEND_DIR"
+    if [[ -f "requirements.txt" ]]; then
+        pip install -r requirements.txt
+        log_success "✅ Backend dependencies installed"
+    fi
+    
+    # Install Python dependencies for Ollama Service
+    log_info "Installing Ollama Service dependencies..."
+    cd "$OLLAMA_SERVICE_DIR"
+    if [[ -f "requirements.txt" ]]; then
+        pip install -r requirements.txt
+    else
+        # Install basic dependencies for ollama service
+        pip install requests flask flask-cors
+    fi
+    log_success "✅ Ollama Service dependencies installed"
+    
+    # Install Frontend dependencies
+    log_info "Installing Frontend dependencies..."
+    cd "$FRONTEND_DIR"
+    if [[ -f "package.json" ]]; then
+        npm install
+        log_success "✅ Frontend dependencies installed"
+    else
+        log_warning "⚠️  No package.json found in frontend directory"
+    fi
+    
+    # Check and install curl if needed
+    if ! command -v curl >/dev/null 2>&1; then
+        log_info "Installing curl..."
+        if command -v apt >/dev/null 2>&1; then
+            sudo apt install -y curl
+        elif command -v yum >/dev/null 2>&1; then
+            sudo yum install -y curl
+        fi
+    fi
+    
+    log_success "🎉 Environment setup complete!"
+    return 0
+}
+
 # Start ErrorLogger Server
 start_errorlogger() {
     log_info "🔧 Starting ErrorLogger Server (Port: $ERRORLOGGER_PORT)"
@@ -212,7 +358,6 @@ start_backend() {
     fi
     
     source "$VENV_DIR/bin/activate"
-    pip install -q -r requirements.txt
     
     # Set environment for backend
     export ERRORLOGGER_SERVICE_URL="$ERRORLOGGER_URL/log"
@@ -234,12 +379,6 @@ start_backend() {
 start_frontend() {
     log_info "🌐 Starting Frontend Server (Port: $FRONTEND_PORT)"
     cd "$FRONTEND_DIR"
-    
-    # Install dependencies if needed
-    if [[ ! -d "node_modules" ]]; then
-        log_info "Installing npm dependencies..."
-        npm install
-    fi
     
     # Set environment for frontend
     export REACT_APP_BACKEND_URL="http://localhost:$BACKEND_PORT"
@@ -271,20 +410,13 @@ main() {
     echo "   🌐 Frontend Server     (Port: $FRONTEND_PORT)"
     echo
 
-    # Check prerequisites
-    if [[ ! -d "$VENV_DIR" ]]; then
-        log_error "Virtual environment not found at: $VENV_DIR"
-        log_info "Please run: python -m venv $VENV_DIR"
-        exit 1
-    fi
-
-    if ! command -v node >/dev/null 2>&1; then
-        log_error "Node.js not found. Please install Node.js first."
-        exit 1
-    fi
+    # Check and setup prerequisites
+    log_info "🔍 Checking system requirements..."
+    setup_environment || exit 1
 
     # Start services in sequence
     if ! start_errorlogger; then
+        log_error "Failed to start ErrorLogger service"
         exit 1
     fi
     
@@ -295,10 +427,12 @@ main() {
     start_ollama_service || log_warning "⚠️  Continuing without Ollama service"
     
     if ! start_backend; then
+        log_error "Failed to start Backend service"
         exit 1
     fi
     
     if ! start_frontend; then
+        log_error "Failed to start Frontend service"
         exit 1
     fi
 
