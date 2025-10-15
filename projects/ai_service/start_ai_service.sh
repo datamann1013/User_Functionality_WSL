@@ -83,16 +83,17 @@ wait_for_service() {
 
 # Cleanup function
 cleanup() {
-    log_info "Shutting down all services..."
+    log_info "Shutting down services..."
     
-    # Kill background processes
-    if [[ -f "$PROJECT_ROOT/projects/ErrorLogger/errorlogger.pid" ]]; then
-        PID=$(cat "$PROJECT_ROOT/projects/ErrorLogger/errorlogger.pid" 2>/dev/null || echo "")
-        if [[ -n "$PID" ]]; then
-            kill $PID 2>/dev/null || true
-            rm -f "$PROJECT_ROOT/projects/ErrorLogger/errorlogger.pid"
-            log_info "Stopped ErrorLogger service"
-        fi
+    # Note: We DON'T automatically kill ErrorLogger since it might be used by other services
+    # We only kill ErrorLogger if we started it ourselves
+    if [[ -n "${ERRORLOGGER_PID:-}" ]]; then
+        log_info "Stopping ErrorLogger service (started by this script)..."
+        kill $ERRORLOGGER_PID 2>/dev/null || true
+        rm -f "$PROJECT_ROOT/projects/ErrorLogger/errorlogger.pid"
+        log_info "Stopped ErrorLogger service"
+    else
+        log_info "Leaving ErrorLogger service running (may be used by other services)"
     fi
     
     if [[ -n "${BACKEND_PID:-}" ]]; then
@@ -255,26 +256,86 @@ setup_environment() {
     return 0
 }
 
-# Start ErrorLogger Server
-start_errorlogger() {
-    log_info "🔧 Starting ErrorLogger Server (Port: $ERRORLOGGER_PORT)"
-    cd "$PROJECT_ROOT/projects/ErrorLogger"
-    
+# Check if ErrorLogger service is running
+check_errorlogger_status() {
+    # Check if the service is responding to health checks
     if check_service "$ERRORLOGGER_URL"; then
-        log_success "✅ ErrorLogger already running"
-        return 0
+        return 0  # Running
     fi
     
+    # Check if there's a PID file and the process is running
+    if [[ -f "$PROJECT_ROOT/projects/ErrorLogger/errorlogger.pid" ]]; then
+        PID=$(cat "$PROJECT_ROOT/projects/ErrorLogger/errorlogger.pid" 2>/dev/null || echo "")
+        if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
+            # Process exists but might not be responding yet
+            return 2  # Starting/Not ready
+        else
+            # PID file exists but process is dead - cleanup
+            rm -f "$PROJECT_ROOT/projects/ErrorLogger/errorlogger.pid"
+            return 1  # Not running
+        fi
+    fi
+    
+    return 1  # Not running
+}
+
+# Start ErrorLogger Server
+start_errorlogger() {
+    log_info "🔧 Checking ErrorLogger Server (Port: $ERRORLOGGER_PORT)"
+    
+    case $(check_errorlogger_status) in
+        0)
+            log_success "✅ ErrorLogger already running and responding"
+            return 0
+            ;;
+        2)
+            log_info "⏳ ErrorLogger process found, waiting for it to be ready..."
+            if wait_for_service "$ERRORLOGGER_URL" "ErrorLogger" 15; then
+                log_success "✅ Existing ErrorLogger is now ready"
+                return 0
+            else
+                log_warning "⚠️  Existing ErrorLogger process not responding, restarting..."
+                # Kill the existing process
+                PID=$(cat "$PROJECT_ROOT/projects/ErrorLogger/errorlogger.pid" 2>/dev/null || echo "")
+                if [[ -n "$PID" ]]; then
+                    kill "$PID" 2>/dev/null || true
+                    sleep 2
+                fi
+                rm -f "$PROJECT_ROOT/projects/ErrorLogger/errorlogger.pid"
+            fi
+            ;;
+        1)
+            log_info "🚀 Starting new ErrorLogger instance..."
+            ;;
+    esac
+    
+    # Start new ErrorLogger instance
+    cd "$PROJECT_ROOT/projects/ErrorLogger"
+    
+    # Check if ErrorLogger script exists
+    if [[ ! -f "error_logger_service.py" ]]; then
+        log_error "❌ ErrorLogger service script not found at: $PROJECT_ROOT/projects/ErrorLogger/error_logger_service.py"
+        log_info "Available files in ErrorLogger directory:"
+        ls -la "$PROJECT_ROOT/projects/ErrorLogger/" | head -10
+        return 1
+    fi
+    
+    # Activate virtual environment and start ErrorLogger
     source "$VENV_DIR/bin/activate"
+    
+    log_info "Starting ErrorLogger service..."
     python error_logger_service.py --port $ERRORLOGGER_PORT --host 127.0.0.1 > errorlogger.log 2>&1 &
     ERRORLOGGER_PID=$!
     echo $ERRORLOGGER_PID > errorlogger.pid
     
-    if wait_for_service "$ERRORLOGGER_URL" "ErrorLogger" 10; then
+    # Wait for service to be ready
+    if wait_for_service "$ERRORLOGGER_URL" "ErrorLogger" 15; then
         log_success "✅ ErrorLogger Server running (PID: $ERRORLOGGER_PID)"
         return 0
     else
         log_error "❌ ErrorLogger Server failed to start"
+        log_info "Recent ErrorLogger logs:"
+        tail -10 errorlogger.log 2>/dev/null || echo "No logs available"
         return 1
     fi
 }
