@@ -10,6 +10,7 @@ import random
 import argparse
 import requests
 import base64
+import time
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -94,12 +95,80 @@ def check_ollama_service():
         return False
 
 def route_to_ollama_chat(message, agent_id):
-    """Route chat request to Ollama service"""
+    """Route chat request to Ollama service with agent-specific parameters and memory context"""
     try:
+        # Look up agent from database to get their parameters
+        agent = db.get_agent(agent_id)
+        if not agent:
+            log_to_errorlogger('AGENT_NOT_FOUND', f'Agent {agent_id} not found in database')
+            # Use default agent parameters
+            agent = {
+                'model_name': 'llama3.2:1b',
+                'temperature': 0.7,
+                'top_p': 0.9,
+                'system_prompt': '',
+                'max_tokens': 2048
+            }
+        
+        # Get agent's important memories to provide context
+        try:
+            memories = db.get_agent_memories(agent_id, min_importance=0.6, limit=10)
+            memory_context = ""
+            
+            if memories:
+                memory_items = []
+                for memory in memories:
+                    memory_items.append(memory['content'])
+                    # Update access time for memories we're using
+                    db.update_memory_access(memory['id'])
+                
+                memory_context = "\nContext about the user:\n" + "\n".join(f"- {item}" for item in memory_items)
+                log_to_errorlogger('MEMORY_CONTEXT_APPLIED', f'Using {len(memories)} memories for agent {agent_id}')
+        except Exception as e:
+            log_to_errorlogger('MEMORY_CONTEXT_ERROR', 'Failed to retrieve agent memories', e)
+            memory_context = ""
+        
+        # Get recent conversation history for continuity
+        try:
+            recent_conversations = db.get_recent_conversations(agent_id, hours=2)
+            conversation_context = ""
+            
+            if recent_conversations and len(recent_conversations) > 1:  # Don't include current conversation
+                recent_conversations = recent_conversations[:-1]  # Remove last (current) conversation
+                recent_conversations = recent_conversations[-3:]  # Last 3 exchanges
+                
+                context_items = []
+                for conv in recent_conversations:
+                    context_items.append(f"User: {conv['user_message']}")
+                    context_items.append(f"Assistant: {conv['ai_response']}")
+                
+                if context_items:
+                    conversation_context = "\nRecent conversation:\n" + "\n".join(context_items)
+                    log_to_errorlogger('CONVERSATION_CONTEXT_APPLIED', f'Using {len(recent_conversations)} recent exchanges for agent {agent_id}')
+        except Exception as e:
+            log_to_errorlogger('CONVERSATION_CONTEXT_ERROR', 'Failed to retrieve conversation context', e)
+            conversation_context = ""
+        
+        # Combine system prompt with memory and conversation context
+        enhanced_system_prompt = agent.get('system_prompt', '')
+        if memory_context:
+            enhanced_system_prompt += memory_context
+        if conversation_context:
+            enhanced_system_prompt += conversation_context
+        
+        # Build enhanced payload with agent parameters and context
         payload = {
             'message': message,
-            'agent_id': agent_id
+            'agent_id': agent_id,
+            'model_name': agent.get('model_name', 'llama3.2:1b'),
+            'temperature': float(agent.get('temperature', 0.7)),
+            'top_p': float(agent.get('top_p', 0.9)),
+            'system_prompt': enhanced_system_prompt,
+            'max_tokens': int(agent.get('max_tokens', 2048))
         }
+        
+        log_to_errorlogger('AGENT_PARAMS_APPLIED', 
+                         f'Using agent {agent_id} with model {payload["model_name"]}, temp={payload["temperature"]}, context_length={len(enhanced_system_prompt)}')
         
         response = requests.post(f"{OLLAMA_SERVICE_URL}/api/chat", 
                                json=payload, timeout=60)
@@ -282,6 +351,102 @@ def ollama_status():
     except requests.exceptions.RequestException as e:
         return jsonify({'error': 'Cannot connect to Ollama service', 'details': str(e)}), 503
 
+def extract_and_store_memory(agent_id, user_message, ai_response):
+    """Extract and store important context from conversations for agent memory"""
+    try:
+        # Simple keyword-based extraction for user preferences and context
+        user_lower = user_message.lower()
+        
+        # Extract technology preferences
+        tech_keywords = {
+            'programming': ['python', 'java', 'javascript', 'react', 'node', 'typescript', 'golang', 'rust', 'c++'],
+            'platforms': ['windows', 'linux', 'macos', 'ubuntu', 'debian', 'centos', 'docker', 'kubernetes'],
+            'databases': ['mysql', 'postgresql', 'mongodb', 'redis', 'sqlite', 'oracle'],
+            'tools': ['git', 'vscode', 'intellij', 'vim', 'emacs', 'nginx', 'apache'],
+            'cloud': ['aws', 'azure', 'gcp', 'heroku', 'digitalocean', 'linode'],
+            'frameworks': ['django', 'flask', 'express', 'spring', 'rails', 'laravel', 'angular', 'vue']
+        }
+        
+        # Extract preferences and context
+        memories_to_add = []
+        
+        for category, keywords in tech_keywords.items():
+            for keyword in keywords:
+                if keyword in user_lower:
+                    content = f"User mentions {keyword} ({category})"
+                    memories_to_add.append({
+                        'type': 'tech_preference',
+                        'content': content,
+                        'importance': 0.6,
+                        'metadata': {'category': category, 'technology': keyword}
+                    })
+        
+        # Extract system/environment information
+        if any(word in user_lower for word in ['server', 'proxmox', 'homelab']):
+            if 'proxmox' in user_lower:
+                memories_to_add.append({
+                    'type': 'environment',
+                    'content': 'User runs a Proxmox server system',
+                    'importance': 0.8,
+                    'metadata': {'type': 'server_environment', 'platform': 'proxmox'}
+                })
+            elif 'server' in user_lower:
+                memories_to_add.append({
+                    'type': 'environment',
+                    'content': 'User works with server systems',
+                    'importance': 0.7,
+                    'metadata': {'type': 'server_environment'}
+                })
+        
+        # Extract project preferences
+        if any(word in user_lower for word in ['project', 'building', 'developing']):
+            if 'prototype' in user_lower:
+                memories_to_add.append({
+                    'type': 'work_style',
+                    'content': 'User prefers prototyping approach to development',
+                    'importance': 0.7,
+                    'metadata': {'approach': 'prototyping'}
+                })
+        
+        # Extract explicit preferences (I prefer, I like, I use)
+        preference_indicators = ['i prefer', 'i like', 'i use', 'i work with', 'i develop with']
+        for indicator in preference_indicators:
+            if indicator in user_lower:
+                # Extract what comes after the indicator
+                start_idx = user_lower.find(indicator) + len(indicator)
+                preference_text = user_message[start_idx:].strip()
+                if preference_text:
+                    # Take first sentence or up to 100 chars
+                    if '.' in preference_text:
+                        preference_text = preference_text.split('.')[0]
+                    preference_text = preference_text[:100]
+                    
+                    memories_to_add.append({
+                        'type': 'user_preference',
+                        'content': f"User preference: {preference_text}",
+                        'importance': 0.8,
+                        'metadata': {'source': 'explicit_statement'}
+                    })
+        
+        # Store the memories
+        for memory in memories_to_add:
+            try:
+                db.add_agent_memory(
+                    agent_id=agent_id,
+                    memory_type=memory['type'],
+                    content=memory['content'],
+                    importance_score=memory['importance'],
+                    metadata=memory['metadata']
+                )
+            except Exception as e:
+                log_to_errorlogger('MEMORY_STORAGE_ERROR', f'Failed to store memory: {memory["content"]}', e)
+        
+        if memories_to_add:
+            log_to_errorlogger('MEMORY_EXTRACTED', f'Extracted {len(memories_to_add)} memories for agent {agent_id}')
+        
+    except Exception as e:
+        log_to_errorlogger('MEMORY_EXTRACTION_ERROR', 'Failed to extract memory from conversation', e)
+
 @app.route('/api/chat', methods=['POST'])
 def chat():
     """Chat endpoint with Ollama integration and demo fallback"""
@@ -301,11 +466,34 @@ def chat():
         # Try Ollama service first
         if check_ollama_service():
             log_to_errorlogger('AI_CHAT_OLLAMA_ROUTE', f'Routing to Ollama service for agent {agent_id}')
+            start_time = time.time()
             ollama_response = route_to_ollama_chat(message, agent_id)
+            response_time = int((time.time() - start_time) * 1000)  # Convert to milliseconds
             
             if ollama_response:
                 log_to_errorlogger('AI_CHAT_OLLAMA_SUCCESS', 
                                  f'Ollama response for agent {agent_id}: "{ollama_response.get("response", "")[:50]}..."')
+                
+                # Log the conversation to database
+                try:
+                    db.log_conversation(
+                        agent_id=agent_id,
+                        user_message=message,
+                        ai_response=ollama_response.get('response', ''),
+                        model_used=ollama_response.get('model_name', 'unknown'),
+                        parameters_used=ollama_response.get('parameters_used', {}),
+                        tokens_used=ollama_response.get('tokens_used', 0),
+                        response_time_ms=response_time,
+                        session_id=data.get('session_id')  # Optional session tracking
+                    )
+                    
+                    # Extract and store important context from the conversation
+                    extract_and_store_memory(agent_id, message, ollama_response.get('response', ''))
+                    
+                    log_to_errorlogger('CONVERSATION_LOGGED', f'Conversation logged for agent {agent_id}')
+                except Exception as e:
+                    log_to_errorlogger('CONVERSATION_LOG_ERROR', 'Failed to log conversation', e)
+                
                 return jsonify(ollama_response)
             else:
                 log_to_errorlogger('AI_CHAT_OLLAMA_FALLBACK', 
@@ -356,6 +544,22 @@ def chat():
             'mode': 'demo_fallback',
             'ollama_available': False
         }
+        
+        # Log the demo conversation to database as well
+        try:
+            db.log_conversation(
+                agent_id=agent_id,
+                user_message=message,
+                ai_response=response,
+                model_used=f"{model_name} (demo)",
+                parameters_used={'mode': 'demo_fallback'},
+                tokens_used=len(response.split()),  # Rough estimate
+                response_time_ms=0,  # Demo responses are instant
+                session_id=data.get('session_id')
+            )
+            log_to_errorlogger('CONVERSATION_LOGGED', f'Demo conversation logged for agent {agent_id}')
+        except Exception as e:
+            log_to_errorlogger('CONVERSATION_LOG_ERROR', 'Failed to log demo conversation', e)
         
         log_to_errorlogger('AI_CHAT_DEMO_RESPONSE', f'Demo response from {active_model}: "{response[:50]}..."',
                           extra={'agent_id': agent_id, 'model_id': active_model, 'response_length': len(response)})
@@ -608,6 +812,111 @@ def serve_avatar(filename):
     except Exception as e:
         log_to_errorlogger('AVATAR_SERVE_ERROR', f'Failed to serve avatar {filename}', e)
         return jsonify({'error': 'Avatar not found'}), 404
+
+# ================================
+# CONVERSATION HISTORY ENDPOINTS
+# ================================
+
+@app.route('/api/agents/<agent_id>/conversations', methods=['GET'])
+def get_agent_conversations(agent_id):
+    """Get conversation history for an agent"""
+    try:
+        # Get query parameters
+        limit = request.args.get('limit', 50, type=int)
+        session_id = request.args.get('session_id')
+        
+        conversations = db.get_conversation_history(agent_id, limit=limit, session_id=session_id)
+        
+        # Reverse to show oldest first for chat display
+        conversations.reverse()
+        
+        return jsonify({
+            'agent_id': agent_id,
+            'conversations': conversations,
+            'total': len(conversations)
+        })
+        
+    except Exception as e:
+        log_to_errorlogger('CONVERSATION_HISTORY_ERROR', f'Failed to get conversations for agent {agent_id}', e)
+        return jsonify({'error': 'Failed to retrieve conversation history'}), 500
+
+@app.route('/api/agents/<agent_id>/recent-conversations', methods=['GET'])
+def get_agent_recent_conversations(agent_id):
+    """Get recent conversations for an agent (last 24 hours by default)"""
+    try:
+        hours = request.args.get('hours', 24, type=int)
+        
+        conversations = db.get_recent_conversations(agent_id, hours=hours)
+        conversations.reverse()  # Show oldest first
+        
+        return jsonify({
+            'agent_id': agent_id,
+            'conversations': conversations,
+            'hours': hours,
+            'total': len(conversations)
+        })
+        
+    except Exception as e:
+        log_to_errorlogger('RECENT_CONVERSATIONS_ERROR', f'Failed to get recent conversations for agent {agent_id}', e)
+        return jsonify({'error': 'Failed to retrieve recent conversations'}), 500
+
+@app.route('/api/agents/<agent_id>/memory', methods=['GET'])
+def get_agent_memory(agent_id):
+    """Get agent memory (condensed context and preferences)"""
+    try:
+        memory_type = request.args.get('type')  # user_preference, context, fact, etc.
+        min_importance = request.args.get('min_importance', 0.0, type=float)
+        limit = request.args.get('limit', 50, type=int)
+        
+        memories = db.get_agent_memories(agent_id, memory_type=memory_type, 
+                                       min_importance=min_importance, limit=limit)
+        
+        return jsonify({
+            'agent_id': agent_id,
+            'memories': memories,
+            'total': len(memories)
+        })
+        
+    except Exception as e:
+        log_to_errorlogger('AGENT_MEMORY_ERROR', f'Failed to get memory for agent {agent_id}', e)
+        return jsonify({'error': 'Failed to retrieve agent memory'}), 500
+
+@app.route('/api/agents/<agent_id>/memory', methods=['POST'])
+def add_agent_memory(agent_id):
+    """Add a memory for an agent"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        memory_type = data.get('memory_type', 'context')
+        content = data.get('content', '').strip()
+        importance_score = float(data.get('importance_score', 0.5))
+        metadata = data.get('metadata', {})
+        
+        if not content:
+            return jsonify({'error': 'Content is required'}), 400
+        
+        memory_id = db.add_agent_memory(
+            agent_id=agent_id,
+            memory_type=memory_type,
+            content=content,
+            importance_score=importance_score,
+            metadata=metadata
+        )
+        
+        log_to_errorlogger('AGENT_MEMORY_ADDED', f'Memory added for agent {agent_id}: {content[:50]}...')
+        
+        return jsonify({
+            'memory_id': memory_id,
+            'agent_id': agent_id,
+            'memory_type': memory_type,
+            'success': True
+        }), 201
+        
+    except Exception as e:
+        log_to_errorlogger('AGENT_MEMORY_ADD_ERROR', f'Failed to add memory for agent {agent_id}', e)
+        return jsonify({'error': 'Failed to add agent memory'}), 500
 
 def check_model_availability(model_name):
     """Check if a specific model is available in Ollama"""

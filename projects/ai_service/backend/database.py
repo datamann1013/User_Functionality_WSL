@@ -22,6 +22,7 @@ class AgentDatabase:
     def init_database(self):
         """Initialize the database with required tables"""
         with sqlite3.connect(self.db_path) as conn:
+            # Agents table
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS agents (
                     id TEXT PRIMARY KEY,
@@ -39,9 +40,47 @@ class AgentDatabase:
                 )
             ''')
             
-            # Create index for faster lookups
+            # Conversation logs table
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS conversation_logs (
+                    id TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL,
+                    user_message TEXT NOT NULL,
+                    ai_response TEXT NOT NULL,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    model_used TEXT,
+                    parameters_used TEXT DEFAULT '{}',
+                    tokens_used INTEGER DEFAULT 0,
+                    response_time_ms INTEGER DEFAULT 0,
+                    session_id TEXT,
+                    FOREIGN KEY (agent_id) REFERENCES agents (id)
+                )
+            ''')
+            
+            # Agent memory table for condensed long-term context
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS agent_memory (
+                    id TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL,
+                    memory_type TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    importance_score REAL DEFAULT 0.5,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_accessed TIMESTAMP,
+                    metadata TEXT DEFAULT '{}',
+                    FOREIGN KEY (agent_id) REFERENCES agents (id)
+                )
+            ''')
+            
+            # Create indexes for faster lookups
             conn.execute('CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_agents_name ON agents(name)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_conv_logs_agent ON conversation_logs(agent_id)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_conv_logs_timestamp ON conversation_logs(timestamp)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_conv_logs_session ON conversation_logs(session_id)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_agent ON agent_memory(agent_id)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_type ON agent_memory(memory_type)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_memory_importance ON agent_memory(importance_score)')
             conn.commit()
     
     def create_agent(self, agent_data: Dict) -> Dict:
@@ -216,6 +255,146 @@ class AgentDatabase:
                 agents.append(agent)
             
             return agents
+    
+    # ==================== CONVERSATION LOGGING METHODS ====================
+    
+    def log_conversation(self, agent_id: str, user_message: str, ai_response: str, 
+                        model_used: str = None, parameters_used: Dict = None, 
+                        tokens_used: int = 0, response_time_ms: int = 0, 
+                        session_id: str = None) -> str:
+        """Log a conversation exchange"""
+        import uuid
+        
+        log_id = str(uuid.uuid4())
+        
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute('''
+                INSERT INTO conversation_logs (
+                    id, agent_id, user_message, ai_response, model_used,
+                    parameters_used, tokens_used, response_time_ms, session_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                log_id, agent_id, user_message, ai_response, model_used,
+                json.dumps(parameters_used or {}), tokens_used, response_time_ms, session_id
+            ))
+            conn.commit()
+        
+        return log_id
+    
+    def get_conversation_history(self, agent_id: str, limit: int = 50, session_id: str = None) -> List[Dict]:
+        """Get conversation history for an agent"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            
+            if session_id:
+                query = '''
+                    SELECT * FROM conversation_logs 
+                    WHERE agent_id = ? AND session_id = ?
+                    ORDER BY timestamp DESC LIMIT ?
+                '''
+                cursor = conn.execute(query, (agent_id, session_id, limit))
+            else:
+                query = '''
+                    SELECT * FROM conversation_logs 
+                    WHERE agent_id = ?
+                    ORDER BY timestamp DESC LIMIT ?
+                '''
+                cursor = conn.execute(query, (agent_id, limit))
+            
+            rows = cursor.fetchall()
+            
+            conversations = []
+            for row in rows:
+                conversation = dict(row)
+                conversation['parameters_used'] = json.loads(conversation['parameters_used'])
+                conversations.append(conversation)
+            
+            return conversations
+    
+    def get_recent_conversations(self, agent_id: str, hours: int = 24) -> List[Dict]:
+        """Get recent conversations within specified hours"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute('''
+                SELECT * FROM conversation_logs 
+                WHERE agent_id = ? AND timestamp > datetime('now', '-{} hours')
+                ORDER BY timestamp DESC
+            '''.format(hours), (agent_id,))
+            
+            rows = cursor.fetchall()
+            
+            conversations = []
+            for row in rows:
+                conversation = dict(row)
+                conversation['parameters_used'] = json.loads(conversation['parameters_used'])
+                conversations.append(conversation)
+            
+            return conversations
+    
+    # ==================== AGENT MEMORY METHODS ====================
+    
+    def add_agent_memory(self, agent_id: str, memory_type: str, content: str, 
+                        importance_score: float = 0.5, metadata: Dict = None) -> str:
+        """Add a memory for an agent (user_preference, context, fact, etc.)"""
+        import uuid
+        
+        memory_id = str(uuid.uuid4())
+        
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute('''
+                INSERT INTO agent_memory (
+                    id, agent_id, memory_type, content, importance_score, 
+                    last_accessed, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                memory_id, agent_id, memory_type, content, importance_score,
+                datetime.now().isoformat(), json.dumps(metadata or {})
+            ))
+            conn.commit()
+        
+        return memory_id
+    
+    def get_agent_memories(self, agent_id: str, memory_type: str = None, 
+                          min_importance: float = 0.0, limit: int = 50) -> List[Dict]:
+        """Get agent memories, optionally filtered by type and importance"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            
+            if memory_type:
+                query = '''
+                    SELECT * FROM agent_memory 
+                    WHERE agent_id = ? AND memory_type = ? AND importance_score >= ?
+                    ORDER BY importance_score DESC, last_accessed DESC LIMIT ?
+                '''
+                cursor = conn.execute(query, (agent_id, memory_type, min_importance, limit))
+            else:
+                query = '''
+                    SELECT * FROM agent_memory 
+                    WHERE agent_id = ? AND importance_score >= ?
+                    ORDER BY importance_score DESC, last_accessed DESC LIMIT ?
+                '''
+                cursor = conn.execute(query, (agent_id, min_importance, limit))
+            
+            rows = cursor.fetchall()
+            
+            memories = []
+            for row in rows:
+                memory = dict(row)
+                memory['metadata'] = json.loads(memory['metadata'])
+                memories.append(memory)
+            
+            return memories
+    
+    def update_memory_access(self, memory_id: str) -> bool:
+        """Update the last accessed time for a memory"""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute('''
+                UPDATE agent_memory 
+                SET last_accessed = ? 
+                WHERE id = ?
+            ''', (datetime.now().isoformat(), memory_id))
+            conn.commit()
+            return cursor.rowcount > 0
 
 # Global database instance
 db = AgentDatabase()

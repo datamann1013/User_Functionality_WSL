@@ -311,28 +311,32 @@ def set_agent_model(agent_id):
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """Chat endpoint using Ollama models"""
+    """Chat endpoint using Ollama models with agent-specific parameters"""
     try:
         data = request.get_json()
         message = data.get('message', '').strip()
         agent_id = data.get('agent_id', 'default')
         
+        # Get agent-specific parameters from request
+        model_name = data.get('model_name', DEFAULT_MODEL)
+        temperature = float(data.get('temperature', 0.7))
+        top_p = float(data.get('top_p', 0.9))
+        system_prompt = data.get('system_prompt', '')
+        max_tokens = int(data.get('max_tokens', 2048))
+        
         if not message:
             return jsonify({'error': 'Message is required'}), 400
         
-        log_to_errorlogger('OLLAMA_CHAT_REQUEST', f'Chat request from agent {agent_id}: "{message[:50]}..."')
+        log_to_errorlogger('OLLAMA_CHAT_REQUEST', 
+                         f'Chat request from agent {agent_id}: "{message[:50]}..." using model {model_name}')
         
         # Check Ollama status
         if not check_ollama_status():
             return jsonify({'error': 'Ollama service not available'}), 503
         
-        # Get model for this agent
-        config = load_agent_models_config()
-        agent_models = config.get('agent_models', {})
-        model_name = agent_models.get(agent_id, agent_models.get('default', DEFAULT_MODEL))
-        
-        # Verify model is available
+        # Verify model is available, fallback if needed
         if model_name not in ollama_status['models_available']:
+            log_to_errorlogger('MODEL_NOT_AVAILABLE', f'Model {model_name} not available, using fallback')
             # Try to use default model
             model_name = DEFAULT_MODEL if DEFAULT_MODEL in ollama_status['models_available'] else None
             if not model_name and ollama_status['models_available']:
@@ -341,16 +345,25 @@ def chat():
             if not model_name:
                 return jsonify({'error': 'No models available'}), 503
         
-        # Prepare Ollama request
+        # Build the full prompt with system prompt if provided
+        full_prompt = message
+        if system_prompt:
+            full_prompt = f"System: {system_prompt}\n\nUser: {message}\n\nAssistant:"
+        
+        # Prepare Ollama request with agent-specific parameters
         ollama_payload = {
             'model': model_name,
-            'prompt': message,
+            'prompt': full_prompt,
             'stream': False,
             'options': {
-                'temperature': config.get('model_configs', {}).get(model_name, {}).get('temperature', 0.7),
-                'num_predict': config.get('model_configs', {}).get(model_name, {}).get('max_tokens', 2048)
+                'temperature': temperature,
+                'top_p': top_p,
+                'num_predict': max_tokens
             }
         }
+        
+        log_to_errorlogger('OLLAMA_REQUEST_PARAMS', 
+                         f'Using temp={temperature}, top_p={top_p}, max_tokens={max_tokens}')
         
         # Send request to Ollama
         try:
@@ -368,7 +381,13 @@ def chat():
                     'model_name': model_name,
                     'timestamp': datetime.now().isoformat(),
                     'mode': 'ollama_powered',
-                    'tokens_used': len(ai_response.split())  # Rough estimate
+                    'tokens_used': len(ai_response.split()),  # Rough estimate
+                    'parameters_used': {
+                        'temperature': temperature,
+                        'top_p': top_p,
+                        'max_tokens': max_tokens,
+                        'system_prompt': system_prompt
+                    }
                 }
                 
                 log_to_errorlogger('OLLAMA_CHAT_SUCCESS', 

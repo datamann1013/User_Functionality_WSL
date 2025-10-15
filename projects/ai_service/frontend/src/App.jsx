@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import "./theme.css";
 import { logFrontendError } from "./utils/errorLogger";
 import CreateAgentModal from "./components/CreateAgentModal";
+import EditAgentModal from "./components/EditAgentModal";
+import ModelManager from "./components/ModelManager";
 
 // API base URL
 const API_BASE = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5000';
@@ -54,6 +56,9 @@ function App() {
   const [connecting, setConnecting] = useState(true);
   const [thinking, setThinking] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [agentToEdit, setAgentToEdit] = useState(null);
+  const [showModelManager, setShowModelManager] = useState(false);
   
   const fileInputRef = useRef(null);
   const chatAreaRef = useRef(null);
@@ -68,11 +73,63 @@ function App() {
         
         // Set first agent as selected if none selected
         if (data.agents && data.agents.length > 0 && !selectedAgent) {
-          setSelectedAgent(data.agents[0].id);
+          await handleAgentSwitch(data.agents[0].id);
         }
       }
     } catch (error) {
       logFrontendError('AGENTS_LOAD_ERROR', 'Failed to load agents', error);
+    }
+  };
+
+  // Load conversation history for an agent
+  const loadConversationHistory = async (agentId) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/agents/${agentId}/conversations?limit=50`);
+      if (response.ok) {
+        const data = await response.json();
+        const conversations = data.conversations || [];
+        
+        // Convert conversation logs to message format
+        const historyMessages = [];
+        conversations.forEach(conv => {
+          // Add user message
+          historyMessages.push({
+            id: `${conv.id}-user`,
+            sender: "user",
+            text: conv.user_message,
+            timestamp: conv.timestamp
+          });
+          
+          // Add AI response
+          historyMessages.push({
+            id: `${conv.id}-ai`,
+            sender: "ai",
+            text: conv.ai_response,
+            timestamp: conv.timestamp,
+            model: conv.model_used
+          });
+        });
+        
+        setMessages(historyMessages);
+        logFrontendError('CONVERSATION_HISTORY_LOADED', `Loaded ${conversations.length} conversations for agent ${agentId}`);
+      }
+    } catch (error) {
+      logFrontendError('CONVERSATION_HISTORY_ERROR', `Failed to load conversation history for agent ${agentId}`, error);
+      setMessages([]); // Clear messages on error
+    }
+  };
+
+  // Handle agent switching with conversation history loading
+  const handleAgentSwitch = async (agentId) => {
+    if (agentId === selectedAgent) return; // No change needed
+    
+    setSelectedAgent(agentId);
+    setMessages([]); // Clear current messages
+    setInputText(''); // Clear input
+    
+    // Load conversation history for the selected agent
+    if (agentId) {
+      await loadConversationHistory(agentId);
     }
   };
 
@@ -105,10 +162,43 @@ function App() {
   }, [messages]);
 
   // Handle agent creation
-  const handleAgentCreated = (newAgent) => {
+  const handleAgentCreated = async (newAgent) => {
     setAgents(prev => [newAgent, ...prev]);
-    setSelectedAgent(newAgent.id);
+    await handleAgentSwitch(newAgent.id);
     logFrontendError('FRONTEND_AGENT_CREATED', `Created agent: ${newAgent.name}`);
+  };
+
+  // Handle agent editing
+  const handleEditAgent = (agent) => {
+    setAgentToEdit(agent);
+    setShowEditModal(true);
+    setToolsOpen(false); // Close tools dropdown
+  };
+
+  // Handle agent update
+  const handleAgentUpdated = (updatedAgent) => {
+    setAgents(prev => prev.map(agent => 
+      agent.id === updatedAgent.id ? updatedAgent : agent
+    ));
+    logFrontendError('FRONTEND_AGENT_UPDATED', `Updated agent: ${updatedAgent.name}`);
+  };
+
+  // Handle agent deletion
+  const handleAgentDeleted = async (deletedAgentId) => {
+    setAgents(prev => prev.filter(agent => agent.id !== deletedAgentId));
+    
+    // If deleted agent was selected, select another one
+    if (selectedAgent === deletedAgentId) {
+      const remainingAgents = agents.filter(agent => agent.id !== deletedAgentId);
+      if (remainingAgents.length > 0) {
+        await handleAgentSwitch(remainingAgents[0].id);
+      } else {
+        setSelectedAgent(null);
+        setMessages([]);
+      }
+    }
+    
+    logFrontendError('FRONTEND_AGENT_DELETED', `Deleted agent: ${deletedAgentId}`);
   };
 
   // Handle sending messages
@@ -241,7 +331,7 @@ function App() {
               <div 
                 key={agent.id}
                 className={`agent-item ${selectedAgent === agent.id ? 'selected' : ''}`}
-                onClick={() => setSelectedAgent(agent.id)}
+                onClick={() => handleAgentSwitch(agent.id)}
               >
                 <div 
                   className="agent-avatar"
@@ -389,12 +479,48 @@ function App() {
                     className={`tools-btn ${toolsOpen ? 'open' : ''}`}
                     onClick={() => setToolsOpen(!toolsOpen)}
                     disabled={connecting || thinking}
+                    title="Agent Management"
                   >
-                    Tools ▼
+                    ⚙️
                   </button>
                   {toolsOpen && (
                     <div className="tools-menu">
-                      <div className="tools-empty">No tools available</div>
+                      <div className="tools-section">
+                        <div className="tools-section-title">Agent Management</div>
+                        {selectedAgent && (
+                          <button 
+                            className="tool-item"
+                            onClick={() => handleEditAgent(agents.find(a => a.id === selectedAgent))}
+                          >
+                            ✏️ Edit Agent
+                          </button>
+                        )}
+                        <button 
+                          className="tool-item"
+                          onClick={() => {
+                            setShowCreateModal(true);
+                            setToolsOpen(false);
+                          }}
+                        >
+                          ➕ Create Agent
+                        </button>
+                      </div>
+                      
+                      <div className="tools-section">
+                        <div className="tools-section-title">Models</div>
+                        <button 
+                          className="tool-item"
+                          onClick={() => {
+                            setShowModelManager(true);
+                            setToolsOpen(false);
+                          }}
+                        >
+                          📥 Download Models
+                        </button>
+                        <button className="tool-item">
+                          📊 Model Status
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -426,6 +552,24 @@ function App() {
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         onAgentCreated={handleAgentCreated}
+      />
+
+      {/* Edit Agent Modal */}
+      <EditAgentModal
+        isOpen={showEditModal}
+        onClose={() => {
+          setShowEditModal(false);
+          setAgentToEdit(null);
+        }}
+        agent={agentToEdit}
+        onAgentUpdated={handleAgentUpdated}
+        onAgentDeleted={handleAgentDeleted}
+      />
+
+      {/* Model Manager Modal */}
+      <ModelManager
+        isOpen={showModelManager}
+        onClose={() => setShowModelManager(false)}
       />
     </div>
   );
