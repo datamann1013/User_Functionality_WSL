@@ -14,6 +14,9 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 
+# Import our database module
+from database import db
+
 # Load environment variables
 load_dotenv()
 
@@ -329,6 +332,186 @@ def chat():
     except Exception as e:
         log_to_errorlogger('AI_CHAT_ERROR', 'Chat request failed', e)
         return jsonify({'error': 'Chat request failed', 'details': str(e)}), 500
+
+# ================================
+# AGENT MANAGEMENT API ENDPOINTS
+# ================================
+
+@app.route('/api/agents', methods=['GET'])
+def get_agents():
+    """Get all agents"""
+    try:
+        agents = db.get_all_agents()
+        
+        # Update agent status based on model availability
+        for agent in agents:
+            model_available = check_model_availability(agent['model_name'])
+            current_status = 'idle' if model_available else 'offline'
+            
+            # Update status in database if it changed
+            if agent['status'] != current_status:
+                db.update_agent_status(agent['id'], current_status)
+                agent['status'] = current_status
+        
+        log_to_errorlogger('AGENTS_LIST_SUCCESS', f'Retrieved {len(agents)} agents')
+        return jsonify({'agents': agents, 'count': len(agents)})
+        
+    except Exception as e:
+        log_to_errorlogger('AGENTS_LIST_ERROR', 'Failed to retrieve agents', e)
+        return jsonify({'error': 'Failed to retrieve agents', 'details': str(e)}), 500
+
+@app.route('/api/agents', methods=['POST'])
+def create_agent():
+    """Create a new agent"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Create the agent
+        agent = db.create_agent(data)
+        
+        # Check if the model is available and update status
+        model_available = check_model_availability(agent['model_name'])
+        initial_status = 'idle' if model_available else 'offline'
+        
+        if agent['status'] != initial_status:
+            db.update_agent_status(agent['id'], initial_status)
+            agent['status'] = initial_status
+        
+        log_to_errorlogger('AGENT_CREATE_SUCCESS', f'Created agent: {agent["name"]} with model {agent["model_name"]}',
+                          extra={'agent_id': agent['id'], 'model': agent['model_name']})
+        
+        return jsonify(agent), 201
+        
+    except ValueError as e:
+        log_to_errorlogger('AGENT_CREATE_VALIDATION_ERROR', 'Agent creation validation failed', e)
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        log_to_errorlogger('AGENT_CREATE_ERROR', 'Failed to create agent', e)
+        return jsonify({'error': 'Failed to create agent', 'details': str(e)}), 500
+
+@app.route('/api/agents/<agent_id>', methods=['GET'])
+def get_agent(agent_id):
+    """Get a specific agent"""
+    try:
+        agent = db.get_agent(agent_id)
+        
+        if not agent:
+            return jsonify({'error': 'Agent not found'}), 404
+        
+        # Update status based on model availability
+        model_available = check_model_availability(agent['model_name'])
+        current_status = 'idle' if model_available else 'offline'
+        
+        if agent['status'] != current_status:
+            db.update_agent_status(agent['id'], current_status)
+            agent['status'] = current_status
+        
+        return jsonify(agent)
+        
+    except Exception as e:
+        log_to_errorlogger('AGENT_GET_ERROR', f'Failed to get agent {agent_id}', e)
+        return jsonify({'error': 'Failed to retrieve agent', 'details': str(e)}), 500
+
+@app.route('/api/agents/<agent_id>', methods=['PUT'])
+def update_agent(agent_id):
+    """Update an existing agent"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        success = db.update_agent(agent_id, data)
+        
+        if not success:
+            return jsonify({'error': 'Agent not found'}), 404
+        
+        # Get updated agent
+        agent = db.get_agent(agent_id)
+        
+        # Update status if model was changed
+        if 'model_name' in data:
+            model_available = check_model_availability(agent['model_name'])
+            new_status = 'idle' if model_available else 'offline'
+            db.update_agent_status(agent_id, new_status)
+            agent['status'] = new_status
+        
+        log_to_errorlogger('AGENT_UPDATE_SUCCESS', f'Updated agent: {agent_id}')
+        return jsonify(agent)
+        
+    except Exception as e:
+        log_to_errorlogger('AGENT_UPDATE_ERROR', f'Failed to update agent {agent_id}', e)
+        return jsonify({'error': 'Failed to update agent', 'details': str(e)}), 500
+
+@app.route('/api/agents/<agent_id>', methods=['DELETE'])
+def delete_agent(agent_id):
+    """Delete an agent"""
+    try:
+        success = db.delete_agent(agent_id)
+        
+        if not success:
+            return jsonify({'error': 'Agent not found'}), 404
+        
+        log_to_errorlogger('AGENT_DELETE_SUCCESS', f'Deleted agent: {agent_id}')
+        return jsonify({'message': 'Agent deleted successfully'})
+        
+    except Exception as e:
+        log_to_errorlogger('AGENT_DELETE_ERROR', f'Failed to delete agent {agent_id}', e)
+        return jsonify({'error': 'Failed to delete agent', 'details': str(e)}), 500
+
+@app.route('/api/models', methods=['GET'])
+def get_available_models():
+    """Get list of available models from Ollama"""
+    try:
+        models = []
+        
+        # Try to get models from Ollama service
+        if check_ollama_service():
+            try:
+                response = requests.get(f"{OLLAMA_SERVICE_URL}/api/models", timeout=5)
+                if response.status_code == 200:
+                    data = response.json()
+                    models = data.get('models', [])
+            except requests.exceptions.RequestException:
+                pass
+        
+        # Add default/common models if Ollama isn't available
+        if not models:
+            models = [
+                'llama3.2:1b',
+                'llama3.2:3b', 
+                'llama3.1:8b',
+                'codellama:7b',
+                'mistral:7b',
+                'gemma:2b',
+                'phi3:mini'
+            ]
+        
+        return jsonify({'models': models, 'ollama_available': check_ollama_service()})
+        
+    except Exception as e:
+        log_to_errorlogger('MODELS_LIST_ERROR', 'Failed to retrieve models', e)
+        return jsonify({'error': 'Failed to retrieve models', 'details': str(e)}), 500
+
+def check_model_availability(model_name):
+    """Check if a specific model is available in Ollama"""
+    try:
+        if not check_ollama_service():
+            return False
+        
+        response = requests.get(f"{OLLAMA_SERVICE_URL}/api/models", timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            available_models = data.get('models', [])
+            return model_name in available_models
+        
+        return False
+        
+    except requests.exceptions.RequestException:
+        return False
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='AI Service Backend')

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import "./theme.css";
 import { logFrontendError } from "./utils/errorLogger";
+import CreateAgentModal from "./components/CreateAgentModal";
 
 // API base URL
 const API_BASE = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5000';
@@ -43,31 +44,8 @@ function calculateDowntime(lastActive) {
 
 function App() {
   // State management
-  const [agents, setAgents] = useState([
-    {
-      id: "assistant-1",
-      name: "General Assistant",
-      status: "idle",
-      lastActive: new Date().toISOString(),
-      avatar: null
-    },
-    {
-      id: "code-helper",
-      name: "Code Helper",
-      status: "busy",
-      lastActive: new Date(Date.now() - 1800000).toISOString(), // 30 min ago
-      avatar: null
-    },
-    {
-      id: "research-bot",
-      name: "Research Bot",
-      status: "offline",
-      lastActive: new Date(Date.now() - 7200000).toISOString(), // 2 hours ago
-      avatar: null
-    }
-  ]);
-  
-  const [selectedAgent, setSelectedAgent] = useState(agents[0].id);
+  const [agents, setAgents] = useState([]);
+  const [selectedAgent, setSelectedAgent] = useState(null);
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
   const [selectedFiles, setSelectedFiles] = useState([]);
@@ -75,11 +53,30 @@ function App() {
   const [dragOver, setDragOver] = useState(false);
   const [connecting, setConnecting] = useState(true);
   const [thinking, setThinking] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   
   const fileInputRef = useRef(null);
   const chatAreaRef = useRef(null);
 
-  // Check backend connection on mount
+  // Load agents from API
+  const loadAgents = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/agents`);
+      if (response.ok) {
+        const data = await response.json();
+        setAgents(data.agents || []);
+        
+        // Set first agent as selected if none selected
+        if (data.agents && data.agents.length > 0 && !selectedAgent) {
+          setSelectedAgent(data.agents[0].id);
+        }
+      }
+    } catch (error) {
+      logFrontendError('AGENTS_LOAD_ERROR', 'Failed to load agents', error);
+    }
+  };
+
+  // Check backend connection and load agents on mount
   useEffect(() => {
     async function checkBackend() {
       try {
@@ -87,6 +84,8 @@ function App() {
         if (response.ok) {
           setConnecting(false);
           logFrontendError('FRONTEND_INIT', 'Frontend connected to backend successfully');
+          // Load agents after successful connection
+          await loadAgents();
         } else {
           throw new Error(`Backend responded with status: ${response.status}`);
         }
@@ -104,6 +103,13 @@ function App() {
       chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
     }
   }, [messages]);
+
+  // Handle agent creation
+  const handleAgentCreated = (newAgent) => {
+    setAgents(prev => [newAgent, ...prev]);
+    setSelectedAgent(newAgent.id);
+    logFrontendError('FRONTEND_AGENT_CREATED', `Created agent: ${newAgent.name}`);
+  };
 
   // Handle sending messages
   async function handleSend() {
@@ -241,13 +247,13 @@ function App() {
                   className="agent-avatar"
                   style={{ backgroundColor: getAvatarColor(agent.name) }}
                 >
-                  {agent.name.charAt(0).toUpperCase()}
+                  {agent.avatar_image || agent.name.charAt(0).toUpperCase()}
                 </div>
                 <div className="agent-info">
                   <div className="agent-name">{agent.name}</div>
                   <div className="agent-meta">
                     <span className="downtime">
-                      {calculateDowntime(agent.lastActive)}
+                      {calculateDowntime(agent.last_active)}
                     </span>
                     <span className={`status ${agent.status}`}>
                       {agent.status}
@@ -258,7 +264,10 @@ function App() {
             ))}
             
             {/* Create New Agent Button */}
-            <div className="agent-item create-new">
+            <div 
+              className="agent-item create-new"
+              onClick={() => setShowCreateModal(true)}
+            >
               <div className="agent-avatar create-avatar">
                 +
               </div>
@@ -398,6 +407,13 @@ function App() {
         onChange={handleFileSelect}
         multiple
         style={{ display: 'none' }}
+      />
+
+      {/* Create Agent Modal */}
+      <CreateAgentModal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        onAgentCreated={handleAgentCreated}
       />
     </div>
   );
