@@ -247,7 +247,19 @@ function App() {
                   className="agent-avatar"
                   style={{ backgroundColor: getAvatarColor(agent.name) }}
                 >
-                  {agent.avatar_image || agent.name.charAt(0).toUpperCase()}
+                  {agent.avatar_image ? (
+                    agent.avatar_image.startsWith('/api/avatars/') ? (
+                      <img 
+                        src={`http://localhost:5000${agent.avatar_image}`} 
+                        alt={agent.name}
+                        className="agent-avatar-image"
+                      />
+                    ) : (
+                      agent.avatar_image
+                    )
+                  ) : (
+                    agent.name.charAt(0).toUpperCase()
+                  )}
                 </div>
                 <div className="agent-info">
                   <div className="agent-name">{agent.name}</div>

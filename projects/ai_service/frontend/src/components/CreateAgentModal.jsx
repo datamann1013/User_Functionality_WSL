@@ -3,10 +3,10 @@ import React, { useState, useEffect } from 'react';
 const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
   const [formData, setFormData] = useState({
     name: '',
-    avatar_image: '',
+    avatar_image: null,
     model_name: 'llama3.2:1b',
-    temperature: 0.7,
-    top_p: 0.9,
+    temperature: 70,
+    top_p: 90,
     system_prompt: 'You are a helpful AI assistant.',
     max_tokens: 2048
   });
@@ -14,12 +14,8 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
   const [availableModels, setAvailableModels] = useState([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
-
-  // Predefined avatar options
-  const avatarOptions = [
-    '🤖', '👨‍💻', '👩‍💻', '🧠', '⚡', '🚀', '💡', '🎯', '🔬', '📊',
-    '🎨', '📝', '💬', '🌟', '🔥', '💎', '🎪', '🎭', '🎪', '🦄'
-  ];
+  const [avatarPreview, setAvatarPreview] = useState(null);
+  const [modelDownloading, setModelDownloading] = useState(null);
 
   // Common model options (will be supplemented by API)
   const commonModels = [
@@ -66,6 +62,72 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
     }
   };
 
+  const handleAvatarUpload = (event) => {
+    const file = event.target.files[0];
+    if (file) {
+      // Validate file type
+      if (!file.type.startsWith('image/')) {
+        setErrors(prev => ({ ...prev, avatar_image: 'Please select an image file' }));
+        return;
+      }
+      
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        setErrors(prev => ({ ...prev, avatar_image: 'Image must be less than 5MB' }));
+        return;
+      }
+      
+      // Create preview
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setAvatarPreview(e.target.result);
+        setFormData(prev => ({ ...prev, avatar_image: file }));
+        setErrors(prev => ({ ...prev, avatar_image: null }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const checkModelAvailability = async (modelName) => {
+    try {
+      const response = await fetch(`http://localhost:5000/api/models/check/${modelName}`);
+      if (response.ok) {
+        const data = await response.json();
+        return data.available;
+      }
+      return false;
+    } catch (error) {
+      console.error('Failed to check model availability:', error);
+      return false;
+    }
+  };
+
+  const handleModelDownload = async (modelName) => {
+    try {
+      setModelDownloading(modelName);
+      
+      const response = await fetch(`http://localhost:5000/api/models/download/${modelName}`, {
+        method: 'POST'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          // Refresh available models
+          await fetchAvailableModels();
+        } else {
+          setErrors(prev => ({ ...prev, model_download: data.error || 'Download failed' }));
+        }
+      } else {
+        setErrors(prev => ({ ...prev, model_download: 'Failed to start download' }));
+      }
+    } catch (error) {
+      setErrors(prev => ({ ...prev, model_download: 'Network error during download' }));
+    } finally {
+      setModelDownloading(null);
+    }
+  };
+
   const validateForm = () => {
     const newErrors = {};
     
@@ -77,12 +139,12 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
       newErrors.model_name = 'Model selection is required';
     }
     
-    if (formData.temperature < 0 || formData.temperature > 2) {
-      newErrors.temperature = 'Temperature must be between 0 and 2';
+    if (formData.temperature < 0 || formData.temperature > 100) {
+      newErrors.temperature = 'Temperature must be between 0 and 100';
     }
     
-    if (formData.top_p < 0 || formData.top_p > 1) {
-      newErrors.top_p = 'Top P must be between 0 and 1';
+    if (formData.top_p < 0 || formData.top_p > 100) {
+      newErrors.top_p = 'Top P must be between 0 and 100';
     }
 
     setErrors(newErrors);
@@ -99,12 +161,37 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
     setLoading(true);
     
     try {
+      // Check if model is available, if not ask for download permission
+      const modelAvailable = await checkModelAvailability(formData.model_name);
+      
+      if (!modelAvailable) {
+        const shouldDownload = window.confirm(
+          `The model "${formData.model_name}" is not available locally. Would you like to download it? This may take several minutes.`
+        );
+        
+        if (shouldDownload) {
+          await handleModelDownload(formData.model_name);
+        } else {
+          setErrors({ model_download: 'Agent will be created but remain offline until model is downloaded' });
+        }
+      }
+
+      // Prepare form data for submission
+      const submitData = new FormData();
+      submitData.append('name', formData.name);
+      submitData.append('model_name', formData.model_name);
+      submitData.append('temperature', formData.temperature / 100); // Convert to 0-1 range for backend
+      submitData.append('top_p', formData.top_p / 100); // Convert to 0-1 range for backend
+      submitData.append('system_prompt', formData.system_prompt);
+      submitData.append('max_tokens', formData.max_tokens);
+      
+      if (formData.avatar_image) {
+        submitData.append('avatar_image', formData.avatar_image);
+      }
+
       const response = await fetch('http://localhost:5000/api/agents', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
+        body: submitData, // Using FormData for file upload
       });
 
       if (response.ok) {
@@ -115,13 +202,14 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
         // Reset form
         setFormData({
           name: '',
-          avatar_image: '',
+          avatar_image: null,
           model_name: 'llama3.2:1b',
-          temperature: 0.7,
-          top_p: 0.9,
+          temperature: 70,
+          top_p: 90,
           system_prompt: 'You are a helpful AI assistant.',
           max_tokens: 2048
         });
+        setAvatarPreview(null);
       } else {
         const error = await response.json();
         setErrors({ submit: error.error || 'Failed to create agent' });
@@ -158,21 +246,32 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
             {errors.name && <span className="error-text">{errors.name}</span>}
           </div>
 
-          {/* Avatar Selection */}
+          {/* Avatar Upload */}
           <div className="form-group">
-            <label>Avatar</label>
-            <div className="avatar-grid">
-              {avatarOptions.map((emoji, index) => (
-                <button
-                  key={index}
-                  type="button"
-                  className={`avatar-option ${formData.avatar_image === emoji ? 'selected' : ''}`}
-                  onClick={() => handleInputChange('avatar_image', emoji)}
-                >
-                  {emoji}
-                </button>
-              ))}
+            <label htmlFor="avatar">Avatar Image</label>
+            <div className="avatar-upload-container">
+              <input
+                id="avatar"
+                type="file"
+                accept="image/*"
+                onChange={handleAvatarUpload}
+                style={{ display: 'none' }}
+              />
+              <label htmlFor="avatar" className="avatar-upload-button">
+                {avatarPreview ? (
+                  <img src={avatarPreview} alt="Avatar preview" className="avatar-preview" />
+                ) : (
+                  <div className="avatar-upload-placeholder">
+                    <span>📁</span>
+                    <span>Choose Image</span>
+                  </div>
+                )}
+              </label>
+              <div className="avatar-upload-info">
+                <small>Upload an image (max 5MB). JPG, PNG, GIF supported.</small>
+              </div>
             </div>
+            {errors.avatar_image && <span className="error-text">{errors.avatar_image}</span>}
           </div>
 
           {/* Model Selection */}
@@ -187,11 +286,13 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
               <option value="">Select a model</option>
               {[...new Set([...commonModels, ...availableModels])].map((model) => (
                 <option key={model} value={model}>
-                  {model}
+                  {model} {availableModels.includes(model) ? '✓' : '⬇️'}
                 </option>
               ))}
             </select>
+            <small>✓ = Available locally, ⬇️ = Needs download</small>
             {errors.model_name && <span className="error-text">{errors.model_name}</span>}
+            {errors.model_download && <span className="error-text">{errors.model_download}</span>}
           </div>
 
           {/* System Prompt */}
@@ -217,12 +318,12 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
                   id="temperature"
                   type="range"
                   min="0"
-                  max="2"
-                  step="0.1"
+                  max="100"
+                  step="1"
                   value={formData.temperature}
-                  onChange={(e) => handleInputChange('temperature', parseFloat(e.target.value))}
+                  onChange={(e) => handleInputChange('temperature', parseInt(e.target.value))}
                 />
-                <small>Controls randomness (0 = focused, 2 = creative)</small>
+                <small>Controls randomness (0 = focused, 100 = creative)</small>
                 {errors.temperature && <span className="error-text">{errors.temperature}</span>}
               </div>
               
@@ -232,12 +333,12 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
                   id="top_p"
                   type="range"
                   min="0"
-                  max="1"
-                  step="0.05"
+                  max="100"
+                  step="1"
                   value={formData.top_p}
-                  onChange={(e) => handleInputChange('top_p', parseFloat(e.target.value))}
+                  onChange={(e) => handleInputChange('top_p', parseInt(e.target.value))}
                 />
-                <small>Controls diversity (0 = narrow, 1 = diverse)</small>
+                <small>Controls diversity (0 = narrow, 100 = diverse)</small>
                 {errors.top_p && <span className="error-text">{errors.top_p}</span>}
               </div>
             </div>

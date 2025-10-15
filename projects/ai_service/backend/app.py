@@ -9,10 +9,12 @@ import json
 import random
 import argparse
 import requests
+import base64
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
+from werkzeug.utils import secure_filename
 
 # Import our database module
 from database import db
@@ -22,6 +24,12 @@ load_dotenv()
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for frontend
+
+# Configuration for file uploads
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
+UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'uploads', 'avatars')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 # Configuration
 ERRORLOGGER_URL = os.environ.get('ERRORLOGGER_SERVICE_URL', 'http://127.0.0.1:5001/log')
@@ -48,6 +56,31 @@ def log_to_errorlogger(error_code, message=None, exception=None, extra=None):
     except Exception:
         # Fail silently if ErrorLogger unavailable
         return False
+
+def allowed_file(filename):
+    """Check if file extension is allowed"""
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def save_avatar_file(file):
+    """Save uploaded avatar file and return filename"""
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        # Add timestamp to avoid conflicts
+        timestamp = str(int(datetime.now().timestamp()))
+        name, ext = os.path.splitext(filename)
+        filename = f"{name}_{timestamp}{ext}"
+        
+        file_path = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(file_path)
+        return filename
+    return None
+
+def get_avatar_url(filename):
+    """Get URL for avatar file"""
+    if filename:
+        return f"/api/avatars/{filename}"
+    return None
 
 def check_ollama_service():
     """Check if Ollama service is available"""
@@ -364,7 +397,30 @@ def get_agents():
 def create_agent():
     """Create a new agent"""
     try:
-        data = request.get_json()
+        # Handle both JSON and form data
+        if request.content_type and 'multipart/form-data' in request.content_type:
+            # Form data with file upload
+            data = {
+                'name': request.form.get('name'),
+                'model_name': request.form.get('model_name'),
+                'temperature': float(request.form.get('temperature', 0.7)),
+                'top_p': float(request.form.get('top_p', 0.9)),
+                'system_prompt': request.form.get('system_prompt', 'You are a helpful AI assistant.'),
+                'max_tokens': int(request.form.get('max_tokens', 2048))
+            }
+            
+            # Handle avatar upload
+            avatar_filename = None
+            if 'avatar_image' in request.files:
+                file = request.files['avatar_image']
+                if file.filename != '':
+                    avatar_filename = save_avatar_file(file)
+                    if avatar_filename:
+                        data['avatar_image'] = get_avatar_url(avatar_filename)
+            
+        else:
+            # JSON data
+            data = request.get_json()
         
         if not data:
             return jsonify({'error': 'No data provided'}), 400
@@ -495,6 +551,63 @@ def get_available_models():
     except Exception as e:
         log_to_errorlogger('MODELS_LIST_ERROR', 'Failed to retrieve models', e)
         return jsonify({'error': 'Failed to retrieve models', 'details': str(e)}), 500
+
+@app.route('/api/models/check/<model_name>', methods=['GET'])
+def check_specific_model(model_name):
+    """Check if a specific model is available"""
+    try:
+        available = check_model_availability(model_name)
+        return jsonify({'model': model_name, 'available': available})
+    except Exception as e:
+        log_to_errorlogger('MODEL_CHECK_ERROR', f'Failed to check model {model_name}', e)
+        return jsonify({'error': 'Failed to check model availability', 'details': str(e)}), 500
+
+@app.route('/api/models/download/<model_name>', methods=['POST'])
+def download_model(model_name):
+    """Download a model via Ollama"""
+    try:
+        if not check_ollama_service():
+            return jsonify({'error': 'Ollama service not available'}), 503
+        
+        # Check if model is already available
+        if check_model_availability(model_name):
+            return jsonify({'success': True, 'message': 'Model already available'})
+        
+        # Request model download from Ollama service
+        response = requests.post(f"{OLLAMA_SERVICE_URL}/api/models/pull", 
+                               json={'model': model_name}, 
+                               timeout=300)  # 5 minute timeout for downloads
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('success'):
+                # Update all agents using this model to 'idle' status
+                agents_with_model = db.get_agents_by_model(model_name)
+                for agent in agents_with_model:
+                    db.update_agent_status(agent['id'], 'idle')
+                
+                log_to_errorlogger('MODEL_DOWNLOAD_SUCCESS', f'Downloaded model: {model_name}')
+                return jsonify({'success': True, 'message': f'Model {model_name} downloaded successfully'})
+            else:
+                return jsonify({'success': False, 'error': data.get('error', 'Download failed')})
+        else:
+            return jsonify({'success': False, 'error': f'Ollama responded with status {response.status_code}'}), response.status_code
+    
+    except requests.exceptions.Timeout:
+        return jsonify({'success': False, 'error': 'Download timeout - model download may still be in progress'}), 408
+    except Exception as e:
+        log_to_errorlogger('MODEL_DOWNLOAD_ERROR', f'Failed to download model {model_name}', e)
+        return jsonify({'success': False, 'error': 'Failed to download model', 'details': str(e)}), 500
+
+@app.route('/api/avatars/<filename>')
+def serve_avatar(filename):
+    """Serve avatar images"""
+    try:
+        from flask import send_from_directory
+        return send_from_directory(UPLOAD_FOLDER, filename)
+    except Exception as e:
+        log_to_errorlogger('AVATAR_SERVE_ERROR', f'Failed to serve avatar {filename}', e)
+        return jsonify({'error': 'Avatar not found'}), 404
 
 def check_model_availability(model_name):
     """Check if a specific model is available in Ollama"""
