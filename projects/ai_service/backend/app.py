@@ -460,47 +460,138 @@ def chat():
         if not message:
             return jsonify({'error': 'Message is required'}), 400
         
+        # Set agent as busy before processing
+        db.update_agent_status(agent_id, 'busy')
+        
         log_to_errorlogger('AI_CHAT_REQUEST', f'Chat request: "{message[:50]}..."', 
                           extra={'agent_id': agent_id, 'message_length': len(message)})
         
-        # Try Ollama service first
-        if check_ollama_service():
-            log_to_errorlogger('AI_CHAT_OLLAMA_ROUTE', f'Routing to Ollama service for agent {agent_id}')
-            start_time = time.time()
-            ollama_response = route_to_ollama_chat(message, agent_id)
-            response_time = int((time.time() - start_time) * 1000)  # Convert to milliseconds
-            
-            if ollama_response:
-                log_to_errorlogger('AI_CHAT_OLLAMA_SUCCESS', 
-                                 f'Ollama response for agent {agent_id}: "{ollama_response.get("response", "")[:50]}..."')
+        try:
+            # Try Ollama service first
+            if check_ollama_service():
+                log_to_errorlogger('AI_CHAT_OLLAMA_ROUTE', f'Routing to Ollama service for agent {agent_id}')
+                start_time = time.time()
+                ollama_response = route_to_ollama_chat(message, agent_id)
+                response_time = int((time.time() - start_time) * 1000)  # Convert to milliseconds
                 
-                # Log the conversation to database
-                try:
-                    db.log_conversation(
-                        agent_id=agent_id,
-                        user_message=message,
-                        ai_response=ollama_response.get('response', ''),
-                        model_used=ollama_response.get('model_name', 'unknown'),
-                        parameters_used=ollama_response.get('parameters_used', {}),
-                        tokens_used=ollama_response.get('tokens_used', 0),
-                        response_time_ms=response_time,
-                        session_id=data.get('session_id')  # Optional session tracking
-                    )
+                if ollama_response:
+                    log_to_errorlogger('AI_CHAT_OLLAMA_SUCCESS', 
+                                     f'Ollama response for agent {agent_id}: "{ollama_response.get("response", "")[:50]}..."')
                     
-                    # Extract and store important context from the conversation
-                    extract_and_store_memory(agent_id, message, ollama_response.get('response', ''))
+                    # Log the conversation to database
+                    try:
+                        db.log_conversation(
+                            agent_id=agent_id,
+                            user_message=message,
+                            ai_response=ollama_response.get('response', ''),
+                            model_used=ollama_response.get('model_name', 'unknown'),
+                            parameters_used=ollama_response.get('parameters_used', {}),
+                            tokens_used=ollama_response.get('tokens_used', 0),
+                            response_time_ms=response_time,
+                            session_id=data.get('session_id')  # Optional session tracking
+                        )
+                        
+                        # Extract and store important context from the conversation
+                        extract_and_store_memory(agent_id, message, ollama_response.get('response', ''))
+                        
+                        log_to_errorlogger('CONVERSATION_LOGGED', f'Conversation logged for agent {agent_id}')
+                    except Exception as e:
+                        log_to_errorlogger('CONVERSATION_LOG_ERROR', 'Failed to log conversation', e)
                     
-                    log_to_errorlogger('CONVERSATION_LOGGED', f'Conversation logged for agent {agent_id}')
-                except Exception as e:
-                    log_to_errorlogger('CONVERSATION_LOG_ERROR', 'Failed to log conversation', e)
-                
-                return jsonify(ollama_response)
+                    # Set agent back to idle after successful response
+                    db.update_agent_status(agent_id, 'idle')
+                    
+                    return jsonify(ollama_response)
+                else:
+                    log_to_errorlogger('AI_CHAT_OLLAMA_FALLBACK', 
+                                     'Ollama service failed, falling back to demo model')
             else:
-                log_to_errorlogger('AI_CHAT_OLLAMA_FALLBACK', 
-                                 'Ollama service failed, falling back to demo model')
-        else:
-            log_to_errorlogger('AI_CHAT_OLLAMA_UNAVAILABLE', 
-                             'Ollama service unavailable, using demo model')
+                log_to_errorlogger('AI_CHAT_OLLAMA_UNAVAILABLE', 
+                                 'Ollama service unavailable, using demo model')
+            
+            # Fallback to demo model functionality
+            # Check if we have an active demo model
+            if not active_model or active_model not in loaded_models:
+                # Try to initialize a model if none active
+                if not startup_model_check():
+                    # Set agent back to offline if no models available
+                    db.update_agent_status(agent_id, 'offline')
+                    return jsonify({'error': 'No AI models available'}), 503
+            
+            # Get active demo model info
+            model_info = loaded_models.get(active_model, {})
+            model_name = model_info.get('config', {}).get('name', 'AI Assistant')
+            
+            # Generate contextual response using demo model
+            message_lower = message.lower()
+            if any(word in message_lower for word in ['hello', 'hi', 'hey']):
+                response = f"Hello! I'm {model_name}, your AI assistant. How can I help you today?"
+            elif any(word in message_lower for word in ['model', 'who are you']):
+                response = f"I'm {model_name}, a free demonstration model. I'm running locally without any API costs."
+            elif any(word in message_lower for word in ['test', 'testing']):
+                response = f"Great! {model_name} is working correctly. All systems are operational."
+            elif any(word in message_lower for word in ['error', 'log']):
+                response = f"I'm {model_name}, integrated with the ErrorLogger service for comprehensive monitoring."
+            elif any(word in message_lower for word in ['ollama', 'real ai', 'actual ai']):
+                response = f"I'm currently using {model_name} demo mode. The Ollama AI service is available but not responding. Real AI capabilities can be enabled when Ollama is properly configured."
+            else:
+                responses = [
+                    f"I'm {model_name}, ready to assist you with any questions or tasks.",
+                    f"How can {model_name} help you today?",
+                    f"I'm here as {model_name} to demonstrate the AI service functionality.",
+                    f"Thanks for using {model_name}! The system is working perfectly.",
+                    f"This is {model_name} responding from the AI service backend."
+                ]
+                response = random.choice(responses)
+            
+            result = {
+                'response': response,
+                'agent_id': agent_id,
+                'model_id': active_model,
+                'model_name': model_name,
+                'timestamp': datetime.now().isoformat(),
+                'mode': 'demo_fallback',
+                'ollama_available': False
+            }
+            
+            # Log the demo conversation to database as well
+            try:
+                db.log_conversation(
+                    agent_id=agent_id,
+                    user_message=message,
+                    ai_response=response,
+                    model_used=f"{model_name} (demo)",
+                    parameters_used={'mode': 'demo_fallback'},
+                    tokens_used=len(response.split()),  # Rough estimate
+                    response_time_ms=0,  # Demo responses are instant
+                    session_id=data.get('session_id')
+                )
+                log_to_errorlogger('CONVERSATION_LOGGED', f'Demo conversation logged for agent {agent_id}')
+            except Exception as e:
+                log_to_errorlogger('CONVERSATION_LOG_ERROR', 'Failed to log demo conversation', e)
+            
+            # Set agent back to idle after demo response
+            db.update_agent_status(agent_id, 'idle')
+            
+            log_to_errorlogger('AI_CHAT_DEMO_RESPONSE', f'Demo response from {active_model}: "{response[:50]}..."',
+                              extra={'agent_id': agent_id, 'model_id': active_model, 'response_length': len(response)})
+            
+            return jsonify(result)
+        
+        except Exception as inner_e:
+            log_to_errorlogger('AI_CHAT_INNER_ERROR', 'Error during chat processing', inner_e)
+            # Set agent back to idle on any error
+            db.update_agent_status(agent_id, 'idle')
+            return jsonify({'error': 'Chat processing failed', 'details': str(inner_e)}), 500
+        
+    except Exception as e:
+        log_to_errorlogger('AI_CHAT_ERROR', 'Chat request failed', e)
+        # Try to set agent back to idle on any error, but don't fail if this fails
+        try:
+            db.update_agent_status(agent_id, 'idle')
+        except:
+            pass
+        return jsonify({'error': 'Chat request failed', 'details': str(e)}), 500
         
         # Fallback to demo model functionality
         # Check if we have an active demo model

@@ -192,7 +192,7 @@ function App() {
       if (!connecting) {
         await loadAgents();
       }
-    }, 30000); // Refresh every 30 seconds
+    }, 5000); // Refresh every 5 seconds for better busy status visibility
     
     return () => clearInterval(refreshInterval);
   }, []);
