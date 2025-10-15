@@ -44,6 +44,43 @@ function calculateDowntime(lastActive) {
   return 'Just now';
 }
 
+// Helper function to get readable status with download info
+function getAgentStatusDisplay(agent) {
+  // Check if model is downloading (from metadata)
+  let metadata = {};
+  try {
+    metadata = typeof agent.metadata === 'string' ? JSON.parse(agent.metadata) : agent.metadata || {};
+  } catch (e) {
+    metadata = {};
+  }
+  
+  // Always show offline if model is downloading or unavailable
+  if (metadata.model_downloading || agent.status === 'offline') {
+    return {
+      text: 'offline',
+      class: 'offline'
+    };
+  }
+  
+  switch (agent.status) {
+    case 'idle':
+      return {
+        text: 'ready',
+        class: 'idle'
+      };
+    case 'busy':
+      return {
+        text: 'thinking',
+        class: 'busy'
+      };
+    default:
+      return {
+        text: agent.status,
+        class: agent.status
+      };
+  }
+}
+
 function App() {
   // State management
   const [agents, setAgents] = useState([]);
@@ -133,25 +170,31 @@ function App() {
     }
   };
 
-  // Check backend connection and load agents on mount
+    // Check backend connection and load agents on mount
   useEffect(() => {
-    async function checkBackend() {
+    const checkBackend = async () => {
       try {
         const response = await fetch(`${API_BASE}/health`);
         if (response.ok) {
           setConnecting(false);
-          logFrontendError('FRONTEND_INIT', 'Frontend connected to backend successfully');
-          // Load agents after successful connection
           await loadAgents();
-        } else {
-          throw new Error(`Backend responded with status: ${response.status}`);
         }
       } catch (error) {
-        setConnecting(true);
-        logFrontendError('FRONTEND_CONNECTION_ERROR', 'Failed to connect to backend', error);
+        logFrontendError('BACKEND_CONNECTION_ERROR', 'Failed to connect to backend', error);
+        setTimeout(checkBackend, 5000); // Retry after 5 seconds
       }
-    }
+    };
+
     checkBackend();
+    
+    // Set up periodic agent refresh to check for status updates
+    const refreshInterval = setInterval(async () => {
+      if (!connecting) {
+        await loadAgents();
+      }
+    }, 30000); // Refresh every 30 seconds
+    
+    return () => clearInterval(refreshInterval);
   }, []);
 
   // Auto scroll to bottom when new messages arrive
@@ -357,8 +400,8 @@ function App() {
                     <span className="downtime">
                       {calculateDowntime(agent.last_active)}
                     </span>
-                    <span className={`status ${agent.status}`}>
-                      {agent.status}
+                    <span className={`status ${getAgentStatusDisplay(agent).class}`}>
+                      {getAgentStatusDisplay(agent).text}
                     </span>
                   </div>
                 </div>

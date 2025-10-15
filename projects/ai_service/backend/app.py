@@ -622,6 +622,13 @@ def create_agent():
                     if avatar_filename:
                         data['avatar_image'] = get_avatar_url(avatar_filename)
             
+            # Handle metadata
+            if 'metadata' in request.form:
+                try:
+                    data['metadata'] = json.loads(request.form.get('metadata'))
+                except json.JSONDecodeError:
+                    data['metadata'] = {}
+            
         else:
             # JSON data
             data = request.get_json()
@@ -785,10 +792,8 @@ def download_model(model_name):
         if response.status_code == 200:
             data = response.json()
             if data.get('success'):
-                # Update all agents using this model to 'idle' status
-                agents_with_model = db.get_agents_by_model(model_name)
-                for agent in agents_with_model:
-                    db.update_agent_status(agent['id'], 'idle')
+                # Update all agents using this model
+                update_agents_after_model_download(model_name)
                 
                 log_to_errorlogger('MODEL_DOWNLOAD_SUCCESS', f'Downloaded model: {model_name}')
                 return jsonify({'success': True, 'message': f'Model {model_name} downloaded successfully'})
@@ -918,6 +923,39 @@ def add_agent_memory(agent_id):
         log_to_errorlogger('AGENT_MEMORY_ADD_ERROR', f'Failed to add memory for agent {agent_id}', e)
         return jsonify({'error': 'Failed to add agent memory'}), 500
 
+@app.route('/api/agents/update-status', methods=['POST'])
+def update_all_agent_status():
+    """Update all agent statuses based on model availability"""
+    try:
+        agents = db.get_all_agents()
+        updated_count = 0
+        
+        for agent in agents:
+            model_available = check_model_availability(agent['model_name'])
+            new_status = 'idle' if model_available else 'offline'
+            
+            if agent['status'] != new_status:
+                db.update_agent_status(agent['id'], new_status)
+                updated_count += 1
+                
+                # If model is now available, clear downloading metadata
+                if model_available:
+                    try:
+                        metadata = json.loads(agent.get('metadata', '{}'))
+                        if metadata.get('model_downloading'):
+                            metadata.pop('model_downloading', None)
+                            metadata.pop('download_started', None)
+                            db.update_agent(agent['id'], {'metadata': metadata})
+                    except (json.JSONDecodeError, Exception):
+                        pass
+        
+        log_to_errorlogger('AGENT_STATUS_UPDATE', f'Updated status for {updated_count} agents')
+        return jsonify({'success': True, 'updated_count': updated_count})
+        
+    except Exception as e:
+        log_to_errorlogger('AGENT_STATUS_UPDATE_ERROR', 'Failed to update agent statuses', e)
+        return jsonify({'error': 'Failed to update agent statuses'}), 500
+
 def check_model_availability(model_name):
     """Check if a specific model is available in Ollama"""
     try:
@@ -933,6 +971,174 @@ def check_model_availability(model_name):
         return False
         
     except requests.exceptions.RequestException:
+        return False
+
+def update_agents_after_model_download(model_name):
+    """Update agent status and metadata after a model download completes"""
+    try:
+        # Get all agents using this model
+        agents_with_model = db.get_agents_by_model(model_name)
+        
+        for agent in agents_with_model:
+            # Update status to idle
+            db.update_agent_status(agent['id'], 'idle')
+            
+            # Clear downloading metadata
+            try:
+                metadata = json.loads(agent.get('metadata', '{}'))
+                if metadata.get('model_downloading'):
+                    metadata.pop('model_downloading', None)
+                    metadata.pop('download_started', None)
+                    db.update_agent(agent['id'], {'metadata': metadata})
+            except (json.JSONDecodeError, Exception) as e:
+                log_to_errorlogger('METADATA_UPDATE_ERROR', f'Failed to update metadata for agent {agent["id"]}', e)
+        
+        log_to_errorlogger('AGENTS_UPDATED_AFTER_DOWNLOAD', f'Updated {len(agents_with_model)} agents after {model_name} download')
+        
+    except Exception as e:
+        log_to_errorlogger('UPDATE_AGENTS_ERROR', f'Failed to update agents after {model_name} download', e)
+
+def download_model_sync(model_name):
+    """Download a model synchronously during startup"""
+    try:
+        if not check_ollama_service():
+            log_to_errorlogger('STARTUP_MODEL_DOWNLOAD_NO_OLLAMA', f'Cannot download {model_name}: Ollama service not available')
+            return False
+        
+        # Check if model is already available
+        if check_model_availability(model_name):
+            log_to_errorlogger('STARTUP_MODEL_DOWNLOAD_EXISTS', f'Model {model_name} already available')
+            return True
+        
+        log_to_errorlogger('STARTUP_MODEL_DOWNLOAD_START', f'Starting download of model: {model_name}')
+        print(f"   📥 Downloading model: {model_name}...")
+        
+        # Request model download from Ollama service
+        response = requests.post(f"{OLLAMA_SERVICE_URL}/api/models/pull", 
+                               json={'model': model_name}, 
+                               timeout=600)  # 10 minute timeout for startup downloads
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('success'):
+                log_to_errorlogger('STARTUP_MODEL_DOWNLOAD_SUCCESS', f'Successfully downloaded model: {model_name}')
+                print(f"   ✅ Model downloaded: {model_name}")
+                
+                # Update all agents using this model
+                update_agents_after_model_download(model_name)
+                return True
+            else:
+                log_to_errorlogger('STARTUP_MODEL_DOWNLOAD_FAIL', f'Failed to download {model_name}: {data.get("error", "Unknown error")}')
+                print(f"   ❌ Failed to download {model_name}: {data.get('error', 'Unknown error')}")
+                return False
+        else:
+            log_to_errorlogger('STARTUP_MODEL_DOWNLOAD_HTTP_ERROR', f'HTTP error downloading {model_name}: {response.status_code}')
+            print(f"   ❌ HTTP error downloading {model_name}: {response.status_code}")
+            return False
+    
+    except requests.exceptions.Timeout:
+        log_to_errorlogger('STARTUP_MODEL_DOWNLOAD_TIMEOUT', f'Timeout downloading {model_name}')
+        print(f"   ⏰ Timeout downloading {model_name} (continuing in background)")
+        return False
+    except Exception as e:
+        log_to_errorlogger('STARTUP_MODEL_DOWNLOAD_ERROR', f'Error downloading {model_name}', e)
+        print(f"   ❌ Error downloading {model_name}: {str(e)}")
+        return False
+
+def check_and_download_agent_models():
+    """Check if models used by saved agents are available and download missing ones"""
+    try:
+        # Get all saved agents
+        agents = db.get_all_agents()
+        if not agents:
+            log_to_errorlogger('STARTUP_NO_AGENTS', 'No saved agents found')
+            return True
+        
+        # Get unique models used by agents
+        agent_models = set()
+        for agent in agents:
+            model_name = agent.get('model_name')
+            if model_name:
+                agent_models.add(model_name)
+        
+        if not agent_models:
+            log_to_errorlogger('STARTUP_NO_AGENT_MODELS', 'No models specified in saved agents')
+            return True
+        
+        log_to_errorlogger('STARTUP_CHECKING_AGENT_MODELS', f'Checking {len(agent_models)} models used by agents: {list(agent_models)}')
+        print(f"   🔍 Checking models for {len(agents)} saved agents...")
+        
+        # Check Ollama availability
+        if not check_ollama_service():
+            log_to_errorlogger('STARTUP_OLLAMA_UNAVAILABLE', 'Ollama service not available for model checking')
+            print(f"   ⚠️  Ollama service not available - agents will be marked offline")
+            
+            # Mark all agents as offline
+            for agent in agents:
+                db.update_agent_status(agent['id'], 'offline')
+            
+            return True  # Continue startup even without Ollama
+        
+        # Check each model and download if missing
+        missing_models = []
+        available_models = []
+        failed_downloads = []
+        
+        for model_name in agent_models:
+            if check_model_availability(model_name):
+                available_models.append(model_name)
+                log_to_errorlogger('STARTUP_MODEL_AVAILABLE', f'Model available: {model_name}')
+            else:
+                missing_models.append(model_name)
+                log_to_errorlogger('STARTUP_MODEL_MISSING', f'Model missing: {model_name}')
+        
+        print(f"   ✅ Available models: {len(available_models)}")
+        if available_models:
+            print(f"      {', '.join(available_models)}")
+        
+        if missing_models:
+            print(f"   📥 Missing models: {len(missing_models)}")
+            print(f"      {', '.join(missing_models)}")
+            print(f"   ⏳ Downloading missing models...")
+            
+            for model_name in missing_models:
+                print(f"      Downloading {model_name}...")
+                if download_model_sync(model_name):
+                    available_models.append(model_name)
+                else:
+                    failed_downloads.append(model_name)
+        
+        # Update agent statuses based on model availability
+        updated_agents = 0
+        for agent in agents:
+            model_name = agent.get('model_name')
+            if model_name in available_models:
+                if agent['status'] != 'idle':
+                    db.update_agent_status(agent['id'], 'idle')
+                    updated_agents += 1
+            else:
+                if agent['status'] != 'offline':
+                    db.update_agent_status(agent['id'], 'offline')
+                    updated_agents += 1
+        
+        # Log summary
+        summary_msg = f'Agent model check complete: {len(available_models)} available, {len(failed_downloads)} failed'
+        log_to_errorlogger('STARTUP_AGENT_MODELS_COMPLETE', summary_msg)
+        
+        print(f"   📊 Model check summary:")
+        print(f"      Available: {len(available_models)} models")
+        print(f"      Failed: {len(failed_downloads)} models")
+        print(f"      Updated: {updated_agents} agents")
+        
+        if failed_downloads:
+            print(f"   ⚠️  Failed downloads: {', '.join(failed_downloads)}")
+            print(f"      These agents will remain offline until models are available")
+        
+        return len(failed_downloads) == 0  # Return True if all downloads succeeded
+        
+    except Exception as e:
+        log_to_errorlogger('STARTUP_AGENT_MODELS_ERROR', 'Failed to check/download agent models', e)
+        print(f"   ❌ Error checking agent models: {str(e)}")
         return False
 
 if __name__ == '__main__':
@@ -959,6 +1165,17 @@ if __name__ == '__main__':
         print(f"   ✅ AI model ready: {active_model}")
     else:
         print(f"   ⚠️  No AI models available (will run in fallback mode)")
+    
+    # Check and download models for saved agents
+    print(f"   🤖 Checking models for saved agents...")
+    agent_models_ready = check_and_download_agent_models()
+    if agent_models_ready:
+        print(f"   ✅ All agent models ready")
+    else:
+        print(f"   ⚠️  Some agent models unavailable (agents marked offline)")
+    
+    print(f"   🚀 AI Service ready!")
+    print(f"")  # Empty line for readability
     
     try:
         app.run(host=args.host, port=args.port, debug=args.debug, use_reloader=False)

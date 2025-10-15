@@ -115,14 +115,22 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
         if (data.success) {
           // Refresh available models
           await fetchAvailableModels();
+          console.log(`Model ${modelName} download completed successfully`);
         } else {
-          setErrors(prev => ({ ...prev, model_download: data.error || 'Download failed' }));
+          console.error(`Model ${modelName} download failed:`, data.error);
+          throw new Error(data.error || 'Download failed');
         }
       } else {
-        setErrors(prev => ({ ...prev, model_download: 'Failed to start download' }));
+        console.error(`Failed to start download for ${modelName}`);
+        throw new Error('Failed to start download');
       }
     } catch (error) {
-      setErrors(prev => ({ ...prev, model_download: 'Network error during download' }));
+      console.error(`Model download error for ${modelName}:`, error);
+      // Only set errors if this is a foreground download (user initiated from model list)
+      if (modelDownloading === modelName) {
+        setErrors(prev => ({ ...prev, model_download: error.message || 'Network error during download' }));
+      }
+      throw error; // Re-throw for background download handling
     } finally {
       setModelDownloading(null);
     }
@@ -161,18 +169,22 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
     setLoading(true);
     
     try {
-      // Check if model is available, if not ask for download permission
+      // Check if model is available
       const modelAvailable = await checkModelAvailability(formData.model_name);
+      
+      let downloadInProgress = false;
       
       if (!modelAvailable) {
         const shouldDownload = window.confirm(
-          `The model "${formData.model_name}" is not available locally. Would you like to download it? This may take several minutes.`
+          `The model "${formData.model_name}" is not available locally. Would you like to download it?\n\nThe agent will be created immediately but will show as "offline" until the download completes. This may take several minutes.`
         );
         
         if (shouldDownload) {
-          await handleModelDownload(formData.model_name);
-        } else {
-          setErrors({ model_download: 'Agent will be created but remain offline until model is downloaded' });
+          downloadInProgress = true;
+          // Start download in background - don't wait for it
+          handleModelDownload(formData.model_name).catch(error => {
+            console.error('Background model download failed:', error);
+          });
         }
       }
 
@@ -185,6 +197,14 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
       submitData.append('system_prompt', formData.system_prompt);
       submitData.append('max_tokens', formData.max_tokens);
       
+      // Add download status to metadata
+      if (downloadInProgress) {
+        submitData.append('metadata', JSON.stringify({
+          model_downloading: true,
+          download_started: new Date().toISOString()
+        }));
+      }
+      
       if (formData.avatar_image) {
         submitData.append('avatar_image', formData.avatar_image);
       }
@@ -196,6 +216,12 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
 
       if (response.ok) {
         const newAgent = await response.json();
+        
+        // Show success message with download info if applicable
+        if (downloadInProgress) {
+          alert(`Agent "${newAgent.name}" created successfully!\n\nThe model "${formData.model_name}" is downloading in the background. The agent will appear offline until the download completes.`);
+        }
+        
         onAgentCreated(newAgent);
         onClose();
         
