@@ -5,6 +5,7 @@ Connects to ErrorLogger service for logging
 """
 import os
 import sys
+import json
 import random
 import argparse
 import requests
@@ -21,9 +22,14 @@ CORS(app)  # Enable CORS for frontend
 
 # Configuration
 ERRORLOGGER_URL = os.environ.get('ERRORLOGGER_SERVICE_URL', 'http://127.0.0.1:5001/log')
+OLLAMA_SERVICE_URL = os.environ.get('OLLAMA_SERVICE_URL', 'http://127.0.0.1:5002')
 SERVICE_NAME = 'ai_service'
+MODELS_FILE = os.path.join(os.path.dirname(__file__), 'models.json')
 
-# Error logging helper
+# Global variables for model state
+loaded_models = {}
+active_model = None
+
 def log_to_errorlogger(error_code, message=None, exception=None, extra=None):
     """Log to ErrorLogger service if available"""
     try:
@@ -40,14 +46,133 @@ def log_to_errorlogger(error_code, message=None, exception=None, extra=None):
         # Fail silently if ErrorLogger unavailable
         return False
 
-# Mock AI responses for demonstration
-MOCK_RESPONSES = [
-    "I'm an AI assistant running in demonstration mode. How can I help you?",
-    "This is a test response from the AI service backend.",
-    "I'm here to demonstrate the chat functionality. What would you like to know?",
-    "The AI service is working correctly and integrated with error logging.",
-    "Thanks for testing the system! Everything appears to be functioning properly."
-]
+def check_ollama_service():
+    """Check if Ollama service is available"""
+    try:
+        response = requests.get(f"{OLLAMA_SERVICE_URL}/health", timeout=3)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('ollama_status', {}).get('running', False)
+        return False
+    except requests.exceptions.RequestException:
+        return False
+
+def route_to_ollama_chat(message, agent_id):
+    """Route chat request to Ollama service"""
+    try:
+        payload = {
+            'message': message,
+            'agent_id': agent_id
+        }
+        
+        response = requests.post(f"{OLLAMA_SERVICE_URL}/api/chat", 
+                               json=payload, timeout=60)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            log_to_errorlogger('OLLAMA_ROUTE_ERROR', 
+                             f'Ollama service error: {response.status_code}',
+                             extra={'response': response.text})
+            return None
+            
+    except requests.exceptions.Timeout:
+        log_to_errorlogger('OLLAMA_ROUTE_TIMEOUT', 'Ollama service timeout')
+        return None
+    except requests.exceptions.RequestException as e:
+        log_to_errorlogger('OLLAMA_ROUTE_REQUEST_ERROR', 'Ollama service request failed', e)
+        return None
+    except Exception as e:
+        log_to_errorlogger('OLLAMA_ROUTE_GENERAL_ERROR', 'Ollama routing error', e)
+        return None
+
+# Default free model configuration
+DEFAULT_MODEL = {
+    "id": "free-assistant",
+    "name": "Free Assistant",
+    "provider": "demo",
+    "model_type": "chat",
+    "status": "idle",
+    "last_active": None,
+    "config": {
+        "max_tokens": 512,
+        "temperature": 0.7,
+        "description": "Simple demonstration model - no API costs"
+    }
+}
+
+def load_models_config():
+    """Load models configuration from JSON file"""
+    try:
+        if os.path.exists(MODELS_FILE):
+            with open(MODELS_FILE, 'r') as f:
+                return json.load(f)
+        else:
+            # Create default model config if none exists
+            default_config = {"models": [DEFAULT_MODEL]}
+            save_models_config(default_config)
+            return default_config
+    except Exception as e:
+        log_to_errorlogger('MODEL_CONFIG_LOAD_ERROR', 'Failed to load models config', e)
+        return {"models": [DEFAULT_MODEL]}
+
+def save_models_config(config):
+    """Save models configuration to JSON file"""
+    try:
+        os.makedirs(os.path.dirname(MODELS_FILE), exist_ok=True)
+        with open(MODELS_FILE, 'w') as f:
+            json.dump(config, f, indent=2)
+        return True
+    except Exception as e:
+        log_to_errorlogger('MODEL_CONFIG_SAVE_ERROR', 'Failed to save models config', e)
+        return False
+
+def initialize_model(model_config):
+    """Initialize a model (demo implementation)"""
+    global loaded_models, active_model
+    
+    model_id = model_config['id']
+    log_to_errorlogger('MODEL_INIT_START', f'Initializing model: {model_id}')
+    
+    try:
+        # For demo - just mark as loaded
+        loaded_models[model_id] = {
+            'config': model_config,
+            'status': 'ready',
+            'loaded_at': datetime.now().isoformat()
+        }
+        
+        # Set as active if no active model
+        if active_model is None:
+            active_model = model_id
+            
+        log_to_errorlogger('MODEL_INIT_SUCCESS', f'Model initialized: {model_id}')
+        return True
+        
+    except Exception as e:
+        log_to_errorlogger('MODEL_INIT_ERROR', f'Failed to initialize model: {model_id}', e)
+        return False
+
+def startup_model_check():
+    """Check and initialize models on startup"""
+    global active_model
+    
+    config = load_models_config()
+    models = config.get('models', [])
+    
+    if not models:
+        log_to_errorlogger('STARTUP_NO_MODELS', 'No models configured, adding default')
+        models = [DEFAULT_MODEL]
+        save_models_config({"models": models})
+    
+    # Initialize first available model
+    for model in models:
+        if initialize_model(model):
+            log_to_errorlogger('STARTUP_MODEL_READY', f'Startup model active: {model["id"]}')
+            return True
+    
+    log_to_errorlogger('STARTUP_MODEL_FAIL', 'Failed to initialize any models')
+    return False
 
 @app.route('/api/log-frontend-error', methods=['POST'])
 def log_frontend_error():
@@ -87,16 +212,45 @@ def health():
     except Exception:
         pass
     
+    # Check Ollama service connectivity
+    ollama_status = 'disconnected'
+    try:
+        response = requests.get(f"{OLLAMA_SERVICE_URL}/health", timeout=2)
+        if response.status_code == 200:
+            ollama_data = response.json()
+            if ollama_data.get('ollama_status', {}).get('running', False):
+                ollama_status = 'connected_with_ollama'
+            else:
+                ollama_status = 'connected_no_ollama'
+    except Exception:
+        pass
+    
     return jsonify({
         'status': 'ok',
         'service': SERVICE_NAME,
         'timestamp': datetime.now().isoformat(),
-        'errorlogger_status': errorlogger_status
+        'errorlogger_status': errorlogger_status,
+        'ollama_service_status': ollama_status,
+        'demo_model_active': active_model
     })
+
+@app.route('/api/ollama/status', methods=['GET'])
+def ollama_status():
+    """Get detailed Ollama service status"""
+    try:
+        response = requests.get(f"{OLLAMA_SERVICE_URL}/health", timeout=5)
+        if response.status_code == 200:
+            return jsonify(response.json())
+        else:
+            return jsonify({'error': 'Ollama service not responding', 'status_code': response.status_code}), 502
+    except requests.exceptions.RequestException as e:
+        return jsonify({'error': 'Cannot connect to Ollama service', 'details': str(e)}), 503
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """Chat endpoint with mock AI responses"""
+    """Chat endpoint with Ollama integration and demo fallback"""
+    global active_model
+    
     try:
         data = request.get_json()
         message = data.get('message', '').strip()
@@ -108,26 +262,67 @@ def chat():
         log_to_errorlogger('AI_CHAT_REQUEST', f'Chat request: "{message[:50]}..."', 
                           extra={'agent_id': agent_id, 'message_length': len(message)})
         
-        # Generate contextual response
+        # Try Ollama service first
+        if check_ollama_service():
+            log_to_errorlogger('AI_CHAT_OLLAMA_ROUTE', f'Routing to Ollama service for agent {agent_id}')
+            ollama_response = route_to_ollama_chat(message, agent_id)
+            
+            if ollama_response:
+                log_to_errorlogger('AI_CHAT_OLLAMA_SUCCESS', 
+                                 f'Ollama response for agent {agent_id}: "{ollama_response.get("response", "")[:50]}..."')
+                return jsonify(ollama_response)
+            else:
+                log_to_errorlogger('AI_CHAT_OLLAMA_FALLBACK', 
+                                 'Ollama service failed, falling back to demo model')
+        else:
+            log_to_errorlogger('AI_CHAT_OLLAMA_UNAVAILABLE', 
+                             'Ollama service unavailable, using demo model')
+        
+        # Fallback to demo model functionality
+        # Check if we have an active demo model
+        if not active_model or active_model not in loaded_models:
+            # Try to initialize a model if none active
+            if not startup_model_check():
+                return jsonify({'error': 'No AI models available'}), 503
+        
+        # Get active demo model info
+        model_info = loaded_models.get(active_model, {})
+        model_name = model_info.get('config', {}).get('name', 'AI Assistant')
+        
+        # Generate contextual response using demo model
         message_lower = message.lower()
         if any(word in message_lower for word in ['hello', 'hi', 'hey']):
-            response = "Hello! I'm the AI service demonstration assistant. How can I help you today?"
+            response = f"Hello! I'm {model_name}, your AI assistant. How can I help you today?"
+        elif any(word in message_lower for word in ['model', 'who are you']):
+            response = f"I'm {model_name}, a free demonstration model. I'm running locally without any API costs."
         elif any(word in message_lower for word in ['test', 'testing']):
-            response = "Great! The AI service is working correctly. All systems are operational."
+            response = f"Great! {model_name} is working correctly. All systems are operational."
         elif any(word in message_lower for word in ['error', 'log']):
-            response = "I'm integrated with the ErrorLogger service for comprehensive monitoring and debugging."
+            response = f"I'm {model_name}, integrated with the ErrorLogger service for comprehensive monitoring."
+        elif any(word in message_lower for word in ['ollama', 'real ai', 'actual ai']):
+            response = f"I'm currently using {model_name} demo mode. The Ollama AI service is available but not responding. Real AI capabilities can be enabled when Ollama is properly configured."
         else:
-            response = random.choice(MOCK_RESPONSES)
+            responses = [
+                f"I'm {model_name}, ready to assist you with any questions or tasks.",
+                f"How can {model_name} help you today?",
+                f"I'm here as {model_name} to demonstrate the AI service functionality.",
+                f"Thanks for using {model_name}! The system is working perfectly.",
+                f"This is {model_name} responding from the AI service backend."
+            ]
+            response = random.choice(responses)
         
         result = {
             'response': response,
             'agent_id': agent_id,
+            'model_id': active_model,
+            'model_name': model_name,
             'timestamp': datetime.now().isoformat(),
-            'mode': 'demonstration'
+            'mode': 'demo_fallback',
+            'ollama_available': False
         }
         
-        log_to_errorlogger('AI_CHAT_RESPONSE', f'Response sent: "{response[:50]}..."',
-                          extra={'agent_id': agent_id, 'response_length': len(response)})
+        log_to_errorlogger('AI_CHAT_DEMO_RESPONSE', f'Demo response from {active_model}: "{response[:50]}..."',
+                          extra={'agent_id': agent_id, 'model_id': active_model, 'response_length': len(response)})
         
         return jsonify(result)
         
@@ -152,6 +347,13 @@ if __name__ == '__main__':
         print(f"   ✅ ErrorLogger connection: OK")
     else:
         print(f"   ⚠️  ErrorLogger connection: Failed (will run without logging)")
+    
+    # Initialize models
+    print(f"   🔧 Initializing AI models...")
+    if startup_model_check():
+        print(f"   ✅ AI model ready: {active_model}")
+    else:
+        print(f"   ⚠️  No AI models available (will run in fallback mode)")
     
     try:
         app.run(host=args.host, port=args.port, debug=args.debug, use_reloader=False)

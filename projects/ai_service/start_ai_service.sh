@@ -1,6 +1,6 @@
 #!/bin/bash
 # AI Service Startup Script
-# Starts 3 separate servers: ErrorLogger + Backend + Frontend
+# Starts 4 separate servers: ErrorLogger + Ollama Service + Backend + Frontend
 
 set -e
 
@@ -8,16 +8,19 @@ set -e
 AI_SERVICE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$AI_SERVICE_DIR/../.." && pwd)"
 BACKEND_DIR="$AI_SERVICE_DIR/backend"
+OLLAMA_SERVICE_DIR="$AI_SERVICE_DIR/ollama_service"
 FRONTEND_DIR="$AI_SERVICE_DIR/frontend"
 VENV_DIR="$PROJECT_ROOT/venv"
 
 # Service ports (configurable for different machines)
 ERRORLOGGER_PORT=${ERRORLOGGER_PORT:-5001}
+OLLAMA_SERVICE_PORT=${OLLAMA_SERVICE_PORT:-5002}
 BACKEND_PORT=${BACKEND_PORT:-5000}
 FRONTEND_PORT=${FRONTEND_PORT:-3000}
 
 # Service URLs
 ERRORLOGGER_URL="http://127.0.0.1:$ERRORLOGGER_PORT"
+OLLAMA_SERVICE_URL="http://127.0.0.1:$OLLAMA_SERVICE_PORT"
 BACKEND_URL="http://127.0.0.1:$BACKEND_PORT"
 FRONTEND_URL="http://127.0.0.1:$FRONTEND_PORT"
 
@@ -112,6 +115,33 @@ start_errorlogger() {
     fi
 }
 
+# Start Ollama Service
+start_ollama_service() {
+    log_info "🧠 Starting Ollama Service (Port: $OLLAMA_SERVICE_PORT)"
+    cd "$OLLAMA_SERVICE_DIR"
+    
+    if check_service "$OLLAMA_SERVICE_URL"; then
+        log_success "✅ Ollama Service already running"
+        return 0
+    fi
+    
+    source "$VENV_DIR/bin/activate"
+    
+    # Set environment for Ollama service
+    export ERRORLOGGER_SERVICE_URL="$ERRORLOGGER_URL/log"
+    
+    python ollama_api.py --port $OLLAMA_SERVICE_PORT --host 127.0.0.1 --skip-setup > ollama_service.log 2>&1 &
+    OLLAMA_SERVICE_PID=$!
+    
+    if wait_for_service "$OLLAMA_SERVICE_URL" "Ollama Service" 15; then
+        log_success "✅ Ollama Service running (PID: $OLLAMA_SERVICE_PID)"
+        return 0
+    else
+        log_warning "⚠️  Ollama Service failed to start (AI will use demo mode)"
+        return 1
+    fi
+}
+
 # Start Backend Server
 start_backend() {
     log_info "🤖 Starting Backend Server (Port: $BACKEND_PORT)"
@@ -127,6 +157,7 @@ start_backend() {
     
     # Set environment for backend
     export ERRORLOGGER_SERVICE_URL="$ERRORLOGGER_URL/log"
+    export OLLAMA_SERVICE_URL="$OLLAMA_SERVICE_URL"
     
     python app.py --port $BACKEND_PORT --host 127.0.0.1 > backend.log 2>&1 &
     BACKEND_PID=$!
@@ -173,9 +204,10 @@ start_frontend() {
 
 # Main startup function
 main() {
-    echo "🚀 AI Service - Three Server Architecture"
-    echo "   This will start 3 separate servers:"
+    echo "🚀 AI Service - Four Server Architecture"
+    echo "   This will start 4 separate servers:"
     echo "   📊 ErrorLogger Server  (Port: $ERRORLOGGER_PORT)"
+    echo "   🧠 Ollama Service       (Port: $OLLAMA_SERVICE_PORT)"
     echo "   🤖 Backend Server      (Port: $BACKEND_PORT)" 
     echo "   🌐 Frontend Server     (Port: $FRONTEND_PORT)"
     echo
@@ -197,6 +229,9 @@ main() {
         exit 1
     fi
     
+    # Start Ollama service (non-critical - continue if it fails)
+    start_ollama_service || log_warning "⚠️  Continuing without Ollama service"
+    
     if ! start_backend; then
         exit 1
     fi
@@ -211,6 +246,8 @@ main() {
     log_info "Access your services:"
     log_info "  🌐 Frontend:     $FRONTEND_URL"
     log_info "  🤖 Backend API:  $BACKEND_URL"
+    log_info "  🧠 Ollama API:   $OLLAMA_SERVICE_URL"
+    log_info "  📊 ErrorLogger:  $ERRORLOGGER_URL"
     log_info "  📊 ErrorLogger:  $ERRORLOGGER_URL"
     echo
     log_info "Logs:"
