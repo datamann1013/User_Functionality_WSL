@@ -4,6 +4,24 @@
 
 set -e
 
+# Handle sudo installation mode
+if [[ "$EUID" -eq 0 ]]; then
+    # Running as root - handle Ollama installation
+    if ! command -v ollama >/dev/null 2>&1; then
+        echo "🔧 Installing Ollama (running as root)..."
+        curl -fsSL https://ollama.ai/install.sh | sh
+        echo "✅ Ollama installation complete!"
+        echo ""
+        echo "🚀 Please run this script again as a regular user:"
+        echo "   ./start_ai_service.sh"
+        exit 0
+    else
+        echo "✅ Ollama already installed. Please run as regular user:"
+        echo "   ./start_ai_service.sh"
+        exit 0
+    fi
+fi
+
 # Configuration
 AI_SERVICE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$AI_SERVICE_DIR/../.." && pwd)"
@@ -115,6 +133,47 @@ start_errorlogger() {
     fi
 }
 
+# Check and install Ollama if needed
+check_and_install_ollama() {
+    log_info "🔍 Checking Ollama installation..."
+    
+    # Check if Ollama is installed
+    if command -v ollama >/dev/null 2>&1; then
+        log_success "✅ Ollama is already installed ($(ollama --version))"
+        
+        # Check if Ollama service is running
+        if curl -s http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+            log_success "✅ Ollama service is running"
+        else
+            log_info "🚀 Starting Ollama service..."
+            sudo systemctl start ollama 2>/dev/null || {
+                log_warning "⚠️  Could not start Ollama service automatically"
+                log_info "You may need to run: sudo systemctl start ollama"
+            }
+        fi
+        
+        # Check for default model
+        local models=$(curl -s http://127.0.0.1:11434/api/tags 2>/dev/null | grep -o '"name":"[^"]*"' | wc -l)
+        if [ "$models" -eq 0 ]; then
+            log_info "📥 No models found. The Ollama service will download llama3.2:1b automatically."
+            log_info "This may take a few minutes on first run..."
+        fi
+        
+        return 0
+    else
+        log_error "❌ Ollama not installed!"
+        log_info ""
+        log_info "🔧 To install Ollama, please run this script with sudo:"
+        log_info "   sudo ./start_ai_service.sh"
+        log_info ""
+        log_info "Or install manually:"
+        log_info "   curl -fsSL https://ollama.ai/install.sh | sh"
+        log_info ""
+        log_warning "⚠️  Continuing without Ollama - AI will use demo mode only"
+        return 1
+    fi
+}
+
 # Start Ollama Service
 start_ollama_service() {
     log_info "🧠 Starting Ollama Service (Port: $OLLAMA_SERVICE_PORT)"
@@ -130,10 +189,10 @@ start_ollama_service() {
     # Set environment for Ollama service
     export ERRORLOGGER_SERVICE_URL="$ERRORLOGGER_URL/log"
     
-    python ollama_api.py --port $OLLAMA_SERVICE_PORT --host 127.0.0.1 --skip-setup > ollama_service.log 2>&1 &
+    python ollama_api.py --port $OLLAMA_SERVICE_PORT --host 127.0.0.1 > ollama_service.log 2>&1 &
     OLLAMA_SERVICE_PID=$!
     
-    if wait_for_service "$OLLAMA_SERVICE_URL" "Ollama Service" 15; then
+    if wait_for_service "$OLLAMA_SERVICE_URL" "Ollama Service" 30; then
         log_success "✅ Ollama Service running (PID: $OLLAMA_SERVICE_PID)"
         return 0
     else
@@ -228,6 +287,9 @@ main() {
     if ! start_errorlogger; then
         exit 1
     fi
+    
+    # Check and install Ollama before starting the service
+    check_and_install_ollama
     
     # Start Ollama service (non-critical - continue if it fails)
     start_ollama_service || log_warning "⚠️  Continuing without Ollama service"
