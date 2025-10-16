@@ -1,0 +1,169 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: ai_service_postgres
+    environment:
+      POSTGRES_DB: ai_service
+      POSTGRES_USER: ai_user
+      POSTGRES_PASSWORD: ai_secure_pass_2025
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - ai_service_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ai_user -d ai_service"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching and session management
+  redis:
+    image: redis:7-alpine
+    container_name: ai_service_redis
+    command: redis-server --appendonly yes --requirepass redis_secure_2025
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - ai_service_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ErrorLogger Service
+  errorlogger:
+    build:
+      context: ../..
+      dockerfile: ./projects/ai_service/docker/Dockerfile.errorlogger
+    container_name: ai_service_errorlogger
+    environment:
+      - SERVICE_PORT=5001
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./logs:/app/logs
+      - ./projects/ErrorLogger:/app/ErrorLogger
+    ports:
+      - "5001:5001"
+    networks:
+      - ai_service_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Backend API Service
+  backend:
+    build:
+      context: ../..
+      dockerfile: ./projects/ai_service/docker/Dockerfile.backend
+    container_name: ai_service_backend
+    environment:
+      - DATABASE_URL=postgresql://ai_user:ai_secure_pass_2025@postgres:5432/ai_service
+      - REDIS_URL=redis://:redis_secure_2025@redis:6379/0
+      - ERRORLOGGER_URL=http://errorlogger:5001/log
+      - OLLAMA_SERVICE_URL=http://ollama_service:5002
+      - JWT_SECRET_KEY=jwt_super_secure_key_2025_change_in_production
+      - FLASK_ENV=production
+      - SERVICE_PORT=5000
+    volumes:
+      - ./projects/ai_service/backend:/app/backend
+      - ./projects/shared_utils:/app/shared_utils
+      - ./uploads:/app/uploads
+    ports:
+      - "5000:5000"
+    networks:
+      - ai_service_network
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      errorlogger:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Ollama Service Wrapper
+  ollama_service:
+    build:
+      context: ../..
+      dockerfile: ./projects/ai_service/docker/Dockerfile.ollama
+    container_name: ai_service_ollama
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - ERRORLOGGER_URL=http://errorlogger:5001/log
+      - SERVICE_PORT=5002
+    volumes:
+      - ./projects/ai_service/ollama_service:/app/ollama_service
+    ports:
+      - "5002:5002"
+    networks:
+      - ai_service_network
+    depends_on:
+      - errorlogger
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend React App
+  frontend:
+    build:
+      context: ../..
+      dockerfile: ./projects/ai_service/docker/Dockerfile.frontend
+    container_name: ai_service_frontend
+    environment:
+      - REACT_APP_API_URL=http://localhost:5000
+      - REACT_APP_WS_URL=ws://localhost:5000
+      - NODE_ENV=production
+      - GENERATE_SOURCEMAP=false
+    volumes:
+      - ./projects/ai_service/frontend/src:/app/src
+      - ./projects/ai_service/frontend/public:/app/public
+    ports:
+      - "3000:3000"
+    networks:
+      - ai_service_network
+    depends_on:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# Isolated Network
+networks:
+  ai_service_network:
+    driver: bridge
+    name: ai_service_network
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
+
+# Persistent Storage
+volumes:
+  postgres_data:
+    name: ai_service_postgres_data
+  redis_data:
+    name: ai_service_redis_data
