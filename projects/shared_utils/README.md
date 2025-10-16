@@ -49,7 +49,3 @@ port = SERVICE_PORTS['errorlogger']
 - **Path Utilities**: Cross-platform path resolution helpers
 - **Service Discovery**: Common service location and health check utilities
 - **Logging Helpers**: Shared logging configuration and formatters
-
----
-
-*This module supports the overall architecture consistency across the User Functionality WSL project ecosystem.*
