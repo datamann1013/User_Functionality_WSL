@@ -17,9 +17,9 @@ RUN pip install --no-cache-dir \
     python-dotenv
 
 # Copy ErrorLogger code
-COPY projects/ErrorLogger /app/ErrorLogger
+COPY projects/ErrorLogger/ /app/ErrorLogger/
 
-# Create logs directory
+# Create logs directory and set permissions
 RUN mkdir -p /app/logs && chmod 755 /app/logs
 
 # Create non-root user

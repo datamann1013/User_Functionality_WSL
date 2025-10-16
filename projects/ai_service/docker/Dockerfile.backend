@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
+# Copy requirements first for better layer caching
 COPY projects/ai_service/backend/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -22,9 +23,9 @@ RUN pip install --no-cache-dir \
     gunicorn
 
 # Copy application code
-COPY projects/ai_service/backend /app/backend
-COPY projects/shared_utils /app/shared_utils
-COPY projects/ErrorLogger /app/ErrorLogger
+COPY projects/ai_service/backend/ /app/backend/
+COPY projects/shared_utils/ /app/shared_utils/
+COPY projects/ErrorLogger/ /app/ErrorLogger/
 
 # Create uploads directory
 RUN mkdir -p /app/uploads && chmod 755 /app/uploads
@@ -42,4 +43,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
 EXPOSE 5000
 
 # Start application with Gunicorn for production
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "backend.app:app"]
+WORKDIR /app/backend
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "app:app"]

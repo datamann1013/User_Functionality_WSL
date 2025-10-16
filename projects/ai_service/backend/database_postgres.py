@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Any
 from contextlib import contextmanager
 
 # Import project-wide ErrorLogger
-sys.path.append('/home/administrator/gitcontrol/User_Functionality_WSL/projects')
+sys.path.append('/app')
 from ErrorLogger.logger import log_error_remote
 
 class PostgreSQLDatabase:

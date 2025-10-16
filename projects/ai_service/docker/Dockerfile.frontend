@@ -14,8 +14,8 @@ COPY projects/ai_service/frontend/package*.json ./
 RUN npm install --omit=dev
 
 # Copy source code
-COPY projects/ai_service/frontend/src ./src
-COPY projects/ai_service/frontend/public ./public
+COPY projects/ai_service/frontend/src/ ./src/
+COPY projects/ai_service/frontend/public/ ./public/
 
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs

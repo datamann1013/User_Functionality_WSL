@@ -60,6 +60,12 @@ def get_timestamp():
 
 def get_log_directory():
     """Get the appropriate log directory within the project structure"""
+    # Check for environment variable override first
+    if 'LOG_DIRECTORY' in os.environ:
+        log_dir = os.environ['LOG_DIRECTORY']
+        os.makedirs(log_dir, exist_ok=True)
+        return log_dir
+    
     # Get the User_Functionality_WSL project root directory
     # From ErrorLogger/__file__ go up to projects/, then up to project root
     current_file = os.path.abspath(__file__)

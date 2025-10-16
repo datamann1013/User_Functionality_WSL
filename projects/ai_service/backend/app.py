@@ -15,12 +15,12 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 
 # Import modules
-from database import db
+from database_postgres import db
 from api.ollama import check_ollama_service, route_to_ollama_chat, get_ollama_models, download_model
 from utils.files import save_avatar_file, get_avatar_url, UPLOAD_FOLDER
 
 # Import project-wide ErrorLogger
-sys.path.append('/home/administrator/gitcontrol/User_Functionality_WSL/projects')
+sys.path.append('/app')
 from ErrorLogger.logger import log_error_remote
 
 # Wrapper function to add service name

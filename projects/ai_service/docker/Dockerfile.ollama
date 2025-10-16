@@ -1,4 +1,4 @@
-# Ollama Service Wrapper Dockerfile
+# Ollama Service Dockerfile
 FROM python:3.11-slim
 
 # Set working directory
@@ -16,9 +16,9 @@ RUN pip install --no-cache-dir \
     requests \
     python-dotenv
 
-# Copy ollama service code
-COPY projects/ai_service/ollama_service /app/ollama_service
-COPY projects/ErrorLogger /app/ErrorLogger
+# Copy Ollama service code
+COPY projects/ai_service/ollama_service/ /app/ollama_service/
+COPY projects/ErrorLogger/ /app/ErrorLogger/
 
 # Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser appuser
