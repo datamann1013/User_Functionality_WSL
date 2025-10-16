@@ -1,5 +1,8 @@
 # 🪟 Hidden Toolbar (Bump Launcher)
 
+> **Status**: ✅ Stable | **Environment**: WSL2 + Arch Linux + Openbox  
+> **Last Updated**: October 16, 2025
+
 A discreet, hover-activated toolbar for WSL2 + Arch Linux + Openbox. 
 Designed to give quick access to essential tools without cluttering the desktop.
 
