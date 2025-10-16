@@ -21,7 +21,17 @@ from utils.files import save_avatar_file, get_avatar_url, UPLOAD_FOLDER
 
 # Import project-wide ErrorLogger
 sys.path.append('/home/administrator/gitcontrol/User_Functionality_WSL/projects')
-from ErrorLogger.logger import log_error_remote as log_to_errorlogger
+from ErrorLogger.logger import log_error_remote
+
+# Wrapper function to add service name
+def log_to_errorlogger(error_code, message=None, exception=None, extra=None):
+    """Log to ErrorLogger with proper service identification"""
+    # Add service name to extra data
+    if extra is None:
+        extra = {}
+    extra['service'] = 'ai_service'
+    
+    return log_error_remote(error_code, message, exception, extra)
 
 # Load environment variables
 load_dotenv()
@@ -147,6 +157,11 @@ def log_frontend_error():
         log_to_errorlogger('EAFX02', 'Error processing frontend log', exception=e)
         return jsonify({'error': 'Failed to process error log'}), 500
 
+@app.route('/health', methods=['GET'])
+def health_root():
+    """Root health check endpoint for monitoring"""
+    return health()
+
 @app.route('/api/health', methods=['GET'])
 def health():
     """Simple health check endpoint"""
@@ -200,17 +215,31 @@ def get_agents():
 def create_agent():
     """Create a new agent"""
     try:
+        # Check content type
+        if not request.is_json:
+            log_to_errorlogger('EABD05', f'Invalid content type for agent creation: {request.content_type}')
+            return jsonify({
+                'error': 'Invalid content type',
+                'message': 'Request must be application/json',
+                'received_content_type': request.content_type
+            }), 415
+        
         data = request.get_json()
-        agent_id = db.create_agent(
-            name=data.get('name'),
-            model_name=data.get('model_name'),
-            system_prompt=data.get('system_prompt', ''),
-            temperature=data.get('temperature', 0.7),
-            top_p=data.get('top_p', 0.9),
-            max_tokens=data.get('max_tokens', 2048),
-            avatar_url=data.get('avatar_url')
-        )
-        return jsonify({'agent_id': agent_id, 'status': 'created'})
+        if data is None:
+            log_to_errorlogger('EABD06', 'No JSON data received for agent creation')
+            return jsonify({'error': 'No JSON data provided'}), 400
+            
+        agent_data = {
+            'name': data.get('name'),
+            'model_name': data.get('model_name'),
+            'system_prompt': data.get('system_prompt', ''),
+            'temperature': data.get('temperature', 0.7),
+            'top_p': data.get('top_p', 0.9),
+            'max_tokens': data.get('max_tokens', 2048),
+            'avatar_url': data.get('avatar_url')
+        }
+        agent = db.create_agent(agent_data)
+        return jsonify({'agent_id': agent.get('id'), 'status': 'created'})
     except Exception as e:
         log_to_errorlogger('EABD02', 'Failed to create agent', exception=e)
         return jsonify({'error': 'Failed to create agent'}), 500

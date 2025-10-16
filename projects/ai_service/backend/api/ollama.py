@@ -8,14 +8,28 @@ from datetime import datetime
 
 # Import project-wide ErrorLogger
 sys.path.append('/home/administrator/gitcontrol/User_Functionality_WSL/projects')
-from ErrorLogger.logger import log_error_remote as log_to_errorlogger
+from ErrorLogger.logger import log_error_remote
+
+# Wrapper function to add service name
+def log_to_errorlogger(error_code, message=None, exception=None, extra=None):
+    """Log to ErrorLogger with proper service identification"""
+    if extra is None:
+        extra = {}
+    extra['service'] = 'ai_service'
+    return log_error_remote(error_code, message, exception, extra)
 
 OLLAMA_SERVICE_URL = os.environ.get('OLLAMA_SERVICE_URL', 'http://127.0.0.1:5002')
 
 def check_ollama_service():
     """Check if Ollama service is available"""
     try:
-        response = requests.get(f"{OLLAMA_SERVICE_URL}/api/version", timeout=5)
+        # Check our Ollama service wrapper first
+        response = requests.get(f"{OLLAMA_SERVICE_URL}/health", timeout=5)
+        if response.status_code == 200:
+            return True
+        
+        # Fallback to direct Ollama API
+        response = requests.get("http://127.0.0.1:11434/api/version", timeout=5)
         return response.status_code == 200
     except:
         return False
@@ -91,12 +105,22 @@ def route_to_ollama_chat(message, agent_id):
 def get_ollama_models():
     """Get available models from Ollama service"""
     try:
-        response = requests.get(f"{OLLAMA_SERVICE_URL}/api/tags", timeout=10)
+        # First try our Ollama service wrapper
+        response = requests.get(f"{OLLAMA_SERVICE_URL}/api/models", timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            models = data.get('models', [])
+            # Convert model list to the expected format
+            return [{'name': model} for model in models]
+        
+        # Fallback to direct Ollama API
+        response = requests.get("http://127.0.0.1:11434/api/tags", timeout=10)
         if response.status_code == 200:
             data = response.json()
             return data.get('models', [])
         return []
-    except:
+    except Exception as e:
+        log_to_errorlogger('EABA05', 'Failed to get available models', exception=e)
         return []
 
 def download_model(model_name):
