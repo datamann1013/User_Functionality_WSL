@@ -66,7 +66,7 @@ install_docker() {
         "arch"|"manjaro")
             install_docker_arch
             ;;
-        "ubuntu"|"debian"|"pop"|"linuxmint")
+        "ubuntu"|"debian"|"pop"|"linuxmint"|"kali")
             install_docker_debian
             ;;
         "fedora"|"rhel"|"centos")
@@ -106,7 +106,7 @@ install_docker_arch() {
 
 # Install Docker on Debian/Ubuntu
 install_docker_debian() {
-    echo -e "${BLUE}� Installing Docker on Debian/Ubuntu...${NC}"
+    echo -e "${BLUE}🐧 Installing Docker on Debian/Ubuntu/Kali...${NC}"
     
     # Update package list
     sudo apt-get update
@@ -120,12 +120,22 @@ install_docker_debian() {
     
     # Add Docker's official GPG key
     sudo mkdir -p /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
     
-    # Set up Docker repository
-    echo \
-        "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-        $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    # Determine which repository to use
+    DISTRO=$(detect_distro)
+    if [[ "$DISTRO" == "kali" ]]; then
+        # Use Debian repository for Kali
+        curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
+            bullseye stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    else
+        # Use Ubuntu repository for Ubuntu/derivatives
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+            $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    fi
     
     # Install Docker Engine
     sudo apt-get update
@@ -134,7 +144,7 @@ install_docker_debian() {
     # Add user to docker group
     sudo usermod -aG docker $USER
     
-    echo -e "${GREEN}✅ Docker installed successfully on Debian/Ubuntu${NC}"
+    echo -e "${GREEN}✅ Docker installed successfully on Debian/Ubuntu/Kali${NC}"
 }
 
 # Install Docker on Red Hat/Fedora
