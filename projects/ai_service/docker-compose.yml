@@ -138,8 +138,8 @@ services:
       - NODE_ENV=production
       - GENERATE_SOURCEMAP=false
     volumes:
-      - ./projects/ai_service/frontend/src:/app/src
-      - ./projects/ai_service/frontend/public:/app/public
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
     ports:
       - "3000:3000"
     networks:

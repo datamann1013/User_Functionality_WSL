@@ -85,10 +85,10 @@ class PostgreSQLDatabase:
                 with conn.cursor() as cur:
                     cur.execute("""
                         SELECT a.*, 
-                               COUNT(cl.id) as conversation_count,
-                               MAX(cl.timestamp) as last_conversation
+                               COUNT(c.id) as conversation_count,
+                               MAX(c.updated_at) as last_conversation
                         FROM agents a
-                        LEFT JOIN conversation_logs cl ON a.id = cl.agent_id
+                        LEFT JOIN conversations c ON a.id = c.agent_id
                         GROUP BY a.id
                         ORDER BY a.last_active DESC NULLS LAST, a.created_at DESC
                     """)

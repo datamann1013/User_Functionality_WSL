@@ -31,6 +31,11 @@ def log_to_errorlogger(error_code, message=None, exception=None, extra=None):
         extra = {}
     extra['service'] = 'ai_service'
     
+    # Convert exception to string to avoid JSON serialization issues
+    if exception:
+        exception_str = str(exception)
+        return log_error_remote(error_code, message, exception_str, extra)
+    
     return log_error_remote(error_code, message, exception, extra)
 
 # Load environment variables
@@ -205,7 +210,7 @@ def ollama_status():
 def get_agents():
     """Get all agents"""
     try:
-        agents = db.get_all_agents()
+        agents = db.list_agents()
         return jsonify({'agents': agents})
     except Exception as e:
         log_to_errorlogger('EABD01', 'Failed to get agents', exception=e)

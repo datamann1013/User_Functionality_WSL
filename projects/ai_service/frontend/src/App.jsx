@@ -4,6 +4,7 @@ import { logFrontendError } from "./utils/errorLogger";
 import CreateAgentModal from "./components/CreateAgentModal";
 import EditAgentModal from "./components/EditAgentModal";
 import ModelManager from "./components/ModelManager";
+import MainChat from "./components/MainChat";
 
 // API base URL
 const API_BASE = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5000';
@@ -428,156 +429,12 @@ function App() {
 
         {/* Main Chat Area */}
         <div className="chat-main">
-          {/* Chat Messages */}
-          <div 
-            className={`chat-area ${dragOver ? 'drag-over' : ''}`}
-            ref={chatAreaRef}
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-          >
-            {messages.length === 0 ? (
-              <div className="empty-chat">
-                <div className="empty-message">
-                  <h3>Start a conversation</h3>
-                  <p>Type in the input box below to begin chatting with {agents.find(a => a.id === selectedAgent)?.name}</p>
-                </div>
-              </div>
-            ) : (
-              messages.map(message => (
-                <div key={message.id} className="message-wrapper">
-                  <div className={`message ${message.sender} ${message.error ? 'error' : ''} ${message.isThinking ? 'thinking' : ''}`}>
-                    <div 
-                      className="message-avatar"
-                      style={{ 
-                        backgroundColor: message.sender === 'user' 
-                          ? '#6b46c1' 
-                          : getAvatarColor(agents.find(a => a.id === selectedAgent)?.name || 'AI')
-                      }}
-                      title={formatTime(message.timestamp)}
-                    >
-                      {message.sender === 'user' ? 'U' : agents.find(a => a.id === selectedAgent)?.name?.charAt(0) || 'A'}
-                    </div>
-                    <div className="message-content">
-                      <div className="message-text">{message.text}</div>
-                      {message.files && (
-                        <div className="message-files">
-                          {message.files.map((file, i) => (
-                            <span key={i} className="file-tag">{file.name}</span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="message-separator"></div>
-                </div>
-              ))
-            )}
-            
-            {dragOver && (
-              <div className="drop-overlay">
-                <div className="drop-message">
-                  Drop files here to upload
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Input Area */}
-          <div className="input-area">
-            {selectedFiles.length > 0 && (
-              <div className="selected-files">
-                {selectedFiles.map((file, index) => (
-                  <div key={index} className="file-chip">
-                    <span>{file.name}</span>
-                    <button onClick={() => removeFile(index)}>×</button>
-                  </div>
-                ))}
-              </div>
-            )}
-            
-            <div className="input-bar">
-              <textarea
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                onKeyPress={handleKeyPress}
-                placeholder={connecting ? "Connecting..." : `Message ${agents.find(a => a.id === selectedAgent)?.name}...`}
-                disabled={connecting || thinking}
-                rows={1}
-                className="message-input"
-              />
-              
-              <div className="input-actions">
-                <button 
-                  className="file-upload-btn"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={connecting || thinking}
-                  title="Upload files"
-                >
-                  📎
-                </button>
-                
-                <div className="tools-dropdown">
-                  <button 
-                    className={`tools-btn ${toolsOpen ? 'open' : ''}`}
-                    onClick={() => setToolsOpen(!toolsOpen)}
-                    disabled={connecting || thinking}
-                    title="Agent Management"
-                  >
-                    ⚙️
-                  </button>
-                  {toolsOpen && (
-                    <div className="tools-menu">
-                      <div className="tools-section">
-                        <div className="tools-section-title">Agent Management</div>
-                        {selectedAgent && (
-                          <button 
-                            className="tool-item"
-                            onClick={() => handleEditAgent(agents.find(a => a.id === selectedAgent))}
-                          >
-                            ✏️ Edit Agent
-                          </button>
-                        )}
-                        <button 
-                          className="tool-item"
-                          onClick={() => {
-                            setShowCreateModal(true);
-                            setToolsOpen(false);
-                          }}
-                        >
-                          ➕ Create Agent
-                        </button>
-                      </div>
-                      
-                      <div className="tools-section">
-                        <div className="tools-section-title">Models</div>
-                        <button 
-                          className="tool-item"
-                          onClick={() => {
-                            setShowModelManager(true);
-                            setToolsOpen(false);
-                          }}
-                        >
-                          📥 Download Models
-                        </button>
-                        <button className="tool-item">
-                          📊 Model Status
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                
-                <button 
-                  className="send-btn"
-                  onClick={handleSend}
-                  disabled={connecting || thinking || !inputText.trim()}
-                >
-                  {thinking ? '⏳' : '➤'}
-                </button>
-              </div>
-            </div>
-          </div>
+          <MainChat
+            selectedAgent={agents.find(a => a.id === selectedAgent)}
+            agents={agents}
+            onAgentSelect={(agent) => agent && handleAgentSwitch(agent.id)}
+            onAgentUpdate={loadAgents}
+          />
         </div>
       </div>
 
