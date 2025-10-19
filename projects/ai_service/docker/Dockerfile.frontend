@@ -4,9 +4,8 @@ FROM node:18-alpine
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies (retry APK for flaky network)
-RUN set -eux; \
-    for i in 1 2 3; do apk add --no-cache curl && break || sleep 2; done
+# Install system dependencies
+RUN apk add --no-cache curl
 
 # Copy package files
 COPY projects/ai_service/frontend/package*.json ./

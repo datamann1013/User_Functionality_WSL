@@ -6,9 +6,16 @@ import sys
 import requests
 from datetime import datetime
 
-# Import project-wide ErrorLogger
-sys.path.append('/app')
-from ErrorLogger.logger import log_error_remote
+# Import project-wide ErrorLogger with error handling
+try:
+    sys.path.append('/app')
+    from ErrorLogger.logger import log_error_remote
+    ERROR_LOGGER_AVAILABLE = True
+except ImportError:
+    ERROR_LOGGER_AVAILABLE = False
+    def log_error_remote(error_code, message=None, exception=None, extra=None):
+        """Fallback error logging when ErrorLogger is not available"""
+        print(f"ERROR {error_code}: {message} - {exception}")
 
 # Wrapper function to add service name
 def log_to_errorlogger(error_code, message=None, exception=None, extra=None):
@@ -74,12 +81,22 @@ def route_to_ollama_chat(message, agent_id):
         # Prepare the full message with context
         system_prompt = agent.get('system_prompt', '') + memory_context
         
+        # Convert Decimal objects to float for JSON serialization
+        temperature = agent.get('temperature', 0.7)
+        top_p = agent.get('top_p', 0.9)
+        
+        # Handle Decimal types from database
+        if hasattr(temperature, '__float__'):
+            temperature = float(temperature)
+        if hasattr(top_p, '__float__'):
+            top_p = float(top_p)
+        
         payload = {
             'message': message,
             'agent_id': agent_id,
             'model_name': agent.get('model_name', 'llama3.2:1b'),
-            'temperature': agent.get('temperature', 0.7),
-            'top_p': agent.get('top_p', 0.9),
+            'temperature': temperature,
+            'top_p': top_p,
             'max_tokens': agent.get('max_tokens', 2048),
             'system_prompt': system_prompt,
             'timestamp': datetime.now().isoformat()

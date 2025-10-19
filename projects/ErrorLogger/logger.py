@@ -159,13 +159,40 @@ def get_explanation(error_code, message=None):
     return "Unidentified error (standard)"
 
 
+import json
+import decimal
+import datetime
+
+
+def safe_json_dumps(obj):
+    """Safely serialize objects to JSON, handling problematic types"""
+    def default_serializer(o):
+        if isinstance(o, decimal.Decimal):
+            return float(o)
+        elif isinstance(o, (datetime.datetime, datetime.date)):
+            return o.isoformat()
+        elif isinstance(o, Exception):
+            return str(o)
+        elif hasattr(o, '__dict__'):
+            # For custom objects, return their dict representation
+            return str(o)
+        else:
+            return str(o)
+    
+    try:
+        return json.dumps(obj, default=default_serializer, ensure_ascii=False)
+    except Exception:
+        # Last resort: convert to string
+        return str(obj)
+
+
 def log_error(error_code, message=None, exception=None, extra=None):
     timestamp = get_timestamp()
     explanation = get_explanation(error_code, message)
 
-    # Format exception and extra
+    # Format exception and extra with safe serialization
     exception_str = str(exception) if exception else ""
-    extra_str = json.dumps(extra) if extra else ""
+    extra_str = safe_json_dumps(extra) if extra else ""
 
     # CSV format: timestamp;error_code;explanation;exception;extra
     log_line = f"{timestamp};{error_code};{explanation};{exception_str};{extra_str}"
@@ -194,11 +221,21 @@ def log_error(error_code, message=None, exception=None, extra=None):
 
 def log_error_remote(error_code, message=None, exception=None, extra=None):
     """Synchronous logging with response validation"""
+    # Convert problematic objects to JSON-safe representations
+    safe_exception = str(exception) if exception else None
+    safe_extra = extra
+    if extra:
+        # Ensure extra data is JSON serializable
+        try:
+            safe_json_dumps(extra)
+        except Exception:
+            safe_extra = {"original_extra": str(extra)}
+    
     payload = {
         'error_code': error_code,
         'message': message,
-        'exception': exception,
-        'extra': extra
+        'exception': safe_exception,
+        'extra': safe_extra
     }
     try:
         # Use config settings for timeout and retry
@@ -218,7 +255,7 @@ def log_error_remote(error_code, message=None, exception=None, extra=None):
             "EREM1",
             message="Remote logger failed (standard)",
             exception=f"{e} | Original error: {error_code}",
-            extra=payload
+            extra={"original_payload": str(payload)}
         )
 
 

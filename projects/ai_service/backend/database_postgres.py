@@ -72,7 +72,15 @@ class PostgreSQLDatabase:
                         (agent_id,)
                     )
                     result = cur.fetchone()
-                    return dict(result) if result else None
+                    if result:
+                        agent_data = dict(result)
+                        # Convert Decimal objects to float for JSON serialization
+                        if 'temperature' in agent_data and agent_data['temperature'] is not None:
+                            agent_data['temperature'] = float(agent_data['temperature'])
+                        if 'top_p' in agent_data and agent_data['top_p'] is not None:
+                            agent_data['top_p'] = float(agent_data['top_p'])
+                        return agent_data
+                    return None
         except Exception as e:
             log_error_remote('EADB02', f'Failed to get agent {agent_id}', 
                            exception=e, extra={'service': 'ai_service', 'agent_id': agent_id})
