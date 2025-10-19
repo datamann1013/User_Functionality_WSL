@@ -3,9 +3,9 @@ name: Security Scanning
 # Comprehensive security analysis workflow - Updated
 on:
   push:
-    branches: [ main, AI_service_dev, develop ]
+    branches: [ main, AI_service_dev, AI_service, develop ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, AI_service, develop ]
   schedule:
     # Daily security scans at 2 AM UTC
     - cron: '0 2 * * *'

@@ -2,9 +2,9 @@ name: Code Quality & Linting
 
 on:
   push:
-    branches: [ main, AI_service_dev, develop ]
+    branches: [ main, AI_service_dev, AI_service, develop ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, AI_service, develop ]
   workflow_dispatch:
 
 jobs:
