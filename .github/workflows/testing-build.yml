@@ -40,23 +40,28 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Platform Setup
+      shell: bash
       run: |
         case "${{ matrix.platform.name }}" in
           kali)
             apt-get update && apt-get install -y python3 python3-pip nodejs npm curl git
+            pip3 install flask requests
             ;;
           arch)
             pacman -Syu --noconfirm python python-pip nodejs npm curl git
+            pip install flask requests
             ;;
           debian)
             apt-get update && apt-get install -y python3 python3-pip nodejs npm curl git
+            pip3 install flask requests
             ;;
           ubuntu)
             sudo apt-get update && sudo apt-get install -y python3 python3-pip nodejs npm
+            pip3 install flask requests
             ;;
           windows-wsl)
-            # WSL setup will be handled by GitHub Actions Windows environment
-            choco install python nodejs
+            # For Windows, use different approach
+            python -m pip install flask requests
             ;;
         esac
 
