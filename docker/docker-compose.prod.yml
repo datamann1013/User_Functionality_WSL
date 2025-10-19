@@ -1,0 +1,100 @@
+# RuneCore Ecosystem - Production Deployment
+services:
+  # Ollama AI Service
+  ollama:
+    image: ollama/ollama:latest
+    container_name: runecore-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_ORIGINS=*
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - runecore
+
+  # RuneGuard Security Service (uses ErrorLogger's own Docker setup)
+  runeguard:
+    build:
+      context: ../projects/ErrorLogger
+      dockerfile: Dockerfile
+    container_name: runecore-guard
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    volumes:
+      - guard_logs:/app/logs
+      - guard_data:/app/data
+    environment:
+      - LOG_LEVEL=INFO
+      - RUNECORE_MODE=production
+    depends_on:
+      - ollama
+    networks:
+      - runecore
+
+  # RuneMind Backend (uses AI service's own Docker setup)
+  backend:
+    build:
+      context: ../projects/ai_service
+      dockerfile: docker/Dockerfile.backend
+    container_name: runecore-backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - backend_logs:/app/logs
+      - backend_data:/app/data
+      - model_cache:/app/models
+    environment:
+      - OLLAMA_HOST=ollama:11434
+      - ERRORLOGGER_URL=http://runeguard:5001
+      - RUNECORE_MODE=production
+    depends_on:
+      - ollama
+      - runeguard
+    networks:
+      - runecore
+
+  # RuneMind Frontend (uses AI service's own Docker setup)
+  frontend:
+    build:
+      context: ../projects/ai_service
+      dockerfile: docker/Dockerfile.frontend
+    container_name: runecore-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:5000
+      - REACT_APP_ERRORLOGGER_URL=http://localhost:5001
+    depends_on:
+      - backend
+    networks:
+      - runecore
+
+volumes:
+  ollama_data:
+    driver: local
+  guard_logs:
+    driver: local
+  guard_data:
+    driver: local
+  backend_logs:
+    driver: local
+  backend_data:
+    driver: local
+  model_cache:
+    driver: local
+
+networks:
+  runecore:
+    driver: bridge
+    name: runecore-network

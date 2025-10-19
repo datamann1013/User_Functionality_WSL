@@ -4,10 +4,7 @@
 > **Architecture:** Modular Microservice Environment  
 > **Last Updated:** October 19, 2025
 
-RuneCore is a modular personal # Test RuneMind AI interface
-curl -X POST http://localhost:5000/api/ai/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message":"What is my system status?"}'uting environment built around a central core system. It provides integrated tools for system management, development, file sharing, and cross-device control through a unified, secure ecosystem.
+RuneCore is a modular personal computing environment built around a central core system. It provides integrated tools for system management, development, file sharing, and cross-device control through a unified, secure ecosystem.
 
 ## System Architecture
 
@@ -71,7 +68,7 @@ graph TB
     style Lab fill:#fce38a
 ```
 
-## 🔧 Core Architecture
+## Core Architecture
 
 ### Foundation Components
 - **Central RuneCore**: Mandatory foundation managing all module interactions

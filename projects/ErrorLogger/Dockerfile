@@ -1,4 +1,4 @@
-# Optimized ErrorLogger Service Dockerfile
+# RuneGuard Security Service Dockerfile
 FROM python:3.11-alpine
 
 WORKDIR /app
@@ -6,14 +6,12 @@ WORKDIR /app
 # Install minimal dependencies
 RUN apk add --no-cache curl
 
-# Install only required Python packages with specific versions
-RUN pip install --no-cache-dir --disable-pip-version-check \
-    flask==3.0.0 \
-    flask-cors==4.0.0 \
-    requests==2.31.0
+# Copy requirements and install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir --disable-pip-version-check -r requirements.txt
 
-# Copy optimized ErrorLogger code
-COPY projects/ErrorLogger/ /app/ErrorLogger/
+# Copy ErrorLogger code
+COPY . /app/
 
 # Create logs directory
 RUN mkdir -p /app/logs && chmod 777 /app/logs
@@ -23,11 +21,11 @@ RUN addgroup -g 1001 -S appuser && adduser -S -u 1001 -G appuser appuser
 RUN chown -R appuser:appuser /app
 USER appuser
 
-# Optimized health check
+# Health check
 HEALTHCHECK --interval=60s --timeout=3s --start-period=15s --retries=2 \
     CMD curl -f http://localhost:5001/health || exit 1
 
 EXPOSE 5001
 
-# Start optimized ErrorLogger service
-CMD ["python", "/app/ErrorLogger/error_server.py"]
+# Start ErrorLogger service
+CMD ["python", "error_server.py"]

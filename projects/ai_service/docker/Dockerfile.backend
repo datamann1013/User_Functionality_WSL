@@ -8,14 +8,14 @@ WORKDIR /app
 RUN apk add --no-cache curl postgresql-client
 
 # Copy requirements and install Python dependencies
-COPY projects/ai_service/backend/requirements.txt /app/requirements.txt
+COPY backend/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --disable-pip-version-check -r requirements.txt \
     && pip install --no-cache-dir psycopg2-binary gunicorn
 
 # Copy application code (optimized layering)
-COPY projects/ai_service/backend/ /app/backend/
-COPY projects/shared_utils/ /app/shared_utils/
-COPY projects/ErrorLogger/ /app/ErrorLogger/
+COPY backend/ /app/backend/
+COPY ../shared_utils/ /app/shared_utils/
+COPY ../ErrorLogger/ /app/ErrorLogger/
 
 # Create necessary directories
 RUN mkdir -p /app/uploads /app/logs && chmod 755 /app/uploads && chmod 777 /app/logs
