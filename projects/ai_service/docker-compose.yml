@@ -111,8 +111,9 @@ services:
       - OLLAMA_HOST=http://host.docker.internal:11434
       - ERRORLOGGER_URL=http://errorlogger:5001/log
       - SERVICE_PORT=5002
+      - LOG_DIRECTORY=/app/logs
     volumes:
-      - ./projects/ai_service/ollama_service:/app/ollama_service
+      - ./ollama_service:/app/ollama_service
     ports:
       - "5002:5002"
     networks:
@@ -138,8 +139,8 @@ services:
       - NODE_ENV=production
       - GENERATE_SOURCEMAP=false
     volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
+      - ./projects/ai_service/frontend/src:/app/src
+      - ./projects/ai_service/frontend/public:/app/public
     ports:
       - "3000:3000"
     networks:
