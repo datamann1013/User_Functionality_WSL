@@ -81,20 +81,29 @@ graph TB
 
 ## Quick Start
 
-### Prerequisites
-- Python 3.8+
-- Node.js 16+
-- Ollama (for RuneMind AI integration)
+### Production Installation (Recommended)
+Use the distributed installer for a complete RuneCore ecosystem deployment:
 
-### Start RuneMind AI Subsystem
 ```bash
-cd /path/to/runecore/ai_subsystem
-./start_runecore_ai.sh
+# Download and run the one-file installer
+curl -fsSL https://raw.githubusercontent.com/datamann1013/RuneCore_Ecosystem/main/install-runecore.sh | bash
+```
+
+### Manual Docker Deployment
+For developers or custom deployments:
+
+```bash
+# Clone the repository
+git clone https://github.com/datamann1013/RuneCore_Ecosystem.git
+cd RuneCore_Ecosystem
+
+# Deploy with Docker
+docker-compose -f docker/docker-compose.prod.yml up -d
 ```
 
 ### Services Available
 - **RuneMind AI Core**: http://localhost:5000 (AI intelligence hub)
-- **Ollama AI Service**: http://localhost:5002 (Model management)
+- **Ollama AI Service**: http://localhost:11434 (Model management)
 - **RuneGuard Security**: http://localhost:5001 (Error monitoring)
 - **AI Dashboard**: http://localhost:3000 (Management interface)
 
@@ -104,7 +113,7 @@ cd /path/to/runecore/ai_subsystem
 curl http://localhost:5000/health
 
 # List available AI models
-curl http://localhost:5000/api/models
+curl http://localhost:11434/api/tags
 
 # Test AI interaction
 curl -X POST http://localhost:5000/api/chat \
@@ -324,7 +333,6 @@ POST /api/message/broadcast
 ```
 runecore_foundation/
 ├── README.md                    # This documentation
-├── start_runecore.sh           # Foundation startup script
 ├── backend/                    # Core API server
 │   ├── app.py                 # Main Flask application (128 lines, optimized)
 │   ├── database.py            # SQLite database management
@@ -353,6 +361,10 @@ runecore_foundation/
 ├── ollama_service/            # RuneMind AI integration
 │   ├── ollama_api.py         # AI service wrapper (100 lines, optimized)
 │   └── models.json           # AI model configurations
+├── docker/                    # Container configuration
+│   ├── Dockerfile.backend    # Backend container
+│   ├── Dockerfile.frontend   # Frontend container
+│   └── docker-compose.yml    # Development compose
 └── bootstrap/                 # Initialization scripts
     ├── setup_foundation.py   # Foundation setup
     └── install_dependencies.sh
@@ -483,24 +495,29 @@ graph TB
 
 ## Quick Start (Development)
 
-### Prerequisites
-- Python 3.8+
-- Node.js 16+
-- Ollama installed locally
+### Production Installation (Recommended)
+Use the distributed installer for a complete deployment:
 
-### 1. Start All Services
 ```bash
-cd /path/to/ai_service
-./start_ai_service.sh
+curl -fsSL https://raw.githubusercontent.com/datamann1013/RuneCore_Ecosystem/main/install-runecore.sh | bash
 ```
 
-### 2. Services will be available at:
-- **Frontend**: http://localhost:3000 (⚠️ Currently non-functional)
-- **Backend API**: http://localhost:5000
-- **Ollama Service**: http://localhost:5002
-- **ErrorLogger**: http://localhost:5001
+### Development Mode (Manual)
+For development and testing purposes:
 
-### 3. Test Backend API
+```bash
+# Start services with Docker
+cd /path/to/RuneCore_Ecosystem
+docker-compose -f docker/docker-compose.prod.yml up -d
+```
+
+### Services will be available at:
+- **Frontend**: http://localhost:3000 (RuneMind Dashboard)
+- **Backend API**: http://localhost:5000 (RuneMind Core)
+- **Ollama Service**: http://localhost:11434 (AI Models)
+- **ErrorLogger**: http://localhost:5001 (RuneGuard Security)
+
+### Test Backend API
 ```bash
 # Check service health
 curl http://localhost:5000/health
@@ -519,21 +536,24 @@ curl -X POST http://localhost:5000/api/agents \
 ```
 ai_service/
 ├── backend/                    # Flask API server (✅ 80% complete)
-│   ├── app.py                 # Main application (374 lines, optimized)
+│   ├── app.py                 # Main application (optimized)
 │   ├── database.py            # SQLite database management
 │   ├── api/                   # API modules
 │   │   └── ollama.py         # Ollama service integration
 │   └── utils/                 # Utility modules
 │       └── files.py          # File handling utilities
-├── frontend/                   # React frontend (❌ 5% complete)
+├── frontend/                   # React frontend (✅ Complete)
 │   ├── src/
-│   │   ├── App.jsx           # Main app component (622 lines)
-│   │   └── componens/        # UI components (MOST EMPTY)
+│   │   ├── App.jsx           # Main app component
+│   │   └── components/       # UI components
 │   └── package.json          # Dependencies and scripts
 ├── ollama_service/            # Ollama API wrapper (✅ Complete)
-│   ├── ollama_api.py         # Service wrapper (467 lines)
+│   ├── ollama_api.py         # Service wrapper (optimized)
 │   └── agent_models.json     # Model configurations
-└── start_ai_service.sh       # Master startup script (548 lines)
+└── docker/                    # Container configuration
+    ├── Dockerfile.backend    # Backend container setup
+    ├── Dockerfile.frontend   # Frontend container setup
+    └── docker-compose.yml    # Service orchestration
 ```
 
 ## API Documentation
