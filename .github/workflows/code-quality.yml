@@ -1,0 +1,85 @@
+name: Code Quality & Linting
+
+on:
+  push:
+    branches: [ main, AI_service_dev, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  code-quality:
+    name: Code Quality & Standards
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: '**/package-lock.json'
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install quality tools
+      run: |
+        # JavaScript/TypeScript tools
+        npm install -g eslint@latest prettier@latest
+        
+        # Python tools
+        pip install pylint black isort mypy flake8 bandit safety
+        
+        # Documentation tools
+        pip install pydocstyle
+
+    - name: ESLint Check
+      run: |
+        find . -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" | 
+        grep -v node_modules | 
+        xargs -r npx eslint --max-warnings 0
+
+    - name: Python Linting
+      run: |
+        find . -name "*.py" -not -path "./venv/*" -not -path "./.env/*" | \
+        xargs -r pylint --fail-under=8.0 --disable=C0114,C0115,C0116
+
+    - name: Code Formatting Check
+      run: |
+        # Check JavaScript/TypeScript formatting
+        find . -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" | \
+        grep -v node_modules | \
+        xargs -r prettier --check
+        
+        # Check Python formatting
+        find . -name "*.py" -not -path "./venv/*" | \
+        xargs -r black --check --diff
+
+    - name: Complexity Analysis
+      run: |
+        # Python complexity check
+        find . -name "*.py" -not -path "./venv/*" | \
+        xargs -r python -m mccabe --min 10
+
+    - name: Code Duplication Detection
+      uses: platisd/duplicate-code-detection-tool@master
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        directories: "projects/"
+        file_extensions: "py,js,jsx,ts,tsx"
+        ignore_directories: "node_modules,venv,.env"
+        minimum_tokens: 50
+
+    - name: Documentation Coverage
+      run: |
+        find . -name "*.py" -not -path "./venv/*" | \
+        xargs -r pydocstyle --convention=google
