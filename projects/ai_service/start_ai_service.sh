@@ -18,9 +18,9 @@ set -e  # Exit on any error
 if [[ "$EUID" -eq 0 && "$1" == "--install-ollama-only" ]]; then
     echo "🔧 Installing Ollama (running as root)..."
     curl -fsSL https://ollama.ai/install.sh | sh
-    echo "✅ Ollama installation complete!"
+    echo "Ollama installation complete!"
     echo ""
-    echo "🚀 Please run this script again as a regular user:"
+    echo "Please run this script again as a regular user:"
     echo "   ./start_ai_service.sh"
     exit 0
 fi
@@ -789,16 +789,16 @@ monitor_services() {
     log_info "Services are running! Press Ctrl+C to stop all services"
     echo
     log_info "Service URLs:"
-    log_info "  🌐 Frontend:     $FRONTEND_URL"
-    log_info "  🤖 Backend API:  $BACKEND_URL/health"
-    log_info "  🧠 Ollama API:   $OLLAMA_SERVICE_URL/health" 
-    log_info "  📊 ErrorLogger:  $ERRORLOGGER_URL/health"
+    log_info "  Frontend:     $FRONTEND_URL"
+    log_info "  Backend API:  $BACKEND_URL/health"
+    log_info "  Ollama API:   $OLLAMA_SERVICE_URL/health" 
+    log_info "  ErrorLogger:  $ERRORLOGGER_URL/health"
     echo
     log_info "Log files:"
-    log_info "  📝 ErrorLogger:  $ERRORLOGGER_DIR/errorlogger.log"
-    log_info "  📝 Backend:      $BACKEND_DIR/backend.log"
-    log_info "  📝 Ollama:       $OLLAMA_SERVICE_DIR/ollama_service.log"
-    log_info "  📝 Frontend:     $FRONTEND_DIR/frontend.log"
+    log_info "  ErrorLogger:  $ERRORLOGGER_DIR/errorlogger.log"
+    log_info "  Backend:      $BACKEND_DIR/backend.log"
+    log_info "  Ollama:       $OLLAMA_SERVICE_DIR/ollama_service.log"
+    log_info "  Frontend:     $FRONTEND_DIR/frontend.log"
     echo
     
     # Monitor loop
@@ -846,14 +846,14 @@ main() {
     echo
     
     log_info "This script will:"
-    log_info "  ✅ Install all system dependencies"
-    log_info "  ✅ Set up Python virtual environment"
-    log_info "  ✅ Install all Python packages"
-    log_info "  ✅ Set up Node.js environment"
-    log_info "  ✅ Install all Node.js packages"
-    log_info "  ✅ Install Ollama (with permission)"
-    log_info "  ✅ Start all 4 services"
-    log_info "  ✅ Monitor service health"
+    log_info "  - Install all system dependencies"
+    log_info "  - Set up Python virtual environment"
+    log_info "  - Install all Python packages"
+    log_info "  - Set up Node.js environment"
+    log_info "  - Install all Node.js packages"
+    log_info "  - Install Ollama (with permission)"
+    log_info "  - Start all 4 services"
+    log_info "  - Monitor service health"
     echo
     
     # Set up cleanup trap
@@ -868,7 +868,7 @@ main() {
     setup_nodejs_environment
     install_ollama  # Non-critical, can fail
     
-    log_success "🎉 Installation phase completed!"
+    log_success "Installation phase completed!"
     echo
     
     # Startup phase
@@ -892,7 +892,7 @@ main() {
         exit 1
     fi
     
-    log_success "🚀 All services started successfully!"
+    log_success "All services started successfully!"
     echo
     
     # Monitoring phase
