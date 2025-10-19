@@ -4,7 +4,7 @@
  */
 
 const API_BASE =
-  process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5000';
+  process.env.NODE_ENV === "production" ? "" : "http://localhost:5000";
 
 export const logFrontendError = async (
   errorCode,
@@ -26,36 +26,36 @@ export const logFrontendError = async (
     };
 
     await fetch(`${API_BASE}/api/log-frontend-error`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
       body: JSON.stringify(payload),
     });
   } catch (err) {
     // If logging fails, log to console as fallback
-    console.error('Failed to log to ErrorLogger service:', err);
-    console.error('Original error:', { errorCode, message, exception, extra });
+    console.error("Failed to log to ErrorLogger service:", err);
+    console.error("Original error:", { errorCode, message, exception, extra });
   }
 };
 
-export const getErrorExplanation = errorCode => {
+export const getErrorExplanation = (errorCode) => {
   const errorExplanations = {
-    FRONTEND_INIT: 'Frontend application initialized',
-    FRONTEND_API_ERROR: 'API request failed',
-    FRONTEND_RENDER_ERROR: 'Component render error',
-    FRONTEND_CHAT_ERROR: 'Chat functionality error',
-    FRONTEND_MODEL_ERROR: 'Model management error',
-    FRONTEND_CONNECTION_ERROR: 'Backend connection error',
+    FRONTEND_INIT: "Frontend application initialized",
+    FRONTEND_API_ERROR: "API request failed",
+    FRONTEND_RENDER_ERROR: "Component render error",
+    FRONTEND_CHAT_ERROR: "Chat functionality error",
+    FRONTEND_MODEL_ERROR: "Model management error",
+    FRONTEND_CONNECTION_ERROR: "Backend connection error",
   };
 
-  return errorExplanations[errorCode] || 'Frontend error occurred';
+  return errorExplanations[errorCode] || "Frontend error occurred";
 };
 
 // Global error handler for unhandled errors
-window.addEventListener('error', event => {
+window.addEventListener("error", (event) => {
   logFrontendError(
-    'FRONTEND_UNHANDLED_ERROR',
+    "FRONTEND_UNHANDLED_ERROR",
     `Unhandled error: ${event.message}`,
     event.error,
     {
@@ -67,13 +67,13 @@ window.addEventListener('error', event => {
 });
 
 // Global handler for unhandled promise rejections
-window.addEventListener('unhandledrejection', event => {
+window.addEventListener("unhandledrejection", (event) => {
   logFrontendError(
-    'FRONTEND_UNHANDLED_PROMISE',
+    "FRONTEND_UNHANDLED_PROMISE",
     `Unhandled promise rejection: ${event.reason}`,
     event.reason,
     {
-      type: 'promise_rejection',
+      type: "promise_rejection",
     }
   );
 });
