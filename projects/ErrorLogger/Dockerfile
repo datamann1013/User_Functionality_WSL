@@ -7,11 +7,11 @@ WORKDIR /app
 RUN apk add --no-cache curl
 
 # Copy requirements and install dependencies
-COPY requirements.txt .
+COPY projects/ErrorLogger/requirements.txt .
 RUN pip install --no-cache-dir --disable-pip-version-check -r requirements.txt
 
 # Copy ErrorLogger code
-COPY . /app/
+COPY projects/ErrorLogger/ /app/
 
 # Create logs directory
 RUN mkdir -p /app/logs && chmod 777 /app/logs

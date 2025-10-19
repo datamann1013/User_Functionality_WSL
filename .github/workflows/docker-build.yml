@@ -22,14 +22,14 @@ jobs:
       matrix:
         service:
           - name: errorlogger
-            dockerfile: Dockerfile
-            context: projects/ErrorLogger
+            dockerfile: projects/ErrorLogger/Dockerfile
+            context: .
           - name: backend
-            dockerfile: docker/Dockerfile.backend
-            context: projects/ai_service
+            dockerfile: projects/ai_service/docker/Dockerfile.backend
+            context: .
           - name: frontend
-            dockerfile: docker/Dockerfile.frontend
-            context: projects/ai_service
+            dockerfile: projects/ai_service/docker/Dockerfile.frontend
+            context: .
 
     steps:
     - name: Checkout repository
