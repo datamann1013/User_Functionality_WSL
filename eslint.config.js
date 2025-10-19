@@ -1,7 +1,7 @@
 // ESLint Configuration for RuneCore Ecosystem (v9+ format)
 // Simplified configuration for immediate compatibility
 
-export default [
+module.exports = [
   {
     files: ['**/*.{js,jsx,ts,tsx}'],
     languageOptions: {

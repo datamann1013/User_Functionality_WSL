@@ -80,7 +80,7 @@ jobs:
         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
     - name: OSV Scanner
-      uses: google/osv-scanner-action@v1
+      uses: google/osv-scanner-action@v1.9.0
       with:
         scan-args: |-
           --recursive
