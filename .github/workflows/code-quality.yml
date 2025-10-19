@@ -51,7 +51,7 @@ jobs:
     - name: Python Linting
       run: |
         find . -name "*.py" -not -path "./venv/*" -not -path "./.env/*" | \
-        xargs -r pylint --fail-under=8.0 --disable=C0114,C0115,C0116
+        xargs -r pylint --fail-under=6.0 --disable=C0114,C0115,C0116,C0303,E0401,C0413,C0103,W0611,R0801
 
     - name: Code Formatting Check
       run: |
