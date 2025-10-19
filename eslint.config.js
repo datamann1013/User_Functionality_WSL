@@ -52,7 +52,7 @@ module.exports = [
     },
     rules: {
       // Error Prevention
-      'no-console': 'warn',
+      'no-console': 'warn', // Warn about console statements but don't fail CI
       'no-debugger': 'error',
       'no-unused-vars': 'off', // Disabled for JSX compatibility
       'no-undef': 'error',

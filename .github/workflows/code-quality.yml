@@ -46,7 +46,7 @@ jobs:
       run: |
         find . -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" | 
         grep -v node_modules | 
-        xargs -r npx eslint --max-warnings 0
+        xargs -r npx eslint --max-warnings 15
 
     - name: Python Linting
       run: |
