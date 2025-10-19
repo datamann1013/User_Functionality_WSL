@@ -14,6 +14,12 @@ function getAvatarColor(name) {
     '#6b46c1', '#7c3aed', '#8b5cf6', '#a855f7', '#c084fc',
     '#4c1d95', '#5b21b6', '#6d28d9', '#7c2d12', '#92400e'
   ];
+  
+  // Safety check: handle undefined, null, or empty names
+  if (!name || typeof name !== 'string' || name.length === 0) {
+    return colors[0]; // Return first color as default
+  }
+  
   const index = name.charCodeAt(0) % colors.length;
   return colors[index];
 }
@@ -84,6 +90,7 @@ function getAgentStatusDisplay(agent) {
 function App() {
   // State management
   const [agents, setAgents] = useState([]);
+  const [agentsLoading, setAgentsLoading] = useState(true);
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
@@ -103,18 +110,28 @@ function App() {
   // Load agents from API
   const loadAgents = async () => {
     try {
+      setAgentsLoading(true);
       const response = await fetch(`${API_BASE}/api/agents`);
       if (response.ok) {
         const data = await response.json();
-        setAgents(data.agents || []);
+        const validAgents = (data.agents || []).filter(agent => 
+          agent && typeof agent === 'object' && agent.id && agent.name
+        );
+        setAgents(validAgents);
         
         // Set first agent as selected if none selected
-        if (data.agents && data.agents.length > 0 && !selectedAgent) {
-          await handleAgentSwitch(data.agents[0].id);
+        if (validAgents.length > 0 && !selectedAgent) {
+          await handleAgentSwitch(validAgents[0].id);
         }
+      } else {
+        // If agents API fails, set empty array to prevent errors
+        setAgents([]);
       }
     } catch (error) {
       logFrontendError('AGENTS_LOAD_ERROR', 'Failed to load agents', error);
+      setAgents([]); // Set empty array to prevent undefined errors
+    } finally {
+      setAgentsLoading(false);
     }
   };
 
@@ -401,43 +418,59 @@ function App() {
         {/* Left Sidebar - Agents */}
         <div className="agents-sidebar">
           <div className="agents-list">
-            {agents.map(agent => (
-              <div 
-                key={agent.id}
-                className={`agent-item ${selectedAgent === agent.id ? 'selected' : ''}`}
-                onClick={() => handleAgentSwitch(agent.id)}
-              >
-                <div 
-                  className="agent-avatar"
-                  style={{ backgroundColor: getAvatarColor(agent.name) }}
+            {agentsLoading ? (
+              <div className="loading-agents">
+                <div className="loading-indicator">Loading agents...</div>
+              </div>
+            ) : agents.length === 0 ? (
+              <div className="no-agents">
+                <p>No agents available.</p>
+                <button 
+                  onClick={() => setShowCreateModal(true)}
+                  className="create-first-agent-btn"
                 >
-                  {agent.avatar_image ? (
-                    agent.avatar_image.startsWith('/api/avatars/') ? (
-                      <img 
-                        src={`http://localhost:5000${agent.avatar_image}`} 
-                        alt={agent.name}
-                        className="agent-avatar-image"
-                      />
+                  Create your first agent
+                </button>
+              </div>
+            ) : (
+              agents.filter(agent => agent && agent.id).map(agent => (
+                <div 
+                  key={agent.id}
+                  className={`agent-item ${selectedAgent === agent.id ? 'selected' : ''}`}
+                  onClick={() => handleAgentSwitch(agent.id)}
+                >
+                  <div 
+                    className="agent-avatar"
+                    style={{ backgroundColor: getAvatarColor(agent?.name || 'Unknown') }}
+                  >
+                    {agent.avatar_image ? (
+                      agent.avatar_image.startsWith('/api/avatars/') ? (
+                        <img 
+                          src={`http://localhost:5000${agent.avatar_image}`} 
+                          alt={agent?.name || 'Agent'}
+                          className="agent-avatar-image"
+                        />
+                      ) : (
+                        agent.avatar_image
+                      )
                     ) : (
-                      agent.avatar_image
-                    )
-                  ) : (
-                    agent.name.charAt(0).toUpperCase()
-                  )}
-                </div>
-                <div className="agent-info">
-                  <div className="agent-name">{agent.name}</div>
-                  <div className="agent-meta">
-                    <span className="downtime">
-                      {calculateDowntime(agent.last_active)}
-                    </span>
-                    <span className={`status ${getAgentStatusDisplay(agent).class}`}>
-                      {getAgentStatusDisplay(agent).text}
-                    </span>
+                      (agent?.name || 'A').charAt(0).toUpperCase()
+                    )}
+                  </div>
+                  <div className="agent-info">
+                    <div className="agent-name">{agent?.name || 'Unknown Agent'}</div>
+                    <div className="agent-meta">
+                      <span className="downtime">
+                        {calculateDowntime(agent.last_active)}
+                      </span>
+                      <span className={`status ${getAgentStatusDisplay(agent).class}`}>
+                        {getAgentStatusDisplay(agent).text}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
             
             {/* Create New Agent Button */}
             <div 
@@ -481,7 +514,7 @@ function App() {
               <div className="empty-chat">
                 <div className="empty-message">
                   <h3>Start a conversation</h3>
-                  <p>Type in the input box below to begin chatting with {agents.find(a => a.id === selectedAgent)?.name}</p>
+                  <p>Type in the input box below to begin chatting with {agents.find(a => a.id === selectedAgent)?.name || 'your AI assistant'}</p>
                 </div>
               </div>
             ) : (
@@ -542,7 +575,7 @@ function App() {
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder={connecting ? "Connecting..." : `Message ${agents.find(a => a.id === selectedAgent)?.name}...`}
+                placeholder={connecting ? "Connecting..." : `Message ${agents.find(a => a.id === selectedAgent)?.name || 'AI'}...`}
                 disabled={connecting || thinking}
                 rows={1}
                 className="message-input"

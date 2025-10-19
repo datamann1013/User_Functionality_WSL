@@ -137,9 +137,10 @@ def chat():
         except:
             pass
         return jsonify({
-            'error': 'Request failed',
-            'message': 'Failed to process your request. Please check your connection and try again.',
-            'code': 'EABC05'
+            'error': 'Technical Error - Chat System Failed',
+            'message': 'An unexpected server error occurred in the chat system. This is not something you can fix.',
+            'error_code': 'EABC05',
+            'action_required': 'Please contact the administrator or create a ticket at https://github.com/datamann1013/User_Functionality_WSL/issues with this error code.'
         }), 500
 
 @app.route('/api/log-frontend-error', methods=['POST'])
@@ -202,7 +203,13 @@ def ollama_status():
             }), 503
     except Exception as e:
         log_to_errorlogger('EABS06', 'Failed to get Ollama status', exception=e)
-        return jsonify({'status': 'error', 'error': str(e)}), 500
+        return jsonify({
+            'status': 'error', 
+            'error': 'Technical Error - Service Status Check Failed',
+            'message': 'Unable to check AI service status due to a server error.',
+            'error_code': 'EABS06',
+            'action_required': 'Please contact the administrator or create a ticket at https://github.com/datamann1013/User_Functionality_WSL/issues with this error code.'
+        }), 500
 
 # Agent management endpoints
 @app.route('/api/agents', methods=['GET'])
@@ -214,8 +221,10 @@ def get_agents():
     except Exception as e:
         log_to_errorlogger('EABD01', 'Failed to get agents', exception=e)
         return jsonify({
-            'error': 'Unable to load agents',
-            'message': 'Could not retrieve your AI agents right now. Please refresh the page or try again in a moment.'
+            'error': 'Technical Error - Database Connection Failed',
+            'message': 'Unable to connect to the database to load your AI agents. This is a server-side issue.',
+            'error_code': 'EABD01', 
+            'action_required': 'Please contact the administrator or create a ticket at https://github.com/datamann1013/User_Functionality_WSL/issues with this error code.'
         }), 500
 
 @app.route('/api/agents', methods=['POST'])
@@ -226,10 +235,14 @@ def create_agent():
         if not request.is_json and not request.content_type.startswith('multipart/form-data'):
             log_to_errorlogger('EABD05', f'Invalid content type for agent creation: {request.content_type}')
             return jsonify({
-                'error': 'Unsupported content type',
-                'message': 'Please send your data as JSON (application/json) or use form data (multipart/form-data) for file uploads.',
-                'received_content_type': request.content_type,
-                'supported_types': ['application/json', 'multipart/form-data']
+                'error': 'Technical Error - Unsupported Content Type',
+                'message': 'There is a technical issue with how your request was formatted. This is likely a bug in the application.',
+                'error_code': 'EABD05',
+                'action_required': 'Please contact the administrator or create a ticket at https://github.com/datamann1013/User_Functionality_WSL/issues',
+                'technical_details': {
+                    'received_content_type': request.content_type,
+                    'supported_types': ['application/json', 'multipart/form-data']
+                }
             }), 415
         
         # Handle both JSON and form data
@@ -238,8 +251,10 @@ def create_agent():
             if data is None:
                 log_to_errorlogger('EABD06', 'No JSON data received for agent creation')
                 return jsonify({
-                    'error': 'Empty request',
-                    'message': 'No data was received. Please ensure your request includes the required agent information.'
+                    'error': 'Technical Error - Empty JSON Request',
+                    'message': 'The application sent an empty request. This is likely a bug in the frontend.',
+                    'error_code': 'EABD06',
+                    'action_required': 'Please contact the administrator or create a ticket at https://github.com/datamann1013/User_Functionality_WSL/issues'
                 }), 400
         else:
             # Handle multipart/form-data (for file uploads)
@@ -324,8 +339,10 @@ def create_agent():
     except Exception as e:
         log_to_errorlogger('EABD02', 'Failed to create agent', exception=e)
         return jsonify({
-            'error': 'Server error',
-            'message': 'Something went wrong while creating your agent. Please try again, or contact support if the problem persists.'
+            'error': 'Technical Error - Agent Creation Failed',
+            'message': 'An unexpected server error occurred while creating your agent. This is not something you can fix.',
+            'error_code': 'EABD02',
+            'action_required': 'Please contact the administrator or create a ticket at https://github.com/datamann1013/User_Functionality_WSL/issues with this error code.'
         }), 500
 
 @app.route('/api/agents/<agent_id>', methods=['PUT'])
@@ -422,8 +439,10 @@ def download_model_endpoint():
     except Exception as e:
         log_to_errorlogger('EABM02', f'Failed to download model {model_name}', exception=e)
         return jsonify({
-            'error': 'Download service error',
-            'message': f'Something went wrong while downloading model "{model_name}". Please try again later or choose a different model.'
+            'error': 'Technical Error - Model Download Service Failed',
+            'message': f'An unexpected server error occurred while downloading model "{model_name}". This is a technical issue.',
+            'error_code': 'EABM02',
+            'action_required': 'Please contact the administrator or create a ticket at https://github.com/datamann1013/User_Functionality_WSL/issues with this error code.'
         }), 500
 
 def check_and_download_agent_models():

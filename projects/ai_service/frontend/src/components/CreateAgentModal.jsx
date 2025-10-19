@@ -188,30 +188,59 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
         }
       }
 
-      // Prepare form data for submission
-      const submitData = new FormData();
-      submitData.append('name', formData.name);
-      submitData.append('model_name', formData.model_name);
-      submitData.append('temperature', formData.temperature / 100); // Convert to 0-1 range for backend
-      submitData.append('top_p', formData.top_p / 100); // Convert to 0-1 range for backend
-      submitData.append('system_prompt', formData.system_prompt);
-      submitData.append('max_tokens', formData.max_tokens);
+      // Prepare data for submission
+      let requestBody;
+      let requestHeaders = {};
       
-      // Add download status to metadata
-      if (downloadInProgress) {
-        submitData.append('metadata', JSON.stringify({
-          model_downloading: true,
-          download_started: new Date().toISOString()
-        }));
-      }
-      
+      // Use FormData only if we have a file to upload
       if (formData.avatar_image) {
+        const submitData = new FormData();
+        submitData.append('name', formData.name);
+        submitData.append('model_name', formData.model_name);
+        submitData.append('temperature', formData.temperature / 100); // Convert to 0-1 range for backend
+        submitData.append('top_p', formData.top_p / 100); // Convert to 0-1 range for backend
+        submitData.append('system_prompt', formData.system_prompt);
+        submitData.append('max_tokens', formData.max_tokens);
+        
+        // Add download status to metadata
+        if (downloadInProgress) {
+          submitData.append('metadata', JSON.stringify({
+            model_downloading: true,
+            download_started: new Date().toISOString()
+          }));
+        }
+        
         submitData.append('avatar_image', formData.avatar_image);
+        requestBody = submitData;
+        // Don't set Content-Type for FormData - browser will set it with boundary
+      } else {
+        // Use JSON for cleaner requests when no file upload is needed
+        const jsonData = {
+          name: formData.name,
+          model_name: formData.model_name,
+          temperature: formData.temperature / 100,
+          top_p: formData.top_p / 100,
+          system_prompt: formData.system_prompt,
+          max_tokens: formData.max_tokens,
+          avatar_image: '🤖' // Use emoji avatar as default when no file uploaded
+        };
+        
+        // Add download status to metadata
+        if (downloadInProgress) {
+          jsonData.metadata = {
+            model_downloading: true,
+            download_started: new Date().toISOString()
+          };
+        }
+        
+        requestBody = JSON.stringify(jsonData);
+        requestHeaders['Content-Type'] = 'application/json';
       }
 
       const response = await fetch('http://localhost:5000/api/agents', {
         method: 'POST',
-        body: submitData, // Using FormData for file upload
+        headers: requestHeaders,
+        body: requestBody,
       });
 
       if (response.ok) {
@@ -240,10 +269,21 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
         const errorData = await response.json();
         // Use the improved error message from the backend
         const errorMessage = errorData.message || errorData.error || 'Failed to create agent';
-        setErrors({ 
-          submit: errorMessage,
-          details: errorData.suggestions || []
-        });
+        
+        // Handle technical errors with error codes
+        if (errorData.error_code) {
+          setErrors({ 
+            submit: `${errorMessage} (Error Code: ${errorData.error_code})`,
+            details: errorData.action_required ? [errorData.action_required] : (errorData.suggestions || []),
+            technical: true,
+            errorCode: errorData.error_code
+          });
+        } else {
+          setErrors({ 
+            submit: errorMessage,
+            details: errorData.suggestions || []
+          });
+        }
       }
     } catch (error) {
       console.error('Agent creation error:', error);
@@ -393,11 +433,17 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
           </div>
 
           {errors.submit && (
-            <div className="error-message">
+            <div className={`error-message ${errors.technical ? 'technical-error' : ''}`}>
               <div className="error-text">{errors.submit}</div>
+              {errors.technical && errors.errorCode && (
+                <div className="technical-error-info">
+                  <strong>⚠️ Technical Error</strong>
+                  <p>This appears to be a technical issue that you cannot fix yourself.</p>
+                </div>
+              )}
               {errors.details && errors.details.length > 0 && (
                 <div className="error-suggestions">
-                  <strong>Suggestions:</strong>
+                  <strong>{errors.technical ? 'Action Required:' : 'Suggestions:'}</strong>
                   <ul>
                     {errors.details.map((suggestion, index) => (
                       <li key={index}>{suggestion}</li>
