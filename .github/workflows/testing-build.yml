@@ -46,21 +46,36 @@ jobs:
         case "${{ matrix.platform.name }}" in
           kali)
             apt-get update && apt-get install -y python3 python3-pip nodejs npm curl git
-            pip3 install flask requests
+            if [ -f "projects/ai_service/backend/requirements.txt" ]; then
+              pip3 install -r projects/ai_service/backend/requirements.txt || pip3 install flask requests flask-cors
+            else
+              pip3 install flask requests flask-cors
+            fi
             ;;
           arch)
             pacman -Syu --noconfirm python python-pip nodejs npm curl git
             # Arch Linux uses externally managed Python environment (PEP 668)
-            # Use --break-system-packages or install via pacman
-            pip install --break-system-packages flask requests
+            if [ -f "projects/ai_service/backend/requirements.txt" ]; then
+              pip install --break-system-packages -r projects/ai_service/backend/requirements.txt || pip install --break-system-packages flask requests flask-cors
+            else
+              pip install --break-system-packages flask requests flask-cors
+            fi
             ;;
           debian)
             apt-get update && apt-get install -y python3 python3-pip nodejs npm curl git
-            pip3 install flask requests
+            if [ -f "projects/ai_service/backend/requirements.txt" ]; then
+              pip3 install -r projects/ai_service/backend/requirements.txt || pip3 install flask requests flask-cors
+            else
+              pip3 install flask requests flask-cors
+            fi
             ;;
           ubuntu)
             sudo apt-get update && sudo apt-get install -y python3 python3-pip nodejs npm
-            pip3 install flask requests
+            if [ -f "projects/ai_service/backend/requirements.txt" ]; then
+              pip3 install -r projects/ai_service/backend/requirements.txt || pip3 install flask requests flask-cors
+            else
+              pip3 install flask requests flask-cors
+            fi
             ;;
         esac
 
@@ -69,7 +84,14 @@ jobs:
       shell: powershell
       run: |
         # Install Python packages for Windows
-        python -m pip install flask requests
+        if (Test-Path "projects/ai_service/backend/requirements.txt") {
+          python -m pip install -r projects/ai_service/backend/requirements.txt
+          if ($LASTEXITCODE -ne 0) {
+            python -m pip install flask requests flask-cors
+          }
+        } else {
+          python -m pip install flask requests flask-cors
+        }
 
     - name: Run Platform-Specific Tests (Linux)
       if: matrix.platform.name != 'windows-wsl'
