@@ -216,7 +216,7 @@ def ollama_status():
 def get_agents():
     """Get all agents"""
     try:
-        agents = db.get_all_agents()
+        agents = db.list_agents()
         return jsonify({'agents': agents})
     except Exception as e:
         log_to_errorlogger('EABD01', 'Failed to get agents', exception=e)
@@ -448,7 +448,7 @@ def download_model_endpoint():
 def check_and_download_agent_models():
     """Check and download models for saved agents"""
     try:
-        agents = db.get_all_agents()
+        agents = db.list_agents()
         available_models = {model.get('name') for model in get_ollama_models()}
         
         all_ready = True
