@@ -38,7 +38,7 @@ def route_to_ollama_chat(message, agent_id):
     """Route chat request to Ollama service with agent-specific parameters and memory context"""
     try:
         # Import here to avoid circular imports
-        from database import db
+        from database_postgres import db
         
         # Look up agent from database to get their parameters
         agent = db.get_agent(agent_id)

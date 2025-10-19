@@ -131,7 +131,14 @@ def chat():
             }), 500
         
     except Exception as e:
-        log_to_errorlogger('EABC05', 'Chat request failed', exception=e)
+        # Log the error with simple message to avoid JSON serialization issues
+        error_msg = f'Chat request failed: {str(e)}'
+        try:
+            log_to_errorlogger('EABC05', error_msg)
+        except:
+            # If logging fails, just print to console
+            print(f"ERROR EABC05: {error_msg}")
+        
         try:
             db.update_agent_status(agent_id, 'idle')
         except:
