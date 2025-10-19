@@ -151,15 +151,35 @@ needs_sudo() {
         return 1
     fi
     
-    # Test package manager access
-    if command_exists apt; then
-        ! apt list --installed >/dev/null 2>&1
+    # Test if we can actually use package managers with sudo
+    if command_exists pacman; then
+        # Test if sudo works and we can use pacman
+        if sudo -n pacman -Q >/dev/null 2>&1; then
+            return 0  # We need sudo but it's available
+        elif pacman -Q >/dev/null 2>&1; then
+            return 1  # Can run without sudo
+        else
+            return 0  # Need sudo
+        fi
+    elif command_exists apt; then
+        # Test if we can list packages
+        if apt list --installed >/dev/null 2>&1; then
+            return 1  # Don't need sudo for this test, but will need for install
+        else
+            return 0  # Need sudo
+        fi
     elif command_exists yum; then
-        ! yum list installed >/dev/null 2>&1
+        if yum list installed >/dev/null 2>&1; then
+            return 1
+        else
+            return 0
+        fi
     elif command_exists dnf; then
-        ! dnf list installed >/dev/null 2>&1
-    elif command_exists pacman; then
-        ! pacman -Q >/dev/null 2>&1
+        if dnf list installed >/dev/null 2>&1; then
+            return 1
+        else
+            return 0
+        fi
     else
         return 0  # Assume we need sudo if we can't detect
     fi
@@ -175,23 +195,63 @@ install_system_packages() {
     local distro=$(detect_distro)
     local sudo_cmd=""
     
-    # Determine if we need sudo
-    if needs_sudo; then
-        if ! command_exists sudo; then
+    # Determine if we need sudo and if it's available
+    if ! is_root; then
+        if command_exists sudo; then
+            # Test if sudo works
+            if sudo -n true >/dev/null 2>&1; then
+                sudo_cmd="sudo"
+                log_info "Using sudo for package installation (passwordless)"
+            elif sudo -l >/dev/null 2>&1; then
+                sudo_cmd="sudo"
+                log_warning "Will prompt for sudo password for package installation"
+            else
+                log_error "sudo is not available or configured for this user"
+                log_info "Please ensure you have sudo access or run as root"
+                exit 1
+            fi
+        else
             log_error "This script requires sudo access for package installation"
-            log_info "Please run: su -c './start_ai_service.sh'"
-            log_info "Or install sudo and add your user to sudoers"
+            log_info "Please install sudo or run as root"
             exit 1
         fi
-        sudo_cmd="sudo"
-        log_warning "This script needs to install system packages and will prompt for sudo password"
     fi
+    
+    # Check if essential tools are already installed
+    local missing_tools=()
+    local essential_tools=("curl" "git")
+    
+    for tool in "${essential_tools[@]}"; do
+        if ! command_exists "$tool"; then
+            missing_tools+=("$tool")
+        fi
+    done
+    
+    # Check language runtimes
+    if ! command_exists python3; then
+        missing_tools+=("python3")
+    fi
+    
+    if ! command_exists node; then
+        missing_tools+=("nodejs")
+    fi
+    
+    # If nothing is missing, skip installation
+    if [[ ${#missing_tools[@]} -eq 0 ]]; then
+        log_success "All essential system dependencies already installed"
+        return 0
+    fi
+    
+    log_info "Missing tools: ${missing_tools[*]}"
     
     # Update package lists first
     log_install "Updating package lists..."
     case "$distro" in
         ubuntu|debian)
-            $sudo_cmd apt update -y
+            $sudo_cmd apt update -y || {
+                log_error "Failed to update package lists"
+                exit 1
+            }
             ;;
         fedora)
             $sudo_cmd dnf check-update || true
@@ -200,7 +260,10 @@ install_system_packages() {
             $sudo_cmd yum check-update || true
             ;;
         arch|manjaro)
-            $sudo_cmd pacman -Sy
+            $sudo_cmd pacman -Sy || {
+                log_error "Failed to update package lists"
+                exit 1
+            }
             ;;
     esac
     
@@ -208,17 +271,26 @@ install_system_packages() {
     case "$distro" in
         ubuntu|debian)
             log_install "Installing packages for Ubuntu/Debian..."
-            $sudo_cmd apt install -y curl wget git build-essential pkg-config python3 python3-pip python3-venv nodejs npm
+            $sudo_cmd apt install -y curl wget git build-essential pkg-config python3 python3-pip python3-venv nodejs npm || {
+                log_error "Package installation failed"
+                exit 1
+            }
             ;;
         fedora)
             log_install "Installing packages for Fedora..."
-            $sudo_cmd dnf install -y curl wget git gcc gcc-c++ make python3 python3-pip nodejs npm
+            $sudo_cmd dnf install -y curl wget git gcc gcc-c++ make python3 python3-pip nodejs npm || {
+                log_error "Package installation failed"
+                exit 1
+            }
             ;;
         centos|rhel|rocky|almalinux)
             log_install "Installing packages for CentOS/RHEL..."
             # Enable EPEL repository first
             $sudo_cmd yum install -y epel-release || true
-            $sudo_cmd yum install -y curl wget git gcc gcc-c++ make python3 python3-pip
+            $sudo_cmd yum install -y curl wget git gcc gcc-c++ make python3 python3-pip || {
+                log_error "Package installation failed"
+                exit 1
+            }
             
             # Install Node.js from NodeSource
             if ! command_exists node; then
@@ -229,7 +301,10 @@ install_system_packages() {
             ;;
         arch|manjaro)
             log_install "Installing packages for Arch Linux..."
-            $sudo_cmd pacman -S --noconfirm curl wget git base-devel python python-pip nodejs npm
+            $sudo_cmd pacman -S --noconfirm curl wget git base-devel python python-pip nodejs npm || {
+                log_error "Package installation failed"
+                exit 1
+            }
             ;;
         *)
             log_warning "Unknown distribution: $distro"
@@ -240,6 +315,38 @@ install_system_packages() {
             log_info "  - build tools (gcc, make, etc.)"
             ;;
     esac
+    
+    # Verify critical installations
+    local verification_failed=0
+    
+    if ! command_exists python3; then
+        log_error "Python3 installation failed"
+        verification_failed=1
+    else
+        local python_version=$(python3 --version 2>&1)
+        log_success "Python3 installed: $python_version"
+    fi
+    
+    if ! command_exists node; then
+        log_error "Node.js installation failed"
+        verification_failed=1
+    else
+        local node_version=$(node --version 2>&1)
+        log_success "Node.js installed: $node_version"
+    fi
+    
+    if ! command_exists npm; then
+        log_error "npm installation failed"
+        verification_failed=1
+    else
+        local npm_version=$(npm --version 2>&1)
+        log_success "npm installed: $npm_version"
+    fi
+    
+    if [[ $verification_failed -eq 1 ]]; then
+        log_error "Some critical packages failed to install"
+        exit 1
+    fi
     
     log_success "System dependencies installation completed"
 }
