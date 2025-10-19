@@ -385,5 +385,5 @@ register_module(RuneNewModule())
 
 ---
 
-**RuneCore**: Building the future of personal computing environments, one module at a time.ionality WSL
+**RuneCore**: Building the future of personal computing environments, one module at a time.
 
