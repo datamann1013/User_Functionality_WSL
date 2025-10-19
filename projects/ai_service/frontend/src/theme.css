@@ -228,6 +228,34 @@ body {
   background-color: var(--dark-bg);
 }
 
+/* Connection Status */
+.connection-status {
+  background: linear-gradient(135deg, var(--primary-purple), var(--accent-purple));
+  padding: 12px 16px;
+  margin: 8px 16px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(107, 70, 193, 0.3);
+}
+
+.connection-message {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: white;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.loading-dots {
+  animation: pulse 1.5s ease-in-out infinite;
+  font-size: 16px;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 .chat-area {
   flex: 1;
   overflow-y: auto;

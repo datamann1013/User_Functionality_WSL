@@ -48,7 +48,7 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name.trim()) {
-      setError('Agent name is required');
+      setError('Agent name is required. Please enter a name for your agent.');
       return;
     }
 
@@ -69,11 +69,21 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
         onAgentUpdated(updatedAgent);
         onClose();
       } else {
-        const errorData = await response.json();
-        setError(errorData.error || 'Failed to update agent');
+        const errorData = await response.json().catch(() => ({}));
+        if (response.status === 404) {
+          setError('Agent not found. It may have been deleted by another user. Please refresh the page.');
+        } else if (response.status === 400) {
+          setError(errorData.error || 'Invalid agent settings. Please check your input and try again.');
+        } else {
+          setError(errorData.error || 'Unable to save changes. Please check your connection and try again.');
+        }
       }
     } catch (error) {
-      setError('Network error: ' + error.message);
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        setError('Cannot connect to the server. Please check your internet connection and try again.');
+      } else {
+        setError('Connection error while saving changes. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -93,11 +103,21 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
         onClose();
         setShowDeleteConfirm(false);
       } else {
-        const errorData = await response.json();
-        setError(errorData.error || 'Failed to delete agent');
+        const errorData = await response.json().catch(() => ({}));
+        if (response.status === 404) {
+          setError('Agent not found. It may have already been deleted. Please refresh the page.');
+        } else if (response.status === 403) {
+          setError('You do not have permission to delete this agent.');
+        } else {
+          setError(errorData.error || 'Unable to delete agent. Please check your connection and try again.');
+        }
       }
     } catch (error) {
-      setError('Network error: ' + error.message);
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        setError('Cannot connect to the server. Please check your internet connection and try again.');
+      } else {
+        setError('Connection error while deleting agent. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }

@@ -39,10 +39,19 @@ const ModelManager = ({ isOpen, onClose }) => {
         const data = await response.json();
         setAvailableModels(data.models || []);
       } else {
-        setError('Failed to fetch available models');
+        const errorData = await response.json().catch(() => ({}));
+        if (response.status === 503) {
+          setError('AI service is not available. Please make sure the AI service is running and try again.');
+        } else {
+          setError(errorData.error || 'Unable to load AI models. Please check your connection and try again.');
+        }
       }
     } catch (error) {
-      setError('Network error: ' + error.message);
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        setError('Cannot connect to AI service. Please make sure the service is running.');
+      } else {
+        setError('Connection error: Unable to fetch available models. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -62,13 +71,25 @@ const ModelManager = ({ isOpen, onClose }) => {
       if (response.ok) {
         // Refresh available models after download
         await fetchAvailableModels();
-        setError(`✅ Successfully downloaded ${modelName}`);
+        setError(`✅ Successfully downloaded ${modelName}! You can now use this model in your agents.`);
       } else {
-        const errorData = await response.json();
-        setError(errorData.error || `Failed to download ${modelName}`);
+        const errorData = await response.json().catch(() => ({}));
+        if (response.status === 404) {
+          setError(`Model "${modelName}" not found. Please check the model name and try again.`);
+        } else if (response.status === 507) {
+          setError(`Not enough disk space to download "${modelName}". Please free up space and try again.`);
+        } else if (response.status === 503) {
+          setError('AI service is not available. Please make sure Ollama is running and try again.');
+        } else {
+          setError(errorData.error || `Failed to download "${modelName}". Please check your internet connection and try again.`);
+        }
       }
     } catch (error) {
-      setError('Network error: ' + error.message);
+      if (error.name === 'TypeError' && error.message.includes('fetch')) {
+        setError('Cannot connect to AI service. Please make sure the service is running.');
+      } else {
+        setError(`Connection error while downloading "${modelName}". Please check your internet connection and try again.`);
+      }
     } finally {
       setDownloadingModels(prev => {
         const newSet = new Set(prev);
@@ -80,7 +101,7 @@ const ModelManager = ({ isOpen, onClose }) => {
 
   const downloadCustomModel = async () => {
     if (!newModelName.trim()) {
-      setError('Please enter a model name');
+      setError('Please enter a model name (e.g., "llama3.1:8b" or "mistral:7b")');
       return;
     }
 

@@ -31,11 +31,6 @@ def log_to_errorlogger(error_code, message=None, exception=None, extra=None):
         extra = {}
     extra['service'] = 'ai_service'
     
-    # Convert exception to string to avoid JSON serialization issues
-    if exception:
-        exception_str = str(exception)
-        return log_error_remote(error_code, message, exception_str, extra)
-    
     return log_error_remote(error_code, message, exception, extra)
 
 # Load environment variables
@@ -67,7 +62,10 @@ def chat():
         agent_id = data.get('agent_id', 'assistant-1')
         
         if not message:
-            return jsonify({'error': 'Message is required'}), 400
+            return jsonify({
+                'error': 'Empty message',
+                'message': 'Please type a message to send to your AI agent.'
+            }), 400
         
         # Set agent as busy before processing
         db.update_agent_status(agent_id, 'busy')
@@ -94,8 +92,9 @@ def chat():
                 db.update_agent_status(agent_id, 'idle')
                 return jsonify({
                     'error': 'AI processing failed',
-                    'message': 'The AI service encountered an error processing your request. Please try again or restart the service.',
-                    'code': 'EABC02'
+                    'message': 'The AI couldn\'t process your message right now. This might be due to a model issue or network problem. Please try again in a moment.',
+                    'code': 'EABC02',
+                    'suggestions': ['Try rephrasing your message', 'Check if the AI model is still downloading', 'Restart the conversation']
                 }), 500
             
             log_to_errorlogger('IABC03', 
@@ -210,44 +209,124 @@ def ollama_status():
 def get_agents():
     """Get all agents"""
     try:
-        agents = db.list_agents()
+        agents = db.get_all_agents()
         return jsonify({'agents': agents})
     except Exception as e:
         log_to_errorlogger('EABD01', 'Failed to get agents', exception=e)
-        return jsonify({'error': 'Failed to get agents'}), 500
+        return jsonify({
+            'error': 'Unable to load agents',
+            'message': 'Could not retrieve your AI agents right now. Please refresh the page or try again in a moment.'
+        }), 500
 
 @app.route('/api/agents', methods=['POST'])
 def create_agent():
     """Create a new agent"""
     try:
         # Check content type
-        if not request.is_json:
+        if not request.is_json and not request.content_type.startswith('multipart/form-data'):
             log_to_errorlogger('EABD05', f'Invalid content type for agent creation: {request.content_type}')
             return jsonify({
-                'error': 'Invalid content type',
-                'message': 'Request must be application/json',
-                'received_content_type': request.content_type
+                'error': 'Unsupported content type',
+                'message': 'Please send your data as JSON (application/json) or use form data (multipart/form-data) for file uploads.',
+                'received_content_type': request.content_type,
+                'supported_types': ['application/json', 'multipart/form-data']
             }), 415
         
-        data = request.get_json()
-        if data is None:
-            log_to_errorlogger('EABD06', 'No JSON data received for agent creation')
-            return jsonify({'error': 'No JSON data provided'}), 400
+        # Handle both JSON and form data
+        if request.is_json:
+            data = request.get_json()
+            if data is None:
+                log_to_errorlogger('EABD06', 'No JSON data received for agent creation')
+                return jsonify({
+                    'error': 'Empty request',
+                    'message': 'No data was received. Please ensure your request includes the required agent information.'
+                }), 400
+        else:
+            # Handle multipart/form-data (for file uploads)
+            data = request.form.to_dict()
+            # Convert string values back to appropriate types
+            if 'temperature' in data:
+                try:
+                    data['temperature'] = float(data['temperature'])
+                except (ValueError, TypeError):
+                    return jsonify({
+                        'error': 'Invalid temperature',
+                        'message': 'Temperature must be a number between 0 and 1.'
+                    }), 400
+            if 'top_p' in data:
+                try:
+                    data['top_p'] = float(data['top_p'])
+                except (ValueError, TypeError):
+                    return jsonify({
+                        'error': 'Invalid top_p',
+                        'message': 'Top P must be a number between 0 and 1.'
+                    }), 400
+            if 'max_tokens' in data:
+                try:
+                    data['max_tokens'] = int(data['max_tokens'])
+                except (ValueError, TypeError):
+                    return jsonify({
+                        'error': 'Invalid max_tokens',
+                        'message': 'Maximum tokens must be a whole number.'
+                    }), 400
+        
+        # Validate required fields
+        if not data.get('name') or not data.get('name').strip():
+            return jsonify({
+                'error': 'Missing agent name',
+                'message': 'Please provide a name for your AI agent. This helps you identify it later.'
+            }), 400
+            
+        if not data.get('model_name'):
+            return jsonify({
+                'error': 'Missing model selection',
+                'message': 'Please select an AI model for your agent. Popular options include llama3.2:1b for fast responses or llama3.1:8b for better quality.'
+            }), 400
+        
+        # Validate ranges
+        temperature = data.get('temperature', 0.7)
+        if not (0 <= temperature <= 1):
+            return jsonify({
+                'error': 'Temperature out of range',
+                'message': 'Temperature must be between 0 (very focused) and 1 (very creative). Try 0.7 for balanced responses.'
+            }), 400
+            
+        top_p = data.get('top_p', 0.9)
+        if not (0 <= top_p <= 1):
+            return jsonify({
+                'error': 'Top P out of range', 
+                'message': 'Top P must be between 0 and 1. This controls response variety - try 0.9 for good balance.'
+            }), 400
+            
+        max_tokens = data.get('max_tokens', 2048)
+        if not (1 <= max_tokens <= 8192):
+            return jsonify({
+                'error': 'Max tokens out of range',
+                'message': 'Maximum tokens must be between 1 and 8192. This limits response length - try 2048 for most conversations.'
+            }), 400
             
         agent_data = {
-            'name': data.get('name'),
+            'name': data.get('name').strip(),
             'model_name': data.get('model_name'),
-            'system_prompt': data.get('system_prompt', ''),
-            'temperature': data.get('temperature', 0.7),
-            'top_p': data.get('top_p', 0.9),
-            'max_tokens': data.get('max_tokens', 2048),
+            'system_prompt': data.get('system_prompt', '').strip(),
+            'temperature': temperature,
+            'top_p': top_p,
+            'max_tokens': max_tokens,
             'avatar_url': data.get('avatar_url')
         }
+        
         agent = db.create_agent(agent_data)
-        return jsonify({'agent_id': agent.get('id'), 'status': 'created'})
+        return jsonify({
+            'agent_id': agent.get('id'), 
+            'status': 'created',
+            'message': f'Agent "{agent_data["name"]}" has been created successfully!'
+        })
     except Exception as e:
         log_to_errorlogger('EABD02', 'Failed to create agent', exception=e)
-        return jsonify({'error': 'Failed to create agent'}), 500
+        return jsonify({
+            'error': 'Server error',
+            'message': 'Something went wrong while creating your agent. Please try again, or contact support if the problem persists.'
+        }), 500
 
 @app.route('/api/agents/<agent_id>', methods=['PUT'])
 def update_agent(agent_id):
@@ -276,21 +355,38 @@ def upload_avatar():
     """Upload avatar file"""
     try:
         if 'file' not in request.files:
-            return jsonify({'error': 'No file provided'}), 400
+            return jsonify({
+                'error': 'No file provided',
+                'message': 'Please select an image file to upload as your agent\'s avatar.'
+            }), 400
         
         file = request.files['file']
         if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
+            return jsonify({
+                'error': 'No file selected',
+                'message': 'Please choose an image file from your device.'
+            }), 400
         
         filename = save_avatar_file(file)
         if filename:
             avatar_url = get_avatar_url(filename)
-            return jsonify({'avatar_url': avatar_url, 'filename': filename})
+            return jsonify({
+                'avatar_url': avatar_url, 
+                'filename': filename,
+                'message': 'Avatar uploaded successfully!'
+            })
         else:
-            return jsonify({'error': 'Invalid file type'}), 400
+            return jsonify({
+                'error': 'Invalid file type',
+                'message': 'Please upload a valid image file (JPG, PNG, GIF, or WebP). The file should be less than 5MB.',
+                'supported_formats': ['jpg', 'jpeg', 'png', 'gif', 'webp']
+            }), 400
     except Exception as e:
         log_to_errorlogger('EABF01', 'Failed to upload avatar', exception=e)
-        return jsonify({'error': 'Failed to upload avatar'}), 500
+        return jsonify({
+            'error': 'Upload failed',
+            'message': 'Something went wrong while uploading your avatar. Please try again with a different image or contact support if the problem continues.'
+        }), 500
 
 @app.route('/api/avatars/<filename>')
 def serve_avatar(filename):
@@ -306,13 +402,29 @@ def download_model_endpoint():
         model_name = data.get('model_name')
         
         if not model_name:
-            return jsonify({'error': 'Model name is required'}), 400
+            return jsonify({
+                'error': 'Missing model name',
+                'message': 'Please specify which AI model you want to download (e.g., "llama3.2:1b").'
+            }), 400
         
         success = download_model(model_name)
-        return jsonify({'status': 'downloaded' if success else 'failed'})
+        if success:
+            return jsonify({
+                'status': 'downloaded',
+                'message': f'Model "{model_name}" has been downloaded successfully and is ready to use!'
+            })
+        else:
+            return jsonify({
+                'status': 'failed',
+                'error': 'Download failed',
+                'message': f'Could not download model "{model_name}". Please check the model name and your internet connection.'
+            })
     except Exception as e:
         log_to_errorlogger('EABM02', f'Failed to download model {model_name}', exception=e)
-        return jsonify({'error': 'Failed to download model'}), 500
+        return jsonify({
+            'error': 'Download service error',
+            'message': f'Something went wrong while downloading model "{model_name}". Please try again later or choose a different model.'
+        }), 500
 
 def check_and_download_agent_models():
     """Check and download models for saved agents"""

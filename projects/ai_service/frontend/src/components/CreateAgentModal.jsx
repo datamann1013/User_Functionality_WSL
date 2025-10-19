@@ -67,13 +67,13 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
     if (file) {
       // Validate file type
       if (!file.type.startsWith('image/')) {
-        setErrors(prev => ({ ...prev, avatar_image: 'Please select an image file' }));
+        setErrors(prev => ({ ...prev, avatar_image: 'Please select an image file (JPG, PNG, GIF, or WebP)' }));
         return;
       }
       
       // Validate file size (max 5MB)
       if (file.size > 5 * 1024 * 1024) {
-        setErrors(prev => ({ ...prev, avatar_image: 'Image must be less than 5MB' }));
+        setErrors(prev => ({ ...prev, avatar_image: 'Image file must be smaller than 5MB. Try compressing the image or choose a different one.' }));
         return;
       }
       
@@ -140,19 +140,19 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
     const newErrors = {};
     
     if (!formData.name.trim()) {
-      newErrors.name = 'Agent name is required';
+      newErrors.name = 'Please enter a name for your AI agent';
     }
     
     if (!formData.model_name) {
-      newErrors.model_name = 'Model selection is required';
+      newErrors.model_name = 'Please select an AI model for your agent';
     }
     
     if (formData.temperature < 0 || formData.temperature > 100) {
-      newErrors.temperature = 'Temperature must be between 0 and 100';
+      newErrors.temperature = 'Temperature should be between 0 (focused) and 100 (creative)';
     }
     
     if (formData.top_p < 0 || formData.top_p > 100) {
-      newErrors.top_p = 'Top P must be between 0 and 100';
+      newErrors.top_p = 'Top P should be between 0 and 100 (controls response variety)';
     }
 
     setErrors(newErrors);
@@ -237,11 +237,20 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
         });
         setAvatarPreview(null);
       } else {
-        const error = await response.json();
-        setErrors({ submit: error.error || 'Failed to create agent' });
+        const errorData = await response.json();
+        // Use the improved error message from the backend
+        const errorMessage = errorData.message || errorData.error || 'Failed to create agent';
+        setErrors({ 
+          submit: errorMessage,
+          details: errorData.suggestions || []
+        });
       }
     } catch (error) {
-      setErrors({ submit: 'Network error occurred' });
+      console.error('Agent creation error:', error);
+      setErrors({ 
+        submit: 'Unable to create agent. Please check your internet connection and try again.',
+        details: ['Make sure you\'re connected to the internet', 'Try refreshing the page', 'Contact support if the problem continues']
+      });
     }
     
     setLoading(false);
@@ -384,7 +393,19 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
           </div>
 
           {errors.submit && (
-            <div className="error-message">{errors.submit}</div>
+            <div className="error-message">
+              <div className="error-text">{errors.submit}</div>
+              {errors.details && errors.details.length > 0 && (
+                <div className="error-suggestions">
+                  <strong>Suggestions:</strong>
+                  <ul>
+                    {errors.details.map((suggestion, index) => (
+                      <li key={index}>{suggestion}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           )}
 
           <div className="form-actions">
