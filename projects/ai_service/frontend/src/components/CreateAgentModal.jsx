@@ -8,9 +8,9 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
     temperature: 70,
     top_p: 90,
     system_prompt: 'You are a helpful AI assistant.',
-    max_tokens: 2048
+    max_tokens: 2048,
   });
-  
+
   const [availableModels, setAvailableModels] = useState([]);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
@@ -20,12 +20,12 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
   // Common model options (will be supplemented by API)
   const commonModels = [
     'llama3.2:1b',
-    'llama3.2:3b', 
+    'llama3.2:3b',
     'llama3.1:8b',
     'codellama:7b',
     'mistral:7b',
     'gemma:2b',
-    'phi3:mini'
+    'phi3:mini',
   ];
 
   useEffect(() => {
@@ -50,36 +50,43 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
   const handleInputChange = (field, value) => {
     setFormData(prev => ({
       ...prev,
-      [field]: value
+      [field]: value,
     }));
-    
+
     // Clear field error when user starts typing
     if (errors[field]) {
       setErrors(prev => ({
         ...prev,
-        [field]: null
+        [field]: null,
       }));
     }
   };
 
-  const handleAvatarUpload = (event) => {
+  const handleAvatarUpload = event => {
     const file = event.target.files[0];
     if (file) {
       // Validate file type
       if (!file.type.startsWith('image/')) {
-        setErrors(prev => ({ ...prev, avatar_image: 'Please select an image file (JPG, PNG, GIF, or WebP)' }));
+        setErrors(prev => ({
+          ...prev,
+          avatar_image: 'Please select an image file (JPG, PNG, GIF, or WebP)',
+        }));
         return;
       }
-      
+
       // Validate file size (max 5MB)
       if (file.size > 5 * 1024 * 1024) {
-        setErrors(prev => ({ ...prev, avatar_image: 'Image file must be smaller than 5MB. Try compressing the image or choose a different one.' }));
+        setErrors(prev => ({
+          ...prev,
+          avatar_image:
+            'Image file must be smaller than 5MB. Try compressing the image or choose a different one.',
+        }));
         return;
       }
-      
+
       // Create preview
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = e => {
         setAvatarPreview(e.target.result);
         setFormData(prev => ({ ...prev, avatar_image: file }));
         setErrors(prev => ({ ...prev, avatar_image: null }));
@@ -88,9 +95,11 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
     }
   };
 
-  const checkModelAvailability = async (modelName) => {
+  const checkModelAvailability = async modelName => {
     try {
-      const response = await fetch(`http://localhost:5000/api/models/check/${modelName}`);
+      const response = await fetch(
+        `http://localhost:5000/api/models/check/${modelName}`
+      );
       if (response.ok) {
         const data = await response.json();
         return data.available;
@@ -102,14 +111,17 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
     }
   };
 
-  const handleModelDownload = async (modelName) => {
+  const handleModelDownload = async modelName => {
     try {
       setModelDownloading(modelName);
-      
-      const response = await fetch(`http://localhost:5000/api/models/download/${modelName}`, {
-        method: 'POST'
-      });
-      
+
+      const response = await fetch(
+        `http://localhost:5000/api/models/download/${modelName}`,
+        {
+          method: 'POST',
+        }
+      );
+
       if (response.ok) {
         const data = await response.json();
         if (data.success) {
@@ -128,7 +140,10 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
       console.error(`Model download error for ${modelName}:`, error);
       // Only set errors if this is a foreground download (user initiated from model list)
       if (modelDownloading === modelName) {
-        setErrors(prev => ({ ...prev, model_download: error.message || 'Network error during download' }));
+        setErrors(prev => ({
+          ...prev,
+          model_download: error.message || 'Network error during download',
+        }));
       }
       throw error; // Re-throw for background download handling
     } finally {
@@ -138,47 +153,49 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
 
   const validateForm = () => {
     const newErrors = {};
-    
+
     if (!formData.name.trim()) {
       newErrors.name = 'Please enter a name for your AI agent';
     }
-    
+
     if (!formData.model_name) {
       newErrors.model_name = 'Please select an AI model for your agent';
     }
-    
+
     if (formData.temperature < 0 || formData.temperature > 100) {
-      newErrors.temperature = 'Temperature should be between 0 (focused) and 100 (creative)';
+      newErrors.temperature =
+        'Temperature should be between 0 (focused) and 100 (creative)';
     }
-    
+
     if (formData.top_p < 0 || formData.top_p > 100) {
-      newErrors.top_p = 'Top P should be between 0 and 100 (controls response variety)';
+      newErrors.top_p =
+        'Top P should be between 0 and 100 (controls response variety)';
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async e => {
     e.preventDefault();
-    
+
     if (!validateForm()) {
       return;
     }
 
     setLoading(true);
-    
+
     try {
       // Check if model is available
       const modelAvailable = await checkModelAvailability(formData.model_name);
-      
+
       let downloadInProgress = false;
-      
+
       if (!modelAvailable) {
         const shouldDownload = window.confirm(
           `The model "${formData.model_name}" is not available locally. Would you like to download it?\n\nThe agent will be created immediately but will show as "offline" until the download completes. This may take several minutes.`
         );
-        
+
         if (shouldDownload) {
           downloadInProgress = true;
           // Start download in background - don't wait for it
@@ -191,7 +208,7 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
       // Prepare data for submission
       let requestBody;
       let requestHeaders = {};
-      
+
       // Use FormData only if we have a file to upload
       if (formData.avatar_image) {
         const submitData = new FormData();
@@ -201,15 +218,18 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
         submitData.append('top_p', formData.top_p / 100); // Convert to 0-1 range for backend
         submitData.append('system_prompt', formData.system_prompt);
         submitData.append('max_tokens', formData.max_tokens);
-        
+
         // Add download status to metadata
         if (downloadInProgress) {
-          submitData.append('metadata', JSON.stringify({
-            model_downloading: true,
-            download_started: new Date().toISOString()
-          }));
+          submitData.append(
+            'metadata',
+            JSON.stringify({
+              model_downloading: true,
+              download_started: new Date().toISOString(),
+            })
+          );
         }
-        
+
         submitData.append('avatar_image', formData.avatar_image);
         requestBody = submitData;
         // Don't set Content-Type for FormData - browser will set it with boundary
@@ -222,17 +242,17 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
           top_p: formData.top_p / 100,
           system_prompt: formData.system_prompt,
           max_tokens: formData.max_tokens,
-          avatar_image: '🤖' // Use emoji avatar as default when no file uploaded
+          avatar_image: '🤖', // Use emoji avatar as default when no file uploaded
         };
-        
+
         // Add download status to metadata
         if (downloadInProgress) {
           jsonData.metadata = {
             model_downloading: true,
-            download_started: new Date().toISOString()
+            download_started: new Date().toISOString(),
           };
         }
-        
+
         requestBody = JSON.stringify(jsonData);
         requestHeaders['Content-Type'] = 'application/json';
       }
@@ -245,15 +265,17 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
 
       if (response.ok) {
         const newAgent = await response.json();
-        
+
         // Show success message with download info if applicable
         if (downloadInProgress) {
-          alert(`Agent "${newAgent.name}" created successfully!\n\nThe model "${formData.model_name}" is downloading in the background. The agent will appear offline until the download completes.`);
+          alert(
+            `Agent "${newAgent.name}" created successfully!\n\nThe model "${formData.model_name}" is downloading in the background. The agent will appear offline until the download completes.`
+          );
         }
-        
+
         onAgentCreated(newAgent);
         onClose();
-        
+
         // Reset form
         setFormData({
           name: '',
@@ -262,188 +284,231 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
           temperature: 70,
           top_p: 90,
           system_prompt: 'You are a helpful AI assistant.',
-          max_tokens: 2048
+          max_tokens: 2048,
         });
         setAvatarPreview(null);
       } else {
         const errorData = await response.json();
         // Use the improved error message from the backend
-        const errorMessage = errorData.message || errorData.error || 'Failed to create agent';
-        
+        const errorMessage =
+          errorData.message || errorData.error || 'Failed to create agent';
+
         // Handle technical errors with error codes
         if (errorData.error_code) {
-          setErrors({ 
+          setErrors({
             submit: `${errorMessage} (Error Code: ${errorData.error_code})`,
-            details: errorData.action_required ? [errorData.action_required] : (errorData.suggestions || []),
+            details: errorData.action_required
+              ? [errorData.action_required]
+              : errorData.suggestions || [],
             technical: true,
-            errorCode: errorData.error_code
+            errorCode: errorData.error_code,
           });
         } else {
-          setErrors({ 
+          setErrors({
             submit: errorMessage,
-            details: errorData.suggestions || []
+            details: errorData.suggestions || [],
           });
         }
       }
     } catch (error) {
       console.error('Agent creation error:', error);
-      setErrors({ 
-        submit: 'Unable to create agent. Please check your internet connection and try again.',
-        details: ['Make sure you\'re connected to the internet', 'Try refreshing the page', 'Contact support if the problem continues']
+      setErrors({
+        submit:
+          'Unable to create agent. Please check your internet connection and try again.',
+        details: [
+          "Make sure you're connected to the internet",
+          'Try refreshing the page',
+          'Contact support if the problem continues',
+        ],
       });
     }
-    
+
     setLoading(false);
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
+    <div className='modal-overlay' onClick={onClose}>
+      <div className='modal-content' onClick={e => e.stopPropagation()}>
+        <div className='modal-header'>
           <h2>Create New Agent</h2>
-          <button className="modal-close" onClick={onClose}>×</button>
+          <button className='modal-close' onClick={onClose}>
+            ×
+          </button>
         </div>
-        
-        <form onSubmit={handleSubmit} className="agent-form">
+
+        <form onSubmit={handleSubmit} className='agent-form'>
           {/* Agent Name */}
-          <div className="form-group">
-            <label htmlFor="name">Agent Name *</label>
+          <div className='form-group'>
+            <label htmlFor='name'>Agent Name *</label>
             <input
-              id="name"
-              type="text"
+              id='name'
+              type='text'
               value={formData.name}
-              onChange={(e) => handleInputChange('name', e.target.value)}
-              placeholder="Enter agent name"
+              onChange={e => handleInputChange('name', e.target.value)}
+              placeholder='Enter agent name'
               className={errors.name ? 'error' : ''}
             />
-            {errors.name && <span className="error-text">{errors.name}</span>}
+            {errors.name && <span className='error-text'>{errors.name}</span>}
           </div>
 
           {/* Avatar Upload */}
-          <div className="form-group">
-            <label htmlFor="avatar">Avatar Image</label>
-            <div className="avatar-upload-container">
+          <div className='form-group'>
+            <label htmlFor='avatar'>Avatar Image</label>
+            <div className='avatar-upload-container'>
               <input
-                id="avatar"
-                type="file"
-                accept="image/*"
+                id='avatar'
+                type='file'
+                accept='image/*'
                 onChange={handleAvatarUpload}
                 style={{ display: 'none' }}
               />
-              <label htmlFor="avatar" className="avatar-upload-button">
+              <label htmlFor='avatar' className='avatar-upload-button'>
                 {avatarPreview ? (
-                  <img src={avatarPreview} alt="Avatar preview" className="avatar-preview" />
+                  <img
+                    src={avatarPreview}
+                    alt='Avatar preview'
+                    className='avatar-preview'
+                  />
                 ) : (
-                  <div className="avatar-upload-placeholder">
+                  <div className='avatar-upload-placeholder'>
                     <span>📁</span>
                     <span>Choose Image</span>
                   </div>
                 )}
               </label>
-              <div className="avatar-upload-info">
-                <small>Upload an image (max 5MB). JPG, PNG, GIF supported.</small>
+              <div className='avatar-upload-info'>
+                <small>
+                  Upload an image (max 5MB). JPG, PNG, GIF supported.
+                </small>
               </div>
             </div>
-            {errors.avatar_image && <span className="error-text">{errors.avatar_image}</span>}
+            {errors.avatar_image && (
+              <span className='error-text'>{errors.avatar_image}</span>
+            )}
           </div>
 
           {/* Model Selection */}
-          <div className="form-group">
-            <label htmlFor="model">AI Model *</label>
+          <div className='form-group'>
+            <label htmlFor='model'>AI Model *</label>
             <select
-              id="model"
+              id='model'
               value={formData.model_name}
-              onChange={(e) => handleInputChange('model_name', e.target.value)}
+              onChange={e => handleInputChange('model_name', e.target.value)}
               className={errors.model_name ? 'error' : ''}
             >
-              <option value="">Select a model</option>
-              {[...new Set([...commonModels, ...availableModels])].map((model) => (
-                <option key={model} value={model}>
-                  {model} {availableModels.includes(model) ? '✓' : '⬇️'}
-                </option>
-              ))}
+              <option value=''>Select a model</option>
+              {[...new Set([...commonModels, ...availableModels])].map(
+                model => (
+                  <option key={model} value={model}>
+                    {model} {availableModels.includes(model) ? '✓' : '⬇️'}
+                  </option>
+                )
+              )}
             </select>
             <small>✓ = Available locally, ⬇️ = Needs download</small>
-            {errors.model_name && <span className="error-text">{errors.model_name}</span>}
-            {errors.model_download && <span className="error-text">{errors.model_download}</span>}
+            {errors.model_name && (
+              <span className='error-text'>{errors.model_name}</span>
+            )}
+            {errors.model_download && (
+              <span className='error-text'>{errors.model_download}</span>
+            )}
           </div>
 
           {/* System Prompt */}
-          <div className="form-group">
-            <label htmlFor="system_prompt">System Prompt</label>
+          <div className='form-group'>
+            <label htmlFor='system_prompt'>System Prompt</label>
             <textarea
-              id="system_prompt"
+              id='system_prompt'
               value={formData.system_prompt}
-              onChange={(e) => handleInputChange('system_prompt', e.target.value)}
+              onChange={e => handleInputChange('system_prompt', e.target.value)}
               placeholder="Describe the agent's personality and behavior"
               rows={3}
             />
           </div>
 
           {/* Advanced Settings */}
-          <div className="form-group">
-            <label className="section-label">Advanced Settings</label>
-            
-            <div className="form-row">
-              <div className="form-col">
-                <label htmlFor="temperature">Temperature: {formData.temperature}</label>
+          <div className='form-group'>
+            <label className='section-label'>Advanced Settings</label>
+
+            <div className='form-row'>
+              <div className='form-col'>
+                <label htmlFor='temperature'>
+                  Temperature: {formData.temperature}
+                </label>
                 <input
-                  id="temperature"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
+                  id='temperature'
+                  type='range'
+                  min='0'
+                  max='100'
+                  step='1'
                   value={formData.temperature}
-                  onChange={(e) => handleInputChange('temperature', parseInt(e.target.value))}
+                  onChange={e =>
+                    handleInputChange('temperature', parseInt(e.target.value))
+                  }
                 />
                 <small>Controls randomness (0 = focused, 100 = creative)</small>
-                {errors.temperature && <span className="error-text">{errors.temperature}</span>}
+                {errors.temperature && (
+                  <span className='error-text'>{errors.temperature}</span>
+                )}
               </div>
-              
-              <div className="form-col">
-                <label htmlFor="top_p">Top P: {formData.top_p}</label>
+
+              <div className='form-col'>
+                <label htmlFor='top_p'>Top P: {formData.top_p}</label>
                 <input
-                  id="top_p"
-                  type="range"
-                  min="0"
-                  max="100"
-                  step="1"
+                  id='top_p'
+                  type='range'
+                  min='0'
+                  max='100'
+                  step='1'
                   value={formData.top_p}
-                  onChange={(e) => handleInputChange('top_p', parseInt(e.target.value))}
+                  onChange={e =>
+                    handleInputChange('top_p', parseInt(e.target.value))
+                  }
                 />
                 <small>Controls diversity (0 = narrow, 100 = diverse)</small>
-                {errors.top_p && <span className="error-text">{errors.top_p}</span>}
+                {errors.top_p && (
+                  <span className='error-text'>{errors.top_p}</span>
+                )}
               </div>
             </div>
 
-            <div className="form-col">
-              <label htmlFor="max_tokens">Max Tokens</label>
+            <div className='form-col'>
+              <label htmlFor='max_tokens'>Max Tokens</label>
               <input
-                id="max_tokens"
-                type="number"
-                min="128"
-                max="8192"
+                id='max_tokens'
+                type='number'
+                min='128'
+                max='8192'
                 value={formData.max_tokens}
-                onChange={(e) => handleInputChange('max_tokens', parseInt(e.target.value))}
+                onChange={e =>
+                  handleInputChange('max_tokens', parseInt(e.target.value))
+                }
               />
               <small>Maximum response length</small>
             </div>
           </div>
 
           {errors.submit && (
-            <div className={`error-message ${errors.technical ? 'technical-error' : ''}`}>
-              <div className="error-text">{errors.submit}</div>
+            <div
+              className={`error-message ${errors.technical ? 'technical-error' : ''}`}
+            >
+              <div className='error-text'>{errors.submit}</div>
               {errors.technical && errors.errorCode && (
-                <div className="technical-error-info">
+                <div className='technical-error-info'>
                   <strong>⚠️ Technical Error</strong>
-                  <p>This appears to be a technical issue that you cannot fix yourself.</p>
+                  <p>
+                    This appears to be a technical issue that you cannot fix
+                    yourself.
+                  </p>
                 </div>
               )}
               {errors.details && errors.details.length > 0 && (
-                <div className="error-suggestions">
-                  <strong>{errors.technical ? 'Action Required:' : 'Suggestions:'}</strong>
+                <div className='error-suggestions'>
+                  <strong>
+                    {errors.technical ? 'Action Required:' : 'Suggestions:'}
+                  </strong>
                   <ul>
                     {errors.details.map((suggestion, index) => (
                       <li key={index}>{suggestion}</li>
@@ -454,11 +519,11 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
             </div>
           )}
 
-          <div className="form-actions">
-            <button type="button" onClick={onClose} disabled={loading}>
+          <div className='form-actions'>
+            <button type='button' onClick={onClose} disabled={loading}>
               Cancel
             </button>
-            <button type="submit" disabled={loading} className="primary">
+            <button type='submit' disabled={loading} className='primary'>
               {loading ? 'Creating...' : 'Create Agent'}
             </button>
           </div>

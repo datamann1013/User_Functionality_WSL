@@ -1,6 +1,12 @@
 import React, { useState, useEffect } from 'react';
 
-const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted }) => {
+const EditAgentModal = ({
+  isOpen,
+  onClose,
+  agent,
+  onAgentUpdated,
+  onAgentDeleted,
+}) => {
   const [formData, setFormData] = useState({
     name: '',
     model_name: '',
@@ -8,7 +14,7 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
     top_p: 0.9,
     system_prompt: '',
     max_tokens: 2048,
-    avatar_image: '🤖'
+    avatar_image: '🤖',
   });
   const [availableModels, setAvailableModels] = useState(['llama3.2:1b']);
   const [isLoading, setIsLoading] = useState(false);
@@ -16,7 +22,8 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // API base URL
-  const API_BASE = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5000';
+  const API_BASE =
+    process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5000';
 
   useEffect(() => {
     if (isOpen && agent) {
@@ -27,7 +34,7 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
         top_p: agent.top_p || 0.9,
         system_prompt: agent.system_prompt || '',
         max_tokens: agent.max_tokens || 2048,
-        avatar_image: agent.avatar_image || '🤖'
+        avatar_image: agent.avatar_image || '🤖',
       });
       fetchAvailableModels();
     }
@@ -45,7 +52,7 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
     }
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async e => {
     e.preventDefault();
     if (!formData.name.trim()) {
       setError('Agent name is required. Please enter a name for your agent.');
@@ -71,16 +78,26 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
       } else {
         const errorData = await response.json().catch(() => ({}));
         if (response.status === 404) {
-          setError('Agent not found. It may have been deleted by another user. Please refresh the page.');
+          setError(
+            'Agent not found. It may have been deleted by another user. Please refresh the page.'
+          );
         } else if (response.status === 400) {
-          setError(errorData.error || 'Invalid agent settings. Please check your input and try again.');
+          setError(
+            errorData.error ||
+              'Invalid agent settings. Please check your input and try again.'
+          );
         } else {
-          setError(errorData.error || 'Unable to save changes. Please check your connection and try again.');
+          setError(
+            errorData.error ||
+              'Unable to save changes. Please check your connection and try again.'
+          );
         }
       }
     } catch (error) {
       if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        setError('Cannot connect to the server. Please check your internet connection and try again.');
+        setError(
+          'Cannot connect to the server. Please check your internet connection and try again.'
+        );
       } else {
         setError('Connection error while saving changes. Please try again.');
       }
@@ -105,16 +122,23 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
       } else {
         const errorData = await response.json().catch(() => ({}));
         if (response.status === 404) {
-          setError('Agent not found. It may have already been deleted. Please refresh the page.');
+          setError(
+            'Agent not found. It may have already been deleted. Please refresh the page.'
+          );
         } else if (response.status === 403) {
           setError('You do not have permission to delete this agent.');
         } else {
-          setError(errorData.error || 'Unable to delete agent. Please check your connection and try again.');
+          setError(
+            errorData.error ||
+              'Unable to delete agent. Please check your connection and try again.'
+          );
         }
       }
     } catch (error) {
       if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        setError('Cannot connect to the server. Please check your internet connection and try again.');
+        setError(
+          'Cannot connect to the server. Please check your internet connection and try again.'
+        );
       } else {
         setError('Connection error while deleting agent. Please try again.');
       }
@@ -123,61 +147,59 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
     }
   };
 
-  const handleInputChange = (e) => {
+  const handleInputChange = e => {
     const { name, value, type } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: type === 'number' ? parseFloat(value) : value
+      [name]: type === 'number' ? parseFloat(value) : value,
     }));
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
+    <div className='modal-overlay' onClick={onClose}>
+      <div className='modal-content' onClick={e => e.stopPropagation()}>
+        <div className='modal-header'>
           <h2>Edit Agent</h2>
-          <button className="modal-close" onClick={onClose}>×</button>
+          <button className='modal-close' onClick={onClose}>
+            ×
+          </button>
         </div>
 
-        {error && (
-          <div className="error-message">
-            {error}
-          </div>
-        )}
+        {error && <div className='error-message'>{error}</div>}
 
-        <form onSubmit={handleSubmit} className="modal-form">
-          <div className="form-group">
-            <label htmlFor="name">Agent Name</label>
+        <form onSubmit={handleSubmit} className='modal-form'>
+          <div className='form-group'>
+            <label htmlFor='name'>Agent Name</label>
             <input
-              type="text"
-              id="name"
-              name="name"
+              type='text'
+              id='name'
+              name='name'
               value={formData.name}
               onChange={handleInputChange}
-              placeholder="Enter agent name..."
+              placeholder='Enter agent name...'
               required
             />
           </div>
 
-          <div className="form-group">
-            <label htmlFor="avatar_image">Avatar (emoji or text)</label>
+          <div className='form-group'>
+            <label htmlFor='avatar_image'>Avatar (emoji or text)</label>
             <input
-              type="text"
-              id="avatar_image"
-              name="avatar_image"
+              type='text'
+              id='avatar_image'
+              name='avatar_image'
               value={formData.avatar_image}
               onChange={handleInputChange}
-              placeholder="🤖"
+              placeholder='🤖'
             />
           </div>
 
-          <div className="form-group">
-            <label htmlFor="model_name">AI Model</label>
+          <div className='form-group'>
+            <label htmlFor='model_name'>AI Model</label>
             <select
-              id="model_name"
-              name="model_name"
+              id='model_name'
+              name='model_name'
               value={formData.model_name}
               onChange={handleInputChange}
               required
@@ -190,97 +212,93 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
             </select>
           </div>
 
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="temperature">
+          <div className='form-row'>
+            <div className='form-group'>
+              <label htmlFor='temperature'>
                 Temperature: {formData.temperature}
-                <span className="param-hint">Controls randomness</span>
+                <span className='param-hint'>Controls randomness</span>
               </label>
               <input
-                type="range"
-                id="temperature"
-                name="temperature"
-                min="0"
-                max="2"
-                step="0.1"
+                type='range'
+                id='temperature'
+                name='temperature'
+                min='0'
+                max='2'
+                step='0.1'
                 value={formData.temperature}
                 onChange={handleInputChange}
               />
             </div>
 
-            <div className="form-group">
-              <label htmlFor="top_p">
+            <div className='form-group'>
+              <label htmlFor='top_p'>
                 Top P: {formData.top_p}
-                <span className="param-hint">Controls diversity</span>
+                <span className='param-hint'>Controls diversity</span>
               </label>
               <input
-                type="range"
-                id="top_p"
-                name="top_p"
-                min="0"
-                max="1"
-                step="0.1"
+                type='range'
+                id='top_p'
+                name='top_p'
+                min='0'
+                max='1'
+                step='0.1'
                 value={formData.top_p}
                 onChange={handleInputChange}
               />
             </div>
           </div>
 
-          <div className="form-group">
-            <label htmlFor="max_tokens">
+          <div className='form-group'>
+            <label htmlFor='max_tokens'>
               Max Tokens: {formData.max_tokens}
-              <span className="param-hint">Maximum response length</span>
+              <span className='param-hint'>Maximum response length</span>
             </label>
             <input
-              type="range"
-              id="max_tokens"
-              name="max_tokens"
-              min="100"
-              max="4096"
-              step="100"
+              type='range'
+              id='max_tokens'
+              name='max_tokens'
+              min='100'
+              max='4096'
+              step='100'
               value={formData.max_tokens}
               onChange={handleInputChange}
             />
           </div>
 
-          <div className="form-group">
-            <label htmlFor="system_prompt">System Prompt</label>
+          <div className='form-group'>
+            <label htmlFor='system_prompt'>System Prompt</label>
             <textarea
-              id="system_prompt"
-              name="system_prompt"
+              id='system_prompt'
+              name='system_prompt'
               value={formData.system_prompt}
               onChange={handleInputChange}
-              placeholder="You are a helpful AI assistant..."
+              placeholder='You are a helpful AI assistant...'
               rows={4}
             />
           </div>
 
-          <div className="modal-actions">
-            <div className="actions-left">
+          <div className='modal-actions'>
+            <div className='actions-left'>
               <button
-                type="button"
+                type='button'
                 onClick={() => setShowDeleteConfirm(true)}
                 disabled={isLoading}
-                className="delete-btn"
+                className='delete-btn'
               >
                 🗑️ Delete Agent
               </button>
             </div>
-            
-            <div className="actions-right">
+
+            <div className='actions-right'>
               <button
-                type="button"
+                type='button'
                 onClick={onClose}
                 disabled={isLoading}
-                className="cancel-btn"
+                className='cancel-btn'
               >
                 Cancel
               </button>
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="save-btn"
-              >
+              <button type='submit' disabled={isLoading} className='save-btn'>
                 {isLoading ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
@@ -289,23 +307,25 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
 
         {/* Delete Confirmation Modal */}
         {showDeleteConfirm && (
-          <div className="confirm-overlay">
-            <div className="confirm-dialog">
+          <div className='confirm-overlay'>
+            <div className='confirm-dialog'>
               <h3>Delete Agent</h3>
               <p>Are you sure you want to delete "{agent?.name}"?</p>
-              <p><strong>This action cannot be undone.</strong></p>
-              <div className="confirm-actions">
+              <p>
+                <strong>This action cannot be undone.</strong>
+              </p>
+              <div className='confirm-actions'>
                 <button
                   onClick={() => setShowDeleteConfirm(false)}
                   disabled={isLoading}
-                  className="cancel-btn"
+                  className='cancel-btn'
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleDelete}
                   disabled={isLoading}
-                  className="delete-btn"
+                  className='delete-btn'
                 >
                   {isLoading ? 'Deleting...' : 'Delete Agent'}
                 </button>
