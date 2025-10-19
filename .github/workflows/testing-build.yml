@@ -39,7 +39,8 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Platform Setup
+    - name: Platform Setup (Linux)
+      if: matrix.platform.name != 'windows-wsl'
       shell: bash
       run: |
         case "${{ matrix.platform.name }}" in
@@ -49,7 +50,9 @@ jobs:
             ;;
           arch)
             pacman -Syu --noconfirm python python-pip nodejs npm curl git
-            pip install flask requests
+            # Arch Linux uses externally managed Python environment (PEP 668)
+            # Use --break-system-packages or install via pacman
+            pip install --break-system-packages flask requests
             ;;
           debian)
             apt-get update && apt-get install -y python3 python3-pip nodejs npm curl git
@@ -59,13 +62,18 @@ jobs:
             sudo apt-get update && sudo apt-get install -y python3 python3-pip nodejs npm
             pip3 install flask requests
             ;;
-          windows-wsl)
-            # For Windows, use different approach
-            python -m pip install flask requests
-            ;;
         esac
 
-    - name: Run Platform-Specific Tests
+    - name: Platform Setup (Windows)
+      if: matrix.platform.name == 'windows-wsl'
+      shell: powershell
+      run: |
+        # Install Python packages for Windows
+        python -m pip install flask requests
+
+    - name: Run Platform-Specific Tests (Linux)
+      if: matrix.platform.name != 'windows-wsl'
+      shell: bash
       run: |
         # Platform compatibility tests
         echo "Running tests on ${{ matrix.platform.name }}"
@@ -76,7 +84,22 @@ jobs:
           python3 -c "import app; print('Backend import successful')"
         fi
 
-    - name: Performance Benchmarks
+    - name: Run Platform-Specific Tests (Windows)
+      if: matrix.platform.name == 'windows-wsl'
+      shell: powershell
+      run: |
+        # Platform compatibility tests
+        Write-Host "Running tests on ${{ matrix.platform.name }}"
+        
+        # Test basic functionality
+        if (Test-Path "projects/ai_service/backend/app.py") {
+          Set-Location "projects/ai_service/backend"
+          python -c "import app; print('Backend import successful')"
+        }
+
+    - name: Performance Benchmarks (Linux)
+      if: matrix.platform.name != 'windows-wsl'
+      shell: bash
       run: |
         # Create benchmarks directory if it doesn't exist
         mkdir -p benchmarks/${{ matrix.platform.name }}
@@ -97,6 +120,33 @@ jobs:
           }
         }
         EOF
+
+    - name: Performance Benchmarks (Windows)
+      if: matrix.platform.name == 'windows-wsl'
+      shell: powershell
+      run: |
+        # Create benchmarks directory if it doesn't exist
+        New-Item -ItemType Directory -Force -Path "benchmarks/${{ matrix.platform.name }}"
+        
+        # Run memory and CPU benchmarks
+        Write-Host "Recording performance benchmarks for ${{ matrix.platform.name }}"
+        
+        # Placeholder for actual benchmark implementation
+        $timestamp = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        $filename = "benchmarks/${{ matrix.platform.name }}/benchmark-$(Get-Date -Format 'yyyyMMdd-HHmmss').json"
+        
+        $benchmark = @{
+          module = "runecore-test"
+          platform = "${{ matrix.platform.name }}"
+          timestamp = $timestamp
+          metrics = @{
+            memory_usage_mb = Get-Random -Minimum 100 -Maximum 200
+            cpu_usage_percent = Get-Random -Minimum 5 -Maximum 25
+            startup_time_ms = Get-Random -Minimum 500 -Maximum 2000
+          }
+        }
+        
+        $benchmark | ConvertTo-Json | Out-File -FilePath $filename
 
     - name: Upload Platform Benchmarks
       uses: actions/upload-artifact@v4
