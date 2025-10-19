@@ -1,14 +1,14 @@
 #!/bin/bash
 # ============================================================================
-# AI Service Complete Installation & Startup Script
+# RuneCore AI Subsystem Installation & Startup Script
 # ============================================================================
-# This script handles EVERYTHING needed to run the AI service:
+# This script handles EVERYTHING needed to run the RuneCore AI subsystem:
 # - System dependencies installation
 # - Python/Node.js installation 
 # - Virtual environment setup
 # - All Python/Node package installation
 # - Ollama installation (with sudo prompt)
-# - Service startup and monitoring
+# - RuneCore AI services startup and monitoring
 # - Comprehensive error handling and logging
 # ============================================================================
 
@@ -840,8 +840,8 @@ monitor_services() {
 
 main() {
     echo -e "${PURPLE}╭─────────────────────────────────────────────────────────────╮${NC}"
-    echo -e "${PURPLE}│                  AI SERVICE INSTALLER                      │${NC}"
-    echo -e "${PURPLE}│            Complete Setup & Startup Script                 │${NC}"
+    echo -e "${PURPLE}│               RUNECORE AI SUBSYSTEM INSTALLER              │${NC}"
+    echo -e "${PURPLE}│           AI System Setup & Service Management            │${NC}"
     echo -e "${PURPLE}╰─────────────────────────────────────────────────────────────╯${NC}"
     echo
     
