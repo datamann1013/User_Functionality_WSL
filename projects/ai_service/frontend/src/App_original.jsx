@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import "./theme.css";
 import { logFrontendError } from "./utils/errorLogger";
 import CreateAgentModal from "./components/CreateAgentModal";
@@ -8,33 +8,39 @@ import ModelManager from "./components/ModelManager";
 // API base URL
 const API_BASE = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5000';
 
-// Pre-computed avatar colors for better performance
-const AVATAR_COLORS = [
-  '#6b46c1', '#7c3aed', '#8b5cf6', '#a855f7', '#c084fc',
-  '#4c1d95', '#5b21b6', '#6d28d9', '#7c2d12', '#92400e'
-];
-
-// Optimized helper functions (moved outside component to prevent re-creation)
-const getAvatarColor = (name) => {
+// Helper function to generate avatar colors
+function getAvatarColor(name) {
+  const colors = [
+    '#6b46c1', '#7c3aed', '#8b5cf6', '#a855f7', '#c084fc',
+    '#4c1d95', '#5b21b6', '#6d28d9', '#7c2d12', '#92400e'
+  ];
+  
+  // Safety check: handle undefined, null, or empty names
   if (!name || typeof name !== 'string' || name.length === 0) {
-    return AVATAR_COLORS[0];
+    return colors[0]; // Return first color as default
   }
-  return AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length];
-};
+  
+  const index = name.charCodeAt(0) % colors.length;
+  return colors[index];
+}
 
-const formatTime = (timestamp) => {
-  return new Date(timestamp).toLocaleTimeString('en-US', { 
+// Helper function to format timestamp
+function formatTime(timestamp) {
+  const date = new Date(timestamp);
+  return date.toLocaleTimeString('en-US', { 
     hour: '2-digit', 
     minute: '2-digit',
     hour12: false 
   });
-};
+}
 
-const calculateDowntime = (lastActive) => {
+// Helper function to calculate downtime
+function calculateDowntime(lastActive) {
   if (!lastActive) return 'Never active';
-  const now = Date.now();
-  const last = new Date(lastActive).getTime();
-  const diffMins = Math.floor((now - last) / 60000);
+  const now = new Date();
+  const last = new Date(lastActive);
+  const diffMs = now - last;
+  const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMins / 60);
   const diffDays = Math.floor(diffHours / 24);
   
@@ -42,10 +48,11 @@ const calculateDowntime = (lastActive) => {
   if (diffHours > 0) return `${diffHours}h ago`;
   if (diffMins > 0) return `${diffMins}m ago`;
   return 'Just now';
-};
+}
 
-const getAgentStatusDisplay = (agent) => {
-  // Parse metadata once
+// Helper function to get readable status with download info
+function getAgentStatusDisplay(agent) {
+  // Check if model is downloading (from metadata)
   let metadata = {};
   try {
     metadata = typeof agent.metadata === 'string' ? JSON.parse(agent.metadata) : agent.metadata || {};
@@ -53,19 +60,35 @@ const getAgentStatusDisplay = (agent) => {
     metadata = {};
   }
   
+  // Always show offline if model is downloading or unavailable
   if (metadata.model_downloading || agent.status === 'offline') {
-    return { text: 'offline', class: 'offline' };
+    return {
+      text: 'offline',
+      class: 'offline'
+    };
   }
   
   switch (agent.status) {
-    case 'idle': return { text: 'ready', class: 'idle' };
-    case 'busy': return { text: 'thinking', class: 'busy' };
-    default: return { text: agent.status, class: agent.status };
+    case 'idle':
+      return {
+        text: 'ready',
+        class: 'idle'
+      };
+    case 'busy':
+      return {
+        text: 'thinking',
+        class: 'busy'
+      };
+    default:
+      return {
+        text: agent.status,
+        class: agent.status
+      };
   }
-};
+}
 
 function App() {
-  // State management (optimized with lazy initial state where appropriate)
+  // State management
   const [agents, setAgents] = useState([]);
   const [agentsLoading, setAgentsLoading] = useState(true);
   const [selectedAgent, setSelectedAgent] = useState(null);
@@ -84,19 +107,8 @@ function App() {
   const fileInputRef = useRef(null);
   const chatAreaRef = useRef(null);
 
-  // Memoized values for performance
-  const currentAgent = useMemo(() => 
-    agents.find(a => a.id === selectedAgent), 
-    [agents, selectedAgent]
-  );
-
-  const validAgents = useMemo(() => 
-    agents.filter(agent => agent && typeof agent === 'object' && agent.id && agent.name),
-    [agents]
-  );
-
-  // Optimized API calls with useCallback
-  const loadAgents = useCallback(async () => {
+  // Load agents from API
+  const loadAgents = async () => {
     try {
       setAgentsLoading(true);
       const response = await fetch(`${API_BASE}/api/agents`);
@@ -109,20 +121,22 @@ function App() {
         
         // Set first agent as selected if none selected
         if (validAgents.length > 0 && !selectedAgent) {
-          setSelectedAgent(validAgents[0].id);
+          await handleAgentSwitch(validAgents[0].id);
         }
       } else {
+        // If agents API fails, set empty array to prevent errors
         setAgents([]);
       }
     } catch (error) {
       logFrontendError('AGENTS_LOAD_ERROR', 'Failed to load agents', error);
-      setAgents([]);
+      setAgents([]); // Set empty array to prevent undefined errors
     } finally {
       setAgentsLoading(false);
     }
-  }, [selectedAgent]);
+  };
 
-  const loadConversationHistory = useCallback(async (agentId) => {
+  // Load conversation history for an agent
+  const loadConversationHistory = async (agentId) => {
     try {
       const response = await fetch(`${API_BASE}/api/agents/${agentId}/conversations?limit=50`);
       if (response.ok) {
@@ -130,72 +144,150 @@ function App() {
         const conversations = data.conversations || [];
         
         // Convert conversation logs to message format
-        const historyMessages = conversations.flatMap(conv => [
-          {
+        const historyMessages = [];
+        conversations.forEach(conv => {
+          // Add user message
+          historyMessages.push({
             id: `${conv.id}-user`,
             sender: "user",
             text: conv.user_message,
             timestamp: conv.timestamp
-          },
-          {
+          });
+          
+          // Add AI response
+          historyMessages.push({
             id: `${conv.id}-ai`,
             sender: "ai",
             text: conv.ai_response,
             timestamp: conv.timestamp,
             model: conv.model_used
-          }
-        ]);
+          });
+        });
         
         setMessages(historyMessages);
         logFrontendError('CONVERSATION_HISTORY_LOADED', `Loaded ${conversations.length} conversations for agent ${agentId}`);
       }
     } catch (error) {
       logFrontendError('CONVERSATION_HISTORY_ERROR', `Failed to load conversation history for agent ${agentId}`, error);
-      setMessages([]);
+      setMessages([]); // Clear messages on error
     }
-  }, []);
+  };
 
-  const handleAgentSwitch = useCallback(async (agentId) => {
-    if (agentId === selectedAgent) return;
+  // Handle agent switching with conversation history loading
+  const handleAgentSwitch = async (agentId) => {
+    if (agentId === selectedAgent) return; // No change needed
     
     setSelectedAgent(agentId);
-    setMessages([]);
-    setInputText('');
+    setMessages([]); // Clear current messages
+    setInputText(''); // Clear input
     
+    // Load conversation history for the selected agent
     if (agentId) {
       await loadConversationHistory(agentId);
     }
-  }, [selectedAgent, loadConversationHistory]);
+  };
 
-  const handleSend = useCallback(async () => {
+    // Check backend connection and load agents on mount
+  useEffect(() => {
+    const checkBackend = async () => {
+      try {
+        const response = await fetch(`${API_BASE}/health`);
+        if (response.ok) {
+          setConnecting(false);
+          await loadAgents();
+        }
+      } catch (error) {
+        logFrontendError('BACKEND_CONNECTION_ERROR', 'Failed to connect to backend', error);
+        setConnecting(true); // Keep showing connecting state
+        setTimeout(checkBackend, 5000); // Retry after 5 seconds
+      }
+    };
+
+    checkBackend();
+    
+    // Set up periodic agent refresh to check for status updates
+    const refreshInterval = setInterval(async () => {
+      if (!connecting) {
+        await loadAgents();
+      }
+    }, 5000); // Refresh every 5 seconds for better busy status visibility
+    
+    return () => clearInterval(refreshInterval);
+  }, []);
+
+  // Auto scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (chatAreaRef.current) {
+      chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  // Handle agent creation
+  const handleAgentCreated = async (newAgent) => {
+    setAgents(prev => [newAgent, ...prev]);
+    await handleAgentSwitch(newAgent.id);
+    logFrontendError('FRONTEND_AGENT_CREATED', `Created agent: ${newAgent.name}`);
+  };
+
+  // Handle agent editing
+  const handleEditAgent = (agent) => {
+    setAgentToEdit(agent);
+    setShowEditModal(true);
+    setToolsOpen(false); // Close tools dropdown
+  };
+
+  // Handle agent update
+  const handleAgentUpdated = (updatedAgent) => {
+    setAgents(prev => prev.map(agent => 
+      agent.id === updatedAgent.id ? updatedAgent : agent
+    ));
+    logFrontendError('FRONTEND_AGENT_UPDATED', `Updated agent: ${updatedAgent.name}`);
+  };
+
+  // Handle agent deletion
+  const handleAgentDeleted = async (deletedAgentId) => {
+    setAgents(prev => prev.filter(agent => agent.id !== deletedAgentId));
+    
+    // If deleted agent was selected, select another one
+    if (selectedAgent === deletedAgentId) {
+      const remainingAgents = agents.filter(agent => agent.id !== deletedAgentId);
+      if (remainingAgents.length > 0) {
+        await handleAgentSwitch(remainingAgents[0].id);
+      } else {
+        setSelectedAgent(null);
+        setMessages([]);
+      }
+    }
+    
+    logFrontendError('FRONTEND_AGENT_DELETED', `Deleted agent: ${deletedAgentId}`);
+  };
+
+  // Handle sending messages
+  async function handleSend() {
     if (connecting || !inputText.trim() || thinking) return;
     
     const userMessage = inputText.trim();
     setInputText('');
     setThinking(true);
     
-    // Generate unique IDs once
-    const messageId = Date.now() + Math.random();
-    const thinkingId = messageId + 1;
-    const timestamp = new Date().toISOString();
-    
     // Add user message
     const newMessage = {
-      id: messageId,
+      id: Date.now() + Math.random(),
       sender: "user",
       text: userMessage,
-      timestamp,
+      timestamp: new Date().toISOString(),
       files: selectedFiles.length > 0 ? [...selectedFiles] : undefined
     };
     setMessages(prev => [...prev, newMessage]);
     setSelectedFiles([]);
     
     // Add thinking indicator
+    const thinkingId = Date.now() + Math.random();
     setMessages(prev => [...prev, {
       id: thinkingId,
       sender: "ai",
       text: "Thinking...",
-      timestamp,
+      timestamp: new Date().toISOString(),
       isThinking: true
     }]);
     
@@ -225,12 +317,14 @@ function App() {
         ]);
         logFrontendError('FRONTEND_CHAT_SUCCESS', 'Chat message sent successfully');
       } else {
+        const errorData = data;
         let errorMessage = "Sorry, I couldn't process your message. ";
         
-        if (data.message) {
-          errorMessage = data.message;
-        } else if (data.error) {
-          switch (data.error) {
+        // Use the improved error messages from the backend
+        if (errorData.message) {
+          errorMessage = errorData.message;
+        } else if (errorData.error) {
+          switch (errorData.error) {
             case 'AI service unavailable':
               errorMessage = "The AI service is currently offline. Please wait a moment and try again.";
               break;
@@ -241,13 +335,14 @@ function App() {
               errorMessage = "Please type a message to send.";
               break;
             default:
-              errorMessage = data.error;
+              errorMessage = errorData.error;
           }
         }
         
         throw new Error(errorMessage);
       }
     } catch (error) {
+      // Remove thinking message and show error
       let userFriendlyMessage = "Sorry, something went wrong. ";
       
       if (error.message) {
@@ -270,112 +365,44 @@ function App() {
     }
     
     setThinking(false);
-  }, [connecting, inputText, thinking, selectedFiles, selectedAgent]);
+  }
 
-  // Check backend connection and load agents on mount
-  useEffect(() => {
-    const checkBackend = async () => {
-      try {
-        const response = await fetch(`${API_BASE}/health`);
-        if (response.ok) {
-          setConnecting(false);
-          await loadAgents();
-        }
-      } catch (error) {
-        logFrontendError('BACKEND_CONNECTION_ERROR', 'Failed to connect to backend', error);
-        setConnecting(true);
-        setTimeout(checkBackend, 5000);
-      }
-    };
-
-    checkBackend();
-    
-    // Set up periodic agent refresh
-    const refreshInterval = setInterval(async () => {
-      if (!connecting) {
-        await loadAgents();
-      }
-    }, 5000);
-    
-    return () => clearInterval(refreshInterval);
-  }, [connecting, loadAgents]);
-
-  // Auto scroll to bottom when new messages arrive
-  useEffect(() => {
-    if (chatAreaRef.current) {
-      chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
-    }
-  }, [messages]);
-
-  // Event handlers (optimized with useCallback)
-  const handleKeyPress = useCallback((e) => {
+  // Handle key press in input
+  function handleKeyPress(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
-  }, [handleSend]);
+  }
 
-  const handleFileSelect = useCallback((e) => {
+  // Handle file selection
+  function handleFileSelect(e) {
     const files = Array.from(e.target.files);
     setSelectedFiles(prev => [...prev, ...files]);
-  }, []);
+  }
 
-  const handleDrop = useCallback((e) => {
+  // Handle drag and drop
+  function handleDrop(e) {
     e.preventDefault();
     setDragOver(false);
     const files = Array.from(e.dataTransfer.files);
     setSelectedFiles(prev => [...prev, ...files]);
-  }, []);
+  }
 
-  const handleDragOver = useCallback((e) => {
+  function handleDragOver(e) {
     e.preventDefault();
     setDragOver(true);
-  }, []);
+  }
 
-  const handleDragLeave = useCallback((e) => {
+  function handleDragLeave(e) {
     e.preventDefault();
     setDragOver(false);
-  }, []);
+  }
 
-  const removeFile = useCallback((index) => {
+  // Remove selected file
+  function removeFile(index) {
     setSelectedFiles(prev => prev.filter((_, i) => i !== index));
-  }, []);
-
-  // Agent management handlers
-  const handleAgentCreated = useCallback(async (newAgent) => {
-    setAgents(prev => [newAgent, ...prev]);
-    await handleAgentSwitch(newAgent.id);
-    logFrontendError('FRONTEND_AGENT_CREATED', `Created agent: ${newAgent.name}`);
-  }, [handleAgentSwitch]);
-
-  const handleEditAgent = useCallback((agent) => {
-    setAgentToEdit(agent);
-    setShowEditModal(true);
-    setToolsOpen(false);
-  }, []);
-
-  const handleAgentUpdated = useCallback((updatedAgent) => {
-    setAgents(prev => prev.map(agent => 
-      agent.id === updatedAgent.id ? updatedAgent : agent
-    ));
-    logFrontendError('FRONTEND_AGENT_UPDATED', `Updated agent: ${updatedAgent.name}`);
-  }, []);
-
-  const handleAgentDeleted = useCallback(async (deletedAgentId) => {
-    setAgents(prev => prev.filter(agent => agent.id !== deletedAgentId));
-    
-    if (selectedAgent === deletedAgentId) {
-      const remainingAgents = agents.filter(agent => agent.id !== deletedAgentId);
-      if (remainingAgents.length > 0) {
-        await handleAgentSwitch(remainingAgents[0].id);
-      } else {
-        setSelectedAgent(null);
-        setMessages([]);
-      }
-    }
-    
-    logFrontendError('FRONTEND_AGENT_DELETED', `Deleted agent: ${deletedAgentId}`);
-  }, [selectedAgent, agents, handleAgentSwitch]);
+  }
 
   return (
     <div className="app">
@@ -395,7 +422,7 @@ function App() {
               <div className="loading-agents">
                 <div className="loading-indicator">Loading agents...</div>
               </div>
-            ) : validAgents.length === 0 ? (
+            ) : agents.length === 0 ? (
               <div className="no-agents">
                 <p>No agents available.</p>
                 <button 
@@ -406,47 +433,43 @@ function App() {
                 </button>
               </div>
             ) : (
-              validAgents.map(agent => {
-                const statusDisplay = getAgentStatusDisplay(agent);
-                const avatarColor = getAvatarColor(agent.name);
-                const downtime = calculateDowntime(agent.last_active);
-                
-                return (
+              agents.filter(agent => agent && agent.id).map(agent => (
+                <div 
+                  key={agent.id}
+                  className={`agent-item ${selectedAgent === agent.id ? 'selected' : ''}`}
+                  onClick={() => handleAgentSwitch(agent.id)}
+                >
                   <div 
-                    key={agent.id}
-                    className={`agent-item ${selectedAgent === agent.id ? 'selected' : ''}`}
-                    onClick={() => handleAgentSwitch(agent.id)}
+                    className="agent-avatar"
+                    style={{ backgroundColor: getAvatarColor(agent?.name || 'Unknown') }}
                   >
-                    <div 
-                      className="agent-avatar"
-                      style={{ backgroundColor: avatarColor }}
-                    >
-                      {agent.avatar_image ? (
-                        agent.avatar_image.startsWith('/api/avatars/') ? (
-                          <img 
-                            src={`http://localhost:5000${agent.avatar_image}`} 
-                            alt={agent.name}
-                            className="agent-avatar-image"
-                          />
-                        ) : (
-                          agent.avatar_image
-                        )
+                    {agent.avatar_image ? (
+                      agent.avatar_image.startsWith('/api/avatars/') ? (
+                        <img 
+                          src={`http://localhost:5000${agent.avatar_image}`} 
+                          alt={agent?.name || 'Agent'}
+                          className="agent-avatar-image"
+                        />
                       ) : (
-                        agent.name.charAt(0).toUpperCase()
-                      )}
-                    </div>
-                    <div className="agent-info">
-                      <div className="agent-name">{agent.name}</div>
-                      <div className="agent-meta">
-                        <span className="downtime">{downtime}</span>
-                        <span className={`status ${statusDisplay.class}`}>
-                          {statusDisplay.text}
-                        </span>
-                      </div>
+                        agent.avatar_image
+                      )
+                    ) : (
+                      (agent?.name || 'A').charAt(0).toUpperCase()
+                    )}
+                  </div>
+                  <div className="agent-info">
+                    <div className="agent-name">{agent?.name || 'Unknown Agent'}</div>
+                    <div className="agent-meta">
+                      <span className="downtime">
+                        {calculateDowntime(agent.last_active)}
+                      </span>
+                      <span className={`status ${getAgentStatusDisplay(agent).class}`}>
+                        {getAgentStatusDisplay(agent).text}
+                      </span>
                     </div>
                   </div>
-                );
-              })
+                </div>
+              ))
             )}
             
             {/* Create New Agent Button */}
@@ -454,7 +477,9 @@ function App() {
               className="agent-item create-new"
               onClick={() => setShowCreateModal(true)}
             >
-              <div className="agent-avatar create-avatar">+</div>
+              <div className="agent-avatar create-avatar">
+                +
+              </div>
               <div className="agent-info">
                 <div className="agent-name">Create New Agent</div>
                 <div className="agent-meta">
@@ -489,7 +514,7 @@ function App() {
               <div className="empty-chat">
                 <div className="empty-message">
                   <h3>Start a conversation</h3>
-                  <p>Type in the input box below to begin chatting with {currentAgent?.name || 'your AI assistant'}</p>
+                  <p>Type in the input box below to begin chatting with {agents.find(a => a.id === selectedAgent)?.name || 'your AI assistant'}</p>
                 </div>
               </div>
             ) : (
@@ -501,11 +526,11 @@ function App() {
                       style={{ 
                         backgroundColor: message.sender === 'user' 
                           ? '#6b46c1' 
-                          : getAvatarColor(currentAgent?.name || 'AI')
+                          : getAvatarColor(agents.find(a => a.id === selectedAgent)?.name || 'AI')
                       }}
                       title={formatTime(message.timestamp)}
                     >
-                      {message.sender === 'user' ? 'U' : (currentAgent?.name?.charAt(0) || 'A')}
+                      {message.sender === 'user' ? 'U' : agents.find(a => a.id === selectedAgent)?.name?.charAt(0) || 'A'}
                     </div>
                     <div className="message-content">
                       <div className="message-text">{message.text}</div>
@@ -525,7 +550,9 @@ function App() {
             
             {dragOver && (
               <div className="drop-overlay">
-                <div className="drop-message">Drop files here to upload</div>
+                <div className="drop-message">
+                  Drop files here to upload
+                </div>
               </div>
             )}
           </div>
@@ -548,7 +575,7 @@ function App() {
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder={connecting ? "Connecting..." : `Message ${currentAgent?.name || 'AI'}...`}
+                placeholder={connecting ? "Connecting..." : `Message ${agents.find(a => a.id === selectedAgent)?.name || 'AI'}...`}
                 disabled={connecting || thinking}
                 rows={1}
                 className="message-input"
@@ -580,7 +607,7 @@ function App() {
                         {selectedAgent && (
                           <button 
                             className="tool-item"
-                            onClick={() => handleEditAgent(currentAgent)}
+                            onClick={() => handleEditAgent(agents.find(a => a.id === selectedAgent))}
                           >
                             ✏️ Edit Agent
                           </button>
@@ -607,7 +634,9 @@ function App() {
                         >
                           📥 Download Models
                         </button>
-                        <button className="tool-item">📊 Model Status</button>
+                        <button className="tool-item">
+                          📊 Model Status
+                        </button>
                       </div>
                     </div>
                   )}
@@ -635,13 +664,14 @@ function App() {
         style={{ display: 'none' }}
       />
 
-      {/* Modals */}
+      {/* Create Agent Modal */}
       <CreateAgentModal
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         onAgentCreated={handleAgentCreated}
       />
 
+      {/* Edit Agent Modal */}
       <EditAgentModal
         isOpen={showEditModal}
         onClose={() => {
@@ -653,6 +683,7 @@ function App() {
         onAgentDeleted={handleAgentDeleted}
       />
 
+      {/* Model Manager Modal */}
       <ModelManager
         isOpen={showModelManager}
         onClose={() => setShowModelManager(false)}
