@@ -36,11 +36,9 @@ jobs:
         # JavaScript/TypeScript tools
         npm install -g eslint@latest prettier@latest
         
-        # Python tools
-        pip install pylint black isort mypy flake8 bandit safety
-        
-        # Documentation tools
-        pip install pydocstyle
+        # Python tools - handle externally managed environment gracefully
+        pip install pylint black isort mypy flake8 bandit safety pydocstyle || \
+        pip install --break-system-packages pylint black isort mypy flake8 bandit safety pydocstyle
 
     - name: ESLint Check
       run: |

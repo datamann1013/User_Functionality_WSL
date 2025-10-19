@@ -45,11 +45,12 @@ jobs:
       run: |
         case "${{ matrix.platform.name }}" in
           kali)
-            apt-get update && apt-get install -y python3 python3-pip nodejs npm curl git
+            apt-get update && apt-get install -y python3 python3-pip python3-venv nodejs npm curl git
+            # Kali Linux uses externally managed Python environment (PEP 668)
             if [ -f "projects/ai_service/backend/requirements.txt" ]; then
-              pip3 install -r projects/ai_service/backend/requirements.txt || pip3 install flask requests flask-cors
+              pip3 install --break-system-packages -r projects/ai_service/backend/requirements.txt || pip3 install --break-system-packages flask requests flask-cors
             else
-              pip3 install flask requests flask-cors
+              pip3 install --break-system-packages flask requests flask-cors
             fi
             ;;
           arch)
@@ -62,11 +63,12 @@ jobs:
             fi
             ;;
           debian)
-            apt-get update && apt-get install -y python3 python3-pip nodejs npm curl git
+            apt-get update && apt-get install -y python3 python3-pip python3-venv nodejs npm curl git
+            # Debian uses externally managed Python environment (PEP 668)
             if [ -f "projects/ai_service/backend/requirements.txt" ]; then
-              pip3 install -r projects/ai_service/backend/requirements.txt || pip3 install flask requests flask-cors
+              pip3 install --break-system-packages -r projects/ai_service/backend/requirements.txt || pip3 install --break-system-packages flask requests flask-cors
             else
-              pip3 install flask requests flask-cors
+              pip3 install --break-system-packages flask requests flask-cors
             fi
             ;;
           ubuntu)
