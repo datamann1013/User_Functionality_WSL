@@ -19,7 +19,7 @@ if os.path.exists(CONFIG_PATH):
     try:
         with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
             CONFIG.update(json.load(f))
-    except:
+    except (json.JSONDecodeError, IOError, UnicodeDecodeError):
         pass
 
 # Fallback to error_codes if needed
@@ -71,7 +71,7 @@ def safe_json_dumps(obj):
     
     try:
         return json.dumps(obj, default=serializer, separators=(',', ':'))
-    except:
+    except (TypeError, ValueError):
         return str(obj)
 
 

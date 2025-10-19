@@ -38,7 +38,7 @@ def check_ollama_service():
         # Fallback to direct Ollama API
         response = requests.get("http://127.0.0.1:11434/api/version", timeout=5)
         return response.status_code == 200
-    except:
+    except (requests.RequestException, requests.Timeout):
         return False
 
 def route_to_ollama_chat(message, agent_id):
@@ -150,5 +150,5 @@ def download_model(model_name):
             timeout=300  # 5 minutes for model download
         )
         return response.status_code == 200
-    except:
+    except (requests.RequestException, requests.Timeout):
         return False

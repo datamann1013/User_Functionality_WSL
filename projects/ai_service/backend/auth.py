@@ -177,7 +177,7 @@ def optional_auth(f):
                         payload = auth.verify_token(token)
                         if payload:
                             request.session_info = payload
-                except:
+                except (ValueError, AttributeError, jwt.InvalidTokenError):
                     pass  # Graceful degradation - continue without auth
             
             return f(*args, **kwargs)

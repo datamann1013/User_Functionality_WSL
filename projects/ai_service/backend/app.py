@@ -60,8 +60,12 @@ def log_error(error_code, message=None, extra=None):
             'extra': extra or {}
         }
         requests.post(ERRORLOGGER_URL, json=payload, timeout=1)
-    except:
-        pass  # Fail silently for performance
+    except (requests.RequestException, requests.Timeout) as e:
+        # Fail silently for performance, but log the exception type
+        pass
+    except Exception:
+        # Catch any other unexpected errors
+        pass
 
 @app.route('/api/log-frontend-error', methods=['POST'])
 def log_frontend_error():
@@ -74,8 +78,8 @@ def log_frontend_error():
             {'source': 'frontend', **data.get('extra', {})}
         )
         return jsonify({'status': 'logged'})
-    except:
-        return jsonify({'error': 'Logging failed'}), 500
+    except Exception as e:
+        return jsonify({'error': 'Logging failed', 'details': str(e)}), 500
 
 @app.route('/api/agents', methods=['GET'])
 def get_agents():
@@ -145,5 +149,5 @@ def chat():
 
 if __name__ == '__main__':
     print("🤖 AI Service Backend Starting")
-    port = int(os.environ.get('PORT', 5000))
+    port = int(os.environ.get('PORT', 5002))
     app.run(host='0.0.0.0', port=port, debug=False)
