@@ -1,40 +1,62 @@
 #!/bin/bash
-# AI Service Startup Script
-# Starts 4 separate servers: ErrorLogger + Ollama Service + Backend + Frontend
+# ============================================================================
+# AI Service Complete Installation & Startup Script
+# ============================================================================
+# This script handles EVERYTHING needed to run the AI service:
+# - System dependencies installation
+# - Python/Node.js installation 
+# - Virtual environment setup
+# - All Python/Node package installation
+# - Ollama installation (with sudo prompt)
+# - Service startup and monitoring
+# - Comprehensive error handling and logging
+# ============================================================================
 
-set -e
+set -e  # Exit on any error
 
-# Handle sudo installation mode
-if [[ "$EUID" -eq 0 ]]; then
-    # Running as root - handle Ollama installation
-    if ! command -v ollama >/dev/null 2>&1; then
-        echo "🔧 Installing Ollama (running as root)..."
-        curl -fsSL https://ollama.ai/install.sh | sh
-        echo "✅ Ollama installation complete!"
-        echo ""
-        echo "🚀 Please run this script again as a regular user:"
-        echo "   ./start_ai_service.sh"
-        exit 0
-    else
-        echo "✅ Ollama already installed. Please run as regular user:"
-        echo "   ./start_ai_service.sh"
-        exit 0
-    fi
+# Handle sudo installation mode for Ollama only
+if [[ "$EUID" -eq 0 && "$1" == "--install-ollama-only" ]]; then
+    echo "🔧 Installing Ollama (running as root)..."
+    curl -fsSL https://ollama.ai/install.sh | sh
+    echo "✅ Ollama installation complete!"
+    echo ""
+    echo "🚀 Please run this script again as a regular user:"
+    echo "   ./start_ai_service.sh"
+    exit 0
 fi
 
-# Configuration
-AI_SERVICE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$AI_SERVICE_DIR/../.." && pwd)"
+# Warn if running as root (except for ollama-only mode)
+if [[ "$EUID" -eq 0 ]]; then
+    echo "⚠️  Warning: Running as root is not recommended for the main installation"
+    echo "This script will handle sudo prompts when needed."
+    echo ""
+    echo "If you only want to install Ollama as root, run:"
+    echo "   sudo ./start_ai_service.sh --install-ollama-only"
+    echo ""
+    echo "Otherwise, run as regular user:"
+    echo "   ./start_ai_service.sh"
+    exit 1
+fi
+
+# ============================================================================
+# CONFIGURATION & GLOBALS
+# ============================================================================
+
+# Get script directory and project paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+AI_SERVICE_DIR="$SCRIPT_DIR"
 BACKEND_DIR="$AI_SERVICE_DIR/backend"
 OLLAMA_SERVICE_DIR="$AI_SERVICE_DIR/ollama_service"
 FRONTEND_DIR="$AI_SERVICE_DIR/frontend"
+ERRORLOGGER_DIR="$PROJECT_ROOT/projects/ErrorLogger"
 VENV_DIR="$PROJECT_ROOT/venv"
 
-# Service ports (configurable for different machines)
-ERRORLOGGER_PORT=${ERRORLOGGER_PORT:-5001}
-OLLAMA_SERVICE_PORT=${OLLAMA_SERVICE_PORT:-5002}
-BACKEND_PORT=${BACKEND_PORT:-5000}
-FRONTEND_PORT=${FRONTEND_PORT:-3000}
+# Service ports (configurable)
+export ERRORLOGGER_PORT=${ERRORLOGGER_PORT:-5001}
+export OLLAMA_SERVICE_PORT=${OLLAMA_SERVICE_PORT:-5002}
+export BACKEND_PORT=${BACKEND_PORT:-5000}
+export FRONTEND_PORT=${FRONTEND_PORT:-3000}
 
 # Service URLs
 ERRORLOGGER_URL="http://127.0.0.1:$ERRORLOGGER_PORT"
@@ -47,21 +69,44 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
-# Logging functions
+# Process IDs for cleanup
+ERRORLOGGER_PID=""
+OLLAMA_SERVICE_PID=""
+BACKEND_PID=""
+FRONTEND_PID=""
+
+# ============================================================================
+# LOGGING AND UTILITY FUNCTIONS
+# ============================================================================
+
+log_header() { echo -e "${PURPLE}=== $1 ===${NC}"; }
 log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+log_install() { echo -e "${CYAN}[INSTALL]${NC} $1"; }
 
-# Check if service is running
+# Check if running as root
+is_root() {
+    [[ "$EUID" -eq 0 ]]
+}
+
+# Check if command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Check if service is responding
 check_service() {
     local url="$1"
     curl -s "$url/health" >/dev/null 2>&1
 }
 
-# Wait for service to be ready
+# Wait for service with timeout
 wait_for_service() {
     local url="$1"
     local name="$2"
@@ -74,474 +119,708 @@ wait_for_service() {
             log_success "$name is ready!"
             return 0
         fi
+        echo -n "."
         sleep 1
     done
+    echo ""
     
     log_error "$name failed to start within $timeout seconds"
     return 1
 }
 
-# Cleanup function
-cleanup() {
-    log_info "Shutting down services..."
-    
-    # Note: We DON'T automatically kill ErrorLogger since it might be used by other services
-    # We only kill ErrorLogger if we started it ourselves
-    if [[ -n "${ERRORLOGGER_PID:-}" ]]; then
-        log_info "Stopping ErrorLogger service (started by this script)..."
-        kill $ERRORLOGGER_PID 2>/dev/null || true
-        rm -f "$PROJECT_ROOT/projects/ErrorLogger/errorlogger.pid"
-        log_info "Stopped ErrorLogger service"
+# Detect Linux distribution
+detect_distro() {
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        echo "$ID"
+    elif command_exists lsb_release; then
+        lsb_release -si | tr '[:upper:]' '[:lower:]'
+    elif [[ -f /etc/redhat-release ]]; then
+        echo "redhat"
+    elif [[ -f /etc/debian_version ]]; then
+        echo "debian"
     else
-        log_info "Leaving ErrorLogger service running (may be used by other services)"
-    fi
-    
-    if [[ -n "${BACKEND_PID:-}" ]]; then
-        kill $BACKEND_PID 2>/dev/null || true
-        log_info "Stopped Backend service"
-    fi
-    
-    if [[ -n "${FRONTEND_PID:-}" ]]; then
-        kill $FRONTEND_PID 2>/dev/null || true
-        log_info "Stopped Frontend service"
+        echo "unknown"
     fi
 }
 
-# Set trap for cleanup
-trap cleanup EXIT INT TERM
-
-# Setup environment and dependencies
-setup_environment() {
-    log_info "🔧 Setting up environment and dependencies..."
-    
-    # Check Python installation
-    if ! command -v python3 >/dev/null 2>&1; then
-        log_error "Python3 not found. Installing Python3..."
-        if command -v apt >/dev/null 2>&1; then
-            sudo apt update && sudo apt install -y python3 python3-pip python3-venv
-        elif command -v yum >/dev/null 2>&1; then
-            sudo yum install -y python3 python3-pip
-        elif command -v pacman >/dev/null 2>&1; then
-            sudo pacman -S python python-pip
-        else
-            log_error "Could not install Python3. Please install manually."
-            return 1
-        fi
+# Check if we need sudo for package installation
+needs_sudo() {
+    # If we're root, we don't need sudo
+    if is_root; then
+        return 1
     fi
     
-    # Check Node.js installation
-    if ! command -v node >/dev/null 2>&1; then
-        log_info "Node.js not found. Installing Node.js..."
-        if command -v apt >/dev/null 2>&1; then
-            # Ubuntu/Debian
-            log_info "Installing Node.js via package manager..."
-            sudo apt update
-            sudo apt install -y nodejs npm
-        elif command -v yum >/dev/null 2>&1; then
-            # CentOS/RHEL/Fedora
-            log_info "Installing Node.js via package manager..."
-            sudo yum install -y nodejs npm
-        elif command -v dnf >/dev/null 2>&1; then
-            # Fedora
-            log_info "Installing Node.js via package manager..."
-            sudo dnf install -y nodejs npm
-        elif command -v pacman >/dev/null 2>&1; then
-            # Arch Linux
-            log_info "Installing Node.js via package manager..."
-            sudo pacman -S nodejs npm
-        elif command -v curl >/dev/null 2>&1; then
-            # Try NodeSource installation
-            log_info "Installing Node.js via NodeSource..."
-            curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -
-            sudo apt-get install -y nodejs
-        else
-            log_error "Could not install Node.js automatically. Please install manually:"
-            log_info "  Visit: https://nodejs.org/"
-            log_info "  Or use your package manager:"
-            log_info "    Ubuntu/Debian: sudo apt install nodejs npm"
-            log_info "    CentOS/RHEL: sudo yum install nodejs npm"
-            log_info "    Fedora: sudo dnf install nodejs npm"
-            log_info "    Arch: sudo pacman -S nodejs npm"
-            return 1
-        fi
-        
-        # Verify installation
-        if ! command -v node >/dev/null 2>&1; then
-            log_error "Node.js installation failed"
-            return 1
-        fi
-        log_success "✅ Node.js installed successfully ($(node --version))"
+    # Test package manager access
+    if command_exists apt; then
+        ! apt list --installed >/dev/null 2>&1
+    elif command_exists yum; then
+        ! yum list installed >/dev/null 2>&1
+    elif command_exists dnf; then
+        ! dnf list installed >/dev/null 2>&1
+    elif command_exists pacman; then
+        ! pacman -Q >/dev/null 2>&1
     else
-        log_success "✅ Node.js already installed ($(node --version))"
+        return 0  # Assume we need sudo if we can't detect
     fi
-    
-    # Check npm
-    if ! command -v npm >/dev/null 2>&1; then
-        log_info "npm not found. Installing npm..."
-        if command -v apt >/dev/null 2>&1; then
-            sudo apt install -y npm
-        elif command -v yum >/dev/null 2>&1; then
-            sudo yum install -y npm
-        elif command -v pacman >/dev/null 2>&1; then
-            sudo pacman -S npm
-        fi
-    fi
-    
-    # Create virtual environment if it doesn't exist
-    if [[ ! -d "$VENV_DIR" ]]; then
-        log_info "Creating Python virtual environment at: $VENV_DIR"
-        python3 -m venv "$VENV_DIR"
-        if [[ $? -ne 0 ]]; then
-            log_error "Failed to create virtual environment"
-            return 1
-        fi
-        log_success "✅ Virtual environment created"
-    else
-        log_success "✅ Virtual environment already exists"
-    fi
-    
-    # Activate virtual environment and upgrade pip
-    log_info "Activating virtual environment and updating pip..."
-    source "$VENV_DIR/bin/activate"
-    pip install --upgrade pip setuptools wheel
-    
-    # Install Python dependencies for ErrorLogger
-    log_info "Installing ErrorLogger dependencies..."
-    cd "$PROJECT_ROOT/projects/ErrorLogger"
-    if [[ -f "requirements.txt" ]]; then
-        pip install -r requirements.txt
-        log_success "✅ ErrorLogger dependencies installed"
-    fi
-    
-    # Install Python dependencies for Backend
-    log_info "Installing Backend dependencies..."
-    cd "$BACKEND_DIR"
-    if [[ -f "requirements.txt" ]]; then
-        pip install -r requirements.txt
-        log_success "✅ Backend dependencies installed"
-    fi
-    
-    # Install Python dependencies for Ollama Service
-    log_info "Installing Ollama Service dependencies..."
-    cd "$OLLAMA_SERVICE_DIR"
-    if [[ -f "requirements.txt" ]]; then
-        pip install -r requirements.txt
-    else
-        # Install basic dependencies for ollama service
-        pip install requests flask flask-cors
-    fi
-    log_success "✅ Ollama Service dependencies installed"
-    
-    # Install Frontend dependencies
-    log_info "Installing Frontend dependencies..."
-    cd "$FRONTEND_DIR"
-    if [[ -f "package.json" ]]; then
-        npm install
-        log_success "✅ Frontend dependencies installed"
-    else
-        log_warning "⚠️  No package.json found in frontend directory"
-    fi
-    
-    # Check and install curl if needed
-    if ! command -v curl >/dev/null 2>&1; then
-        log_info "Installing curl..."
-        if command -v apt >/dev/null 2>&1; then
-            sudo apt install -y curl
-        elif command -v yum >/dev/null 2>&1; then
-            sudo yum install -y curl
-        fi
-    fi
-    
-    log_success "🎉 Environment setup complete!"
-    return 0
 }
 
-# Check if ErrorLogger service is running
-check_errorlogger_status() {
-    # Check if the service is responding to health checks
-    if check_service "$ERRORLOGGER_URL"; then
-        return 0  # Running
-    fi
-    
-    # Check if there's a PID file and the process is running
-    if [[ -f "$PROJECT_ROOT/projects/ErrorLogger/errorlogger.pid" ]]; then
-        PID=$(cat "$PROJECT_ROOT/projects/ErrorLogger/errorlogger.pid" 2>/dev/null || echo "")
-        if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
-            # Process exists but might not be responding yet
-            return 2  # Starting/Not ready
-        else
-            # PID file exists but process is dead - cleanup
-            rm -f "$PROJECT_ROOT/projects/ErrorLogger/errorlogger.pid"
-            return 1  # Not running
-        fi
-    fi
-    
-    return 1  # Not running
-}
+# ============================================================================
+# SYSTEM DEPENDENCIES INSTALLATION  
+# ============================================================================
 
-# Start ErrorLogger Server
-start_errorlogger() {
-    log_info "🔧 Checking ErrorLogger Server (Port: $ERRORLOGGER_PORT)"
+install_system_packages() {
+    log_header "Installing System Dependencies"
     
-    case $(check_errorlogger_status) in
-        0)
-            log_success "✅ ErrorLogger already running and responding"
-            return 0
+    local distro=$(detect_distro)
+    local sudo_cmd=""
+    
+    # Determine if we need sudo
+    if needs_sudo; then
+        if ! command_exists sudo; then
+            log_error "This script requires sudo access for package installation"
+            log_info "Please run: su -c './start_ai_service.sh'"
+            log_info "Or install sudo and add your user to sudoers"
+            exit 1
+        fi
+        sudo_cmd="sudo"
+        log_warning "This script needs to install system packages and will prompt for sudo password"
+    fi
+    
+    # Update package lists first
+    log_install "Updating package lists..."
+    case "$distro" in
+        ubuntu|debian)
+            $sudo_cmd apt update -y
             ;;
-        2)
-            log_info "⏳ ErrorLogger process found, waiting for it to be ready..."
-            if wait_for_service "$ERRORLOGGER_URL" "ErrorLogger" 15; then
-                log_success "✅ Existing ErrorLogger is now ready"
-                return 0
-            else
-                log_warning "⚠️  Existing ErrorLogger process not responding, restarting..."
-                # Kill the existing process
-                PID=$(cat "$PROJECT_ROOT/projects/ErrorLogger/errorlogger.pid" 2>/dev/null || echo "")
-                if [[ -n "$PID" ]]; then
-                    kill "$PID" 2>/dev/null || true
-                    sleep 2
-                fi
-                rm -f "$PROJECT_ROOT/projects/ErrorLogger/errorlogger.pid"
-            fi
+        fedora)
+            $sudo_cmd dnf check-update || true
             ;;
-        1)
-            log_info "🚀 Starting new ErrorLogger instance..."
+        centos|rhel|rocky|almalinux)
+            $sudo_cmd yum check-update || true
+            ;;
+        arch|manjaro)
+            $sudo_cmd pacman -Sy
             ;;
     esac
     
-    # Start new ErrorLogger instance
-    cd "$PROJECT_ROOT/projects/ErrorLogger"
+    # Install packages based on distribution
+    case "$distro" in
+        ubuntu|debian)
+            log_install "Installing packages for Ubuntu/Debian..."
+            $sudo_cmd apt install -y curl wget git build-essential pkg-config python3 python3-pip python3-venv nodejs npm
+            ;;
+        fedora)
+            log_install "Installing packages for Fedora..."
+            $sudo_cmd dnf install -y curl wget git gcc gcc-c++ make python3 python3-pip nodejs npm
+            ;;
+        centos|rhel|rocky|almalinux)
+            log_install "Installing packages for CentOS/RHEL..."
+            # Enable EPEL repository first
+            $sudo_cmd yum install -y epel-release || true
+            $sudo_cmd yum install -y curl wget git gcc gcc-c++ make python3 python3-pip
+            
+            # Install Node.js from NodeSource
+            if ! command_exists node; then
+                log_install "Installing Node.js from NodeSource..."
+                curl -fsSL https://rpm.nodesource.com/setup_lts.x | $sudo_cmd bash -
+                $sudo_cmd yum install -y nodejs
+            fi
+            ;;
+        arch|manjaro)
+            log_install "Installing packages for Arch Linux..."
+            $sudo_cmd pacman -S --noconfirm curl wget git base-devel python python-pip nodejs npm
+            ;;
+        *)
+            log_warning "Unknown distribution: $distro"
+            log_info "Please ensure these packages are installed manually:"
+            log_info "  - curl, wget, git"
+            log_info "  - python3, python3-pip, python3-venv"
+            log_info "  - nodejs, npm"
+            log_info "  - build tools (gcc, make, etc.)"
+            ;;
+    esac
     
-    # Check if ErrorLogger script exists
-    if [[ ! -f "error_logger_service.py" ]]; then
-        log_error "❌ ErrorLogger service script not found at: $PROJECT_ROOT/projects/ErrorLogger/error_logger_service.py"
-        log_info "Available files in ErrorLogger directory:"
-        ls -la "$PROJECT_ROOT/projects/ErrorLogger/" | head -10
-        return 1
-    fi
-    
-    # Activate virtual environment and start ErrorLogger
-    source "$VENV_DIR/bin/activate"
-    
-    log_info "Starting ErrorLogger service..."
-    python error_logger_service.py --port $ERRORLOGGER_PORT --host 127.0.0.1 > errorlogger.log 2>&1 &
-    ERRORLOGGER_PID=$!
-    echo $ERRORLOGGER_PID > errorlogger.pid
-    
-    # Wait for service to be ready
-    if wait_for_service "$ERRORLOGGER_URL" "ErrorLogger" 15; then
-        log_success "✅ ErrorLogger Server running (PID: $ERRORLOGGER_PID)"
-        return 0
-    else
-        log_error "❌ ErrorLogger Server failed to start"
-        log_info "Recent ErrorLogger logs:"
-        tail -10 errorlogger.log 2>/dev/null || echo "No logs available"
-        return 1
-    fi
+    log_success "System dependencies installation completed"
 }
 
-# Check and install Ollama if needed
-check_and_install_ollama() {
-    log_info "🔍 Checking Ollama installation..."
+setup_python_environment() {
+    log_header "Setting up Python Environment"
     
-    # Check if Ollama is installed
-    if command -v ollama >/dev/null 2>&1; then
-        log_success "✅ Ollama is already installed ($(ollama --version))"
-        
-        # Check if Ollama service is running
-        if curl -s http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
-            log_success "✅ Ollama service is running"
-        else
-            log_info "🚀 Starting Ollama service..."
-            sudo systemctl start ollama 2>/dev/null || {
-                log_warning "⚠️  Could not start Ollama service automatically"
-                log_info "You may need to run: sudo systemctl start ollama"
-            }
-        fi
-        
-        # Check for default model
-        local models=$(curl -s http://127.0.0.1:11434/api/tags 2>/dev/null | grep -o '"name":"[^"]*"' | wc -l)
-        if [ "$models" -eq 0 ]; then
-            log_info "📥 No models found. The Ollama service will download llama3.2:1b automatically."
-            log_info "This may take a few minutes on first run..."
-        fi
-        
-        return 0
-    else
-        log_error "❌ Ollama not installed!"
-        log_info ""
-        log_info "🔧 To install Ollama, please run this script with sudo:"
-        log_info "   sudo ./start_ai_service.sh"
-        log_info ""
-        log_info "Or install manually:"
-        log_info "   curl -fsSL https://ollama.ai/install.sh | sh"
-        log_info ""
-        log_warning "⚠️  Continuing without Ollama - AI will use demo mode only"
-        return 1
-    fi
-}
-
-# Start Ollama Service
-start_ollama_service() {
-    log_info "🧠 Starting Ollama Service (Port: $OLLAMA_SERVICE_PORT)"
-    cd "$OLLAMA_SERVICE_DIR"
-    
-    if check_service "$OLLAMA_SERVICE_URL"; then
-        log_success "✅ Ollama Service already running"
-        return 0
-    fi
-    
-    source "$VENV_DIR/bin/activate"
-    
-    # Set environment for Ollama service
-    export ERRORLOGGER_SERVICE_URL="$ERRORLOGGER_URL/log"
-    
-    python ollama_api.py --port $OLLAMA_SERVICE_PORT --host 127.0.0.1 > ollama_service.log 2>&1 &
-    OLLAMA_SERVICE_PID=$!
-    
-    if wait_for_service "$OLLAMA_SERVICE_URL" "Ollama Service" 30; then
-        log_success "✅ Ollama Service running (PID: $OLLAMA_SERVICE_PID)"
-        return 0
-    else
-        log_warning "⚠️  Ollama Service failed to start (AI will use demo mode)"
-        return 1
-    fi
-}
-
-# Start Backend Server
-start_backend() {
-    log_info "🤖 Starting Backend Server (Port: $BACKEND_PORT)"
-    cd "$BACKEND_DIR"
-    
-    if check_service "$BACKEND_URL"; then
-        log_success "✅ Backend already running"
-        return 0
-    fi
-    
-    source "$VENV_DIR/bin/activate"
-    
-    # Set environment for backend
-    export ERRORLOGGER_SERVICE_URL="$ERRORLOGGER_URL/log"
-    export OLLAMA_SERVICE_URL="$OLLAMA_SERVICE_URL"
-    
-    python app.py --port $BACKEND_PORT --host 127.0.0.1 > backend.log 2>&1 &
-    BACKEND_PID=$!
-    
-    if wait_for_service "$BACKEND_URL" "Backend" 15; then
-        log_success "✅ Backend Server running (PID: $BACKEND_PID)"
-        return 0
-    else
-        log_error "❌ Backend Server failed to start"
-        return 1
-    fi
-}
-
-# Start Frontend Server
-start_frontend() {
-    log_info "🌐 Starting Frontend Server (Port: $FRONTEND_PORT)"
-    cd "$FRONTEND_DIR"
-    
-    # Set environment for frontend
-    export REACT_APP_BACKEND_URL="http://localhost:$BACKEND_PORT"
-    export PORT=$FRONTEND_PORT
-    
-    npm start > frontend.log 2>&1 &
-    FRONTEND_PID=$!
-    
-    # Wait for frontend to start
-    log_info "Waiting for React development server to start..."
-    sleep 8
-    
-    if curl -s "$FRONTEND_URL" >/dev/null 2>&1; then
-        log_success "✅ Frontend Server running (PID: $FRONTEND_PID)"
-        return 0
-    else
-        log_warning "⚠️  Frontend may still be starting..."
-        return 0
-    fi
-}
-
-# Main startup function
-main() {
-    echo "🚀 AI Service - Four Server Architecture"
-    echo "   This will start 4 separate servers:"
-    echo "   📊 ErrorLogger Server  (Port: $ERRORLOGGER_PORT)"
-    echo "   🧠 Ollama Service       (Port: $OLLAMA_SERVICE_PORT)"
-    echo "   🤖 Backend Server      (Port: $BACKEND_PORT)" 
-    echo "   🌐 Frontend Server     (Port: $FRONTEND_PORT)"
-    echo
-
-    # Check and setup prerequisites
-    log_info "🔍 Checking system requirements..."
-    setup_environment || exit 1
-
-    # Start services in sequence
-    if ! start_errorlogger; then
-        log_error "Failed to start ErrorLogger service"
+    # Verify Python installation
+    if ! command_exists python3; then
+        log_error "Python3 not found after installation!"
+        log_info "Please install Python3 manually and run this script again"
         exit 1
     fi
     
-    # Check and install Ollama before starting the service
-    check_and_install_ollama
+    local python_version=$(python3 --version 2>&1)
+    log_success "Found Python: $python_version"
     
-    # Start Ollama service (non-critical - continue if it fails)
-    start_ollama_service || log_warning "⚠️  Continuing without Ollama service"
+    # Create virtual environment
+    if [[ ! -d "$VENV_DIR" ]]; then
+        log_install "Creating virtual environment at: $VENV_DIR"
+        python3 -m venv "$VENV_DIR"
+        if [[ $? -ne 0 ]]; then
+            log_error "Failed to create virtual environment"
+            log_info "Trying alternative method..."
+            # Try with --system-site-packages as fallback
+            python3 -m venv --system-site-packages "$VENV_DIR" || {
+                log_error "Virtual environment creation failed completely"
+                exit 1
+            }
+        fi
+        log_success "Virtual environment created successfully"
+    else
+        log_success "Virtual environment already exists"
+    fi
+    
+    # Activate virtual environment
+    log_info "Activating virtual environment..."
+    source "$VENV_DIR/bin/activate"
+    
+    # Upgrade pip and essential tools
+    log_install "Upgrading pip and essential Python tools..."
+    pip install --upgrade pip setuptools wheel || {
+        log_warning "Failed to upgrade pip/setuptools, continuing..."
+    }
+    
+    log_success "Python environment ready"
+}
+
+install_python_dependencies() {
+    log_header "Installing Python Dependencies"
+    
+    # Ensure virtual environment is activated
+    source "$VENV_DIR/bin/activate"
+    
+    # 1. ErrorLogger dependencies
+    if [[ -f "$ERRORLOGGER_DIR/requirements.txt" ]]; then
+        log_install "Installing ErrorLogger dependencies..."
+        cd "$ERRORLOGGER_DIR"
+        pip install -r requirements.txt || {
+            log_warning "Some ErrorLogger dependencies failed, installing manually..."
+            pip install flask flask-cors requests python-dotenv || {
+                log_error "Failed to install ErrorLogger dependencies"
+                exit 1
+            }
+        }
+        log_success "ErrorLogger dependencies installed"
+    else
+        log_install "Installing ErrorLogger dependencies manually..."
+        pip install flask flask-cors requests python-dotenv
+        log_success "ErrorLogger dependencies installed"
+    fi
+    
+    # 2. Backend dependencies
+    if [[ -f "$BACKEND_DIR/requirements.txt" ]]; then
+        log_install "Installing Backend dependencies..."
+        cd "$BACKEND_DIR"
+        pip install -r requirements.txt || {
+            log_warning "Some Backend dependencies failed, installing manually..."
+            pip install flask flask-cors requests python-dotenv || {
+                log_error "Failed to install Backend dependencies"
+                exit 1
+            }
+        }
+        log_success "Backend dependencies installed"
+    else
+        log_install "Installing Backend dependencies manually..."
+        pip install flask flask-cors requests python-dotenv
+        log_success "Backend dependencies installed"
+    fi
+    
+    # 3. Ollama Service dependencies
+    log_install "Installing Ollama Service dependencies..."
+    pip install flask flask-cors requests python-dotenv
+    log_success "Ollama Service dependencies installed"
+    
+    log_success "All Python dependencies installed"
+}
+
+setup_nodejs_environment() {
+    log_header "Setting up Node.js Environment"
+    
+    # Verify Node.js installation
+    if ! command_exists node; then
+        log_error "Node.js not found after installation!"
+        log_info "Please install Node.js manually and run this script again"
+        exit 1
+    fi
+    
+    if ! command_exists npm; then
+        log_error "npm not found after installation!"
+        log_info "Please install npm manually and run this script again"
+        exit 1
+    fi
+    
+    local node_version=$(node --version 2>&1)
+    local npm_version=$(npm --version 2>&1)
+    log_success "Found Node.js: $node_version"
+    log_success "Found npm: $npm_version"
+    
+    # Install frontend dependencies
+    if [[ -f "$FRONTEND_DIR/package.json" ]]; then
+        log_install "Installing Frontend dependencies..."
+        cd "$FRONTEND_DIR"
+        
+        # Clear npm cache if there are issues
+        npm cache clean --force 2>/dev/null || true
+        
+        # Install dependencies
+        npm install || {
+            log_warning "npm install failed, trying alternative methods..."
+            
+            # Try with legacy peer deps
+            npm install --legacy-peer-deps || {
+                # Try with force
+                npm install --force || {
+                    log_error "Failed to install frontend dependencies"
+                    log_info "You may need to manually run 'npm install' in $FRONTEND_DIR"
+                    exit 1
+                }
+            }
+        }
+        log_success "Frontend dependencies installed"
+    else
+        log_warning "No package.json found in frontend directory"
+        log_info "Frontend may not be properly configured"
+    fi
+    
+    log_success "Node.js environment ready"
+}
+
+install_ollama() {
+    log_header "Ollama Installation Check"
+    
+    # Check if Ollama is already installed
+    if command_exists ollama; then
+        local ollama_version=$(ollama --version 2>&1 || echo "unknown")
+        log_success "Ollama already installed: $ollama_version"
+        
+        # Start ollama service if not running
+        if ! curl -s http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+            log_info "Starting Ollama service..."
+            if command_exists systemctl; then
+                sudo systemctl start ollama 2>/dev/null || {
+                    log_info "Attempting to start Ollama manually..."
+                    ollama serve >/dev/null 2>&1 &
+                    sleep 3
+                }
+            else
+                ollama serve >/dev/null 2>&1 &
+                sleep 3
+            fi
+        fi
+        
+        return 0
+    fi
+    
+    log_warning "Ollama not found!"
+    log_info "Ollama is required for AI functionality (without it, only demo mode available)"
+    echo
+    
+    echo -e "${YELLOW}╭─────────────────────────────────────────────────────────────╮${NC}"
+    echo -e "${YELLOW}│  OLLAMA INSTALLATION REQUIRED                              │${NC}"
+    echo -e "${YELLOW}├─────────────────────────────────────────────────────────────┤${NC}"
+    echo -e "${YELLOW}│  Ollama needs to be installed with root privileges.        │${NC}"
+    echo -e "${YELLOW}│                                                             │${NC}"
+    echo -e "${YELLOW}│  Options:                                                   │${NC}"
+    echo -e "${YELLOW}│  1. Install now with sudo (recommended)                    │${NC}"
+    echo -e "${YELLOW}│  2. Skip and run in demo mode only                         │${NC}"
+    echo -e "${YELLOW}│  3. Exit and install manually                              │${NC}"
+    echo -e "${YELLOW}╰─────────────────────────────────────────────────────────────╯${NC}"
+    echo
+    
+    while true; do
+        read -p "Choose option [1-3]: " choice
+        case $choice in
+            1)
+                log_install "Installing Ollama with sudo..."
+                if command_exists sudo; then
+                    curl -fsSL https://ollama.ai/install.sh | sudo sh || {
+                        log_error "Ollama installation failed"
+                        log_info "Continuing without Ollama (demo mode only)"
+                        return 1
+                    }
+                    log_success "Ollama installation completed"
+                    
+                    # Start ollama service
+                    if command_exists systemctl; then
+                        log_info "Starting Ollama service..."
+                        sudo systemctl enable ollama 2>/dev/null || true
+                        sudo systemctl start ollama 2>/dev/null || true
+                    fi
+                    
+                    return 0
+                else
+                    log_error "sudo not available for Ollama installation"
+                    return 1
+                fi
+                ;;
+            2)
+                log_warning "Skipping Ollama installation (demo mode only)"
+                return 1
+                ;;
+            3)
+                log_info "Manual installation:"
+                log_info "  curl -fsSL https://ollama.ai/install.sh | sh"
+                exit 0
+                ;;
+            *)
+                echo "Please choose 1, 2, or 3"
+                ;;
+        esac
+    done
+}
+
+# ============================================================================
+# SERVICE STARTUP FUNCTIONS
+# ============================================================================
+
+start_errorlogger() {
+    log_header "Starting ErrorLogger Service"
+    
+    # Check if already running
+    if check_service "$ERRORLOGGER_URL"; then
+        log_success "ErrorLogger already running"
+        return 0
+    fi
+    
+    cd "$ERRORLOGGER_DIR"
+    source "$VENV_DIR/bin/activate"
+    
+    # Check which error server file exists
+    local server_script=""
+    if [[ -f "error_server.py" ]]; then
+        server_script="error_server.py"
+    elif [[ -f "error_logger_service.py" ]]; then
+        server_script="error_logger_service.py"
+    else
+        log_error "No ErrorLogger server script found!"
+        log_info "Looking for: error_server.py or error_logger_service.py"
+        return 1
+    fi
+    
+    log_install "Starting ErrorLogger with $server_script..."
+    
+    # Set environment
+    export ERRORLOGGER_HOST="127.0.0.1"
+    export ERRORLOGGER_PORT="$ERRORLOGGER_PORT"
+    
+    # Start service
+    python "$server_script" > errorlogger.log 2>&1 &
+    ERRORLOGGER_PID=$!
+    echo $ERRORLOGGER_PID > errorlogger.pid
+    
+    # Wait for service
+    if wait_for_service "$ERRORLOGGER_URL" "ErrorLogger" 15; then
+        log_success "ErrorLogger running (PID: $ERRORLOGGER_PID, Port: $ERRORLOGGER_PORT)"
+        return 0
+    else
+        log_error "ErrorLogger failed to start"
+        log_info "Check logs: $ERRORLOGGER_DIR/errorlogger.log"
+        return 1
+    fi
+}
+
+start_ollama_service() {
+    log_header "Starting Ollama Service"
+    
+    # Check if already running
+    if check_service "$OLLAMA_SERVICE_URL"; then
+        log_success "Ollama Service already running"
+        return 0
+    fi
+    
+    cd "$OLLAMA_SERVICE_DIR"
+    source "$VENV_DIR/bin/activate"
+    
+    # Check if ollama_api.py exists
+    if [[ ! -f "ollama_api.py" ]]; then
+        log_error "ollama_api.py not found in $OLLAMA_SERVICE_DIR"
+        return 1
+    fi
+    
+    log_install "Starting Ollama Service..."
+    
+    # Set environment
+    export OLLAMA_HOST="http://localhost:11434"
+    export ERRORLOGGER_SERVICE_URL="$ERRORLOGGER_URL/log"
+    export PORT="$OLLAMA_SERVICE_PORT"
+    
+    # Start service
+    python ollama_api.py > ollama_service.log 2>&1 &
+    OLLAMA_SERVICE_PID=$!
+    
+    # Wait for service
+    if wait_for_service "$OLLAMA_SERVICE_URL" "Ollama Service" 30; then
+        log_success "Ollama Service running (PID: $OLLAMA_SERVICE_PID, Port: $OLLAMA_SERVICE_PORT)"
+        return 0
+    else
+        log_warning "Ollama Service failed to start (AI will use demo mode)"
+        log_info "Check logs: $OLLAMA_SERVICE_DIR/ollama_service.log"
+        return 1
+    fi
+}
+
+start_backend() {
+    log_header "Starting Backend Service"
+    
+    # Check if already running
+    if check_service "$BACKEND_URL"; then
+        log_success "Backend already running"
+        return 0
+    fi
+    
+    cd "$BACKEND_DIR"
+    source "$VENV_DIR/bin/activate"
+    
+    # Check if app.py exists
+    if [[ ! -f "app.py" ]]; then
+        log_error "app.py not found in $BACKEND_DIR"
+        return 1
+    fi
+    
+    log_install "Starting Backend Service..."
+    
+    # Set environment
+    export ERRORLOGGER_SERVICE_URL="$ERRORLOGGER_URL/log"
+    export OLLAMA_SERVICE_URL="$OLLAMA_SERVICE_URL"
+    export PORT="$BACKEND_PORT"
+    
+    # Start service
+    python app.py > backend.log 2>&1 &
+    BACKEND_PID=$!
+    
+    # Wait for service
+    if wait_for_service "$BACKEND_URL" "Backend" 15; then
+        log_success "Backend running (PID: $BACKEND_PID, Port: $BACKEND_PORT)"
+        return 0
+    else
+        log_error "Backend failed to start"
+        log_info "Check logs: $BACKEND_DIR/backend.log"
+        return 1
+    fi
+}
+
+start_frontend() {
+    log_header "Starting Frontend Service"
+    
+    cd "$FRONTEND_DIR"
+    
+    # Check if package.json exists
+    if [[ ! -f "package.json" ]]; then
+        log_error "package.json not found in $FRONTEND_DIR"
+        return 1
+    fi
+    
+    log_install "Starting Frontend Service..."
+    
+    # Set environment
+    export REACT_APP_API_URL="http://localhost:$BACKEND_PORT"
+    export PORT="$FRONTEND_PORT"
+    export BROWSER="none"  # Don't auto-open browser
+    
+    # Start service
+    npm start > frontend.log 2>&1 &
+    FRONTEND_PID=$!
+    
+    # Wait for React to start (takes longer)
+    log_info "Waiting for React development server..."
+    sleep 10
+    
+    # Check if frontend is responding
+    if curl -s "$FRONTEND_URL" >/dev/null 2>&1; then
+        log_success "Frontend running (PID: $FRONTEND_PID, Port: $FRONTEND_PORT)"
+        return 0
+    else
+        log_warning "Frontend may still be starting (check $FRONTEND_URL in a minute)"
+        return 0
+    fi
+}
+
+# ============================================================================
+# CLEANUP AND MONITORING
+# ============================================================================
+
+cleanup_services() {
+    log_header "Shutting Down Services"
+    
+    # Stop all services
+    if [[ -n "$FRONTEND_PID" ]]; then
+        log_info "Stopping Frontend service..."
+        kill "$FRONTEND_PID" 2>/dev/null || true
+        wait "$FRONTEND_PID" 2>/dev/null || true
+    fi
+    
+    if [[ -n "$BACKEND_PID" ]]; then
+        log_info "Stopping Backend service..."
+        kill "$BACKEND_PID" 2>/dev/null || true
+        wait "$BACKEND_PID" 2>/dev/null || true
+    fi
+    
+    if [[ -n "$OLLAMA_SERVICE_PID" ]]; then
+        log_info "Stopping Ollama Service..."
+        kill "$OLLAMA_SERVICE_PID" 2>/dev/null || true
+        wait "$OLLAMA_SERVICE_PID" 2>/dev/null || true
+    fi
+    
+    if [[ -n "$ERRORLOGGER_PID" ]]; then
+        log_info "Stopping ErrorLogger service..."
+        kill "$ERRORLOGGER_PID" 2>/dev/null || true
+        wait "$ERRORLOGGER_PID" 2>/dev/null || true
+        rm -f "$ERRORLOGGER_DIR/errorlogger.pid"
+    fi
+    
+    log_success "All services stopped"
+}
+
+monitor_services() {
+    log_header "Service Monitoring Started"
+    
+    log_info "Services are running! Press Ctrl+C to stop all services"
+    echo
+    log_info "Service URLs:"
+    log_info "  🌐 Frontend:     $FRONTEND_URL"
+    log_info "  🤖 Backend API:  $BACKEND_URL/health"
+    log_info "  🧠 Ollama API:   $OLLAMA_SERVICE_URL/health" 
+    log_info "  📊 ErrorLogger:  $ERRORLOGGER_URL/health"
+    echo
+    log_info "Log files:"
+    log_info "  📝 ErrorLogger:  $ERRORLOGGER_DIR/errorlogger.log"
+    log_info "  📝 Backend:      $BACKEND_DIR/backend.log"
+    log_info "  📝 Ollama:       $OLLAMA_SERVICE_DIR/ollama_service.log"
+    log_info "  📝 Frontend:     $FRONTEND_DIR/frontend.log"
+    echo
+    
+    # Monitor loop
+    while true; do
+        sleep 30
+        
+        # Check services health
+        local issues=0
+        
+        if ! check_service "$ERRORLOGGER_URL"; then
+            log_warning "⚠️  ErrorLogger service down"
+            issues=$((issues + 1))
+        fi
+        
+        if ! check_service "$BACKEND_URL"; then
+            log_warning "⚠️  Backend service down"
+            issues=$((issues + 1))
+        fi
+        
+        if ! check_service "$OLLAMA_SERVICE_URL"; then
+            log_warning "⚠️  Ollama service down (AI in demo mode)"
+        fi
+        
+        if ! curl -s "$FRONTEND_URL" >/dev/null 2>&1; then
+            log_warning "⚠️  Frontend service down"
+            issues=$((issues + 1))
+        fi
+        
+        if [[ $issues -gt 1 ]]; then
+            log_error "Multiple critical services are down!"
+            log_info "Check logs and consider restarting"
+        fi
+    done
+}
+
+# ============================================================================
+# MAIN FUNCTION
+# ============================================================================
+
+main() {
+    echo -e "${PURPLE}╭─────────────────────────────────────────────────────────────╮${NC}"
+    echo -e "${PURPLE}│                  AI SERVICE INSTALLER                      │${NC}"
+    echo -e "${PURPLE}│            Complete Setup & Startup Script                 │${NC}"
+    echo -e "${PURPLE}╰─────────────────────────────────────────────────────────────╯${NC}"
+    echo
+    
+    log_info "This script will:"
+    log_info "  ✅ Install all system dependencies"
+    log_info "  ✅ Set up Python virtual environment"
+    log_info "  ✅ Install all Python packages"
+    log_info "  ✅ Set up Node.js environment"
+    log_info "  ✅ Install all Node.js packages"
+    log_info "  ✅ Install Ollama (with permission)"
+    log_info "  ✅ Start all 4 services"
+    log_info "  ✅ Monitor service health"
+    echo
+    
+    # Set up cleanup trap
+    trap cleanup_services EXIT INT TERM
+    
+    # Installation phase
+    log_header "INSTALLATION PHASE"
+    
+    install_system_packages
+    setup_python_environment
+    install_python_dependencies
+    setup_nodejs_environment
+    install_ollama  # Non-critical, can fail
+    
+    log_success "🎉 Installation phase completed!"
+    echo
+    
+    # Startup phase
+    log_header "SERVICE STARTUP PHASE"
+    
+    # Start services in dependency order
+    if ! start_errorlogger; then
+        log_error "Critical: ErrorLogger failed to start"
+        exit 1
+    fi
+    
+    start_ollama_service  # Non-critical
     
     if ! start_backend; then
-        log_error "Failed to start Backend service"
+        log_error "Critical: Backend failed to start"
         exit 1
     fi
     
     if ! start_frontend; then
-        log_error "Failed to start Frontend service"
+        log_error "Critical: Frontend failed to start"
         exit 1
     fi
-
-    echo
-    log_success "🎉 All servers are running!"
-    echo
-    log_info "Access your services:"
-    log_info "  🌐 Frontend:     $FRONTEND_URL"
-    log_info "  🤖 Backend API:  $BACKEND_URL"
-    log_info "  🧠 Ollama API:   $OLLAMA_SERVICE_URL"
-    log_info "  📊 ErrorLogger:  $ERRORLOGGER_URL"
-    log_info "  📊 ErrorLogger:  $ERRORLOGGER_URL"
-    echo
-    log_info "Logs:"
-    log_info "  ErrorLogger: $PROJECT_ROOT/projects/ErrorLogger/errorlogger.log"
-    log_info "  Backend:     $BACKEND_DIR/backend.log"
-    log_info "  Frontend:    $FRONTEND_DIR/frontend.log"
-    echo
-    log_info "Press Ctrl+C to stop all services..."
     
-    # Keep script running and monitor services
-    while true; do
-        sleep 10
-        
-        # Check if all services are still running
-        all_running=true
-        
-        if ! check_service "$ERRORLOGGER_URL"; then
-            log_warning "⚠️  ErrorLogger service appears to be down"
-            all_running=false
-        fi
-        
-        if ! check_service "$BACKEND_URL"; then
-            log_warning "⚠️  Backend service appears to be down" 
-            all_running=false
-        fi
-        
-        if ! curl -s "$FRONTEND_URL" >/dev/null 2>&1; then
-            log_warning "⚠️  Frontend service appears to be down"
-            all_running=false
-        fi
-        
-        if [[ $all_running == false ]]; then
-            log_error "Some services are down. Check logs or restart."
-            break
-        fi
-    done
+    log_success "🚀 All services started successfully!"
+    echo
+    
+    # Monitoring phase
+    monitor_services
 }
+
+# ============================================================================
+# SCRIPT ENTRY POINT
+# ============================================================================
+
+# Check for help flag
+if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+    echo "AI Service Complete Setup Script"
+    echo
+    echo "Usage: $0 [options]"
+    echo
+    echo "This script handles complete installation and startup of the AI service."
+    echo "It will automatically install all dependencies and start all services."
+    echo
+    echo "Options:"
+    echo "  --help, -h    Show this help message"
+    echo "  --install-ollama-only  Install only Ollama (run as root)"
+    echo
+    echo "Environment variables:"
+    echo "  ERRORLOGGER_PORT    Port for ErrorLogger service (default: 5001)"
+    echo "  OLLAMA_SERVICE_PORT Port for Ollama service (default: 5002)"
+    echo "  BACKEND_PORT        Port for Backend service (default: 5000)"
+    echo "  FRONTEND_PORT       Port for Frontend service (default: 3000)"
+    echo
+    echo "The script will prompt for sudo access when needed for:"
+    echo "  - System package installation"
+    echo "  - Ollama installation"
+    echo
+    exit 0
+fi
 
 # Run main function
 main "$@"
