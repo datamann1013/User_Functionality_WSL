@@ -1,0 +1,16 @@
+name: Test Simple Workflow
+
+on:
+  push:
+    branches: [ AI_service_dev ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Simple Test
+        run: echo "Hello from test workflow"
