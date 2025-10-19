@@ -1,6 +1,6 @@
 name: Security Scanning
 
-# Comprehensive security analysis workflow
+# Comprehensive security analysis workflow - Updated
 on:
   push:
     branches: [ main, AI_service_dev, develop ]
