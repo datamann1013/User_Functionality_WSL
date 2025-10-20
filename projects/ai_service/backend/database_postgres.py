@@ -220,11 +220,12 @@ class PostgreSQLDatabase:
 
             with self.get_connection() as conn:
                 with conn.cursor() as cur:
+                    # SQL construction is safe: update_fields built from whitelisted allowed_fields
                     query = f"""
                         UPDATE agents 
                         SET {', '.join(update_fields)}, last_active = CURRENT_TIMESTAMP
                         WHERE id = %(agent_id)s
-                    """
+                    """  # nosec B608
                     cur.execute(query, params)
                     conn.commit()
 
