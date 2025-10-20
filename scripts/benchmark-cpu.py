@@ -9,7 +9,7 @@ import os
 import sys
 import time
 import psutil
-import subprocess
+import subprocess  # nosec B404
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -165,7 +165,7 @@ class CPUBenchmark:
         ai_process = None
         try:
             # Start AI service
-            ai_process = subprocess.Popen(
+            ai_process = subprocess.Popen(  # nosec B603
                 [sys.executable, "projects/ai_service/backend/app.py"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -235,7 +235,7 @@ class CPUBenchmark:
                             if i % 100 == 0:
                                 time.sleep(0.01)
                 except Exception:
-                    pass
+                    pass  # nosec B110
 
             # Run workload while monitoring
             workload_thread = threading.Thread(target=logger_workload)

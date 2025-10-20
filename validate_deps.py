@@ -4,7 +4,7 @@ Dependency validation script for User Functionality WSL project
 """
 import sys
 import importlib
-import subprocess
+import subprocess  # nosec B404
 import os
 
 

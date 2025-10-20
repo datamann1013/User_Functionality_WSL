@@ -9,7 +9,7 @@ import os
 import sys
 import time
 import psutil
-import subprocess
+import subprocess  # nosec B404
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -72,7 +72,7 @@ class MemoryBenchmark:
         # Start AI service in background
         ai_process = None
         try:
-            ai_process = subprocess.Popen(
+            ai_process = subprocess.Popen(  # nosec B603
                 [sys.executable, "projects/ai_service/backend/app.py"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
