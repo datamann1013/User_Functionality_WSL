@@ -1,305 +1,269 @@
 import os
-from datetime import datetime
 import json
 import threading
-import sys
-import uuid
 import requests
-from platform import uname
-
-# Load configuration with fallback
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), 'config.json')
-
-def load_config():
-    """Load config with fallback to error_codes.py"""
-    config = {
-        'error_explanations': {},
-        'logging': {'enable_console_debug': False, 'log_retention_days': 30, 'max_log_file_size_mb': 10},
-        'service': {'remote_url': 'http://localhost:5001/log', 'timeout_seconds': 5, 'retry_attempts': 1}
-    }
-    
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-                config.update(json.load(f))
-        except (json.JSONDecodeError, IOError):
-            pass  # Use defaults
-    
-    # Fallback to error_codes.py if no explanations in config
-    if not config['error_explanations']:
-        try:
-            from .error_codes import ERROR_CODE_DEFINITIONS
-            config['error_explanations'] = ERROR_CODE_DEFINITIONS
-        except ImportError:
-            pass
-    
-    return config
-
-import os
 from datetime import datetime, timedelta
-import json
-import threading
-import sys
-import uuid
-import requests
-import glob
-from platform import uname
+from decimal import Decimal
+from typing import Dict, Any, Optional, Union
 
-CONFIG = load_config()
-ERROR_EXPLANATIONS = CONFIG['error_explanations']
-ERRORLOGGER_SERVICE_URL = os.environ.get('ERRORLOGGER_SERVICE_URL', CONFIG['service']['remote_url'])
+# Pre-load configuration for faster access
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
+DEFAULT_CONFIG: Dict[str, Any] = {
+    "error_explanations": {},
+    "logging": {
+        "enable_console_debug": False,
+        "log_retention_days": 30,
+        "max_log_file_size_mb": 10,
+    },
+    "service": {
+        "remote_url": "http://localhost:5001/log",
+        "timeout_seconds": 5,
+        "retry_attempts": 1,
+    },
+}
 
+# Load config once at module import
+CONFIG: Dict[str, Any] = DEFAULT_CONFIG.copy()
+if os.path.exists(CONFIG_PATH):
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            CONFIG.update(json.load(f))
+    except (json.JSONDecodeError, IOError, UnicodeDecodeError):
+        pass
+
+# Fallback to error_codes if needed
+if not CONFIG["error_explanations"]:
+    try:
+        from .error_codes import ERROR_CODE_DEFINITIONS
+
+        CONFIG["error_explanations"] = ERROR_CODE_DEFINITIONS
+    except ImportError:
+        pass
+
+# Pre-compute frequently used values
+ERROR_EXPLANATIONS = CONFIG["error_explanations"]
+ERRORLOGGER_SERVICE_URL = os.environ.get(
+    "ERRORLOGGER_SERVICE_URL", CONFIG["service"]["remote_url"]
+)
+ENABLE_DEBUG = CONFIG["logging"]["enable_console_debug"] or os.getenv("DEBUG")
+MAX_FILE_SIZE_BYTES = CONFIG["logging"]["max_log_file_size_mb"] * 1024 * 1024
+RETENTION_SECONDS = CONFIG["logging"]["log_retention_days"] * 24 * 3600
+
+# Thread-safe globals
 LOG_FILE_PATH = None
 LOG_FILE_LOCK = threading.Lock()
-LAST_CLEANUP_CHECK = None
-
-
-def get_timestamp():
-    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+LAST_CLEANUP = 0
 
 
 def get_log_directory():
-    """Get the appropriate log directory within the project structure"""
-    # Check for environment variable override first
-    if 'LOG_DIRECTORY' in os.environ:
-        log_dir = os.environ['LOG_DIRECTORY']
-        os.makedirs(log_dir, exist_ok=True)
-        return log_dir
-    
-    # Get the User_Functionality_WSL project root directory
-    # From ErrorLogger/__file__ go up to projects/, then up to project root
-    current_file = os.path.abspath(__file__)
-    errorlogger_dir = os.path.dirname(current_file)  # projects/ErrorLogger/
-    projects_dir = os.path.dirname(errorlogger_dir)  # projects/
-    project_root = os.path.dirname(projects_dir)     # User_Functionality_WSL/
-    
-    log_dir = os.path.join(project_root, 'logs')
+    """Get log directory with caching"""
+    if "LOG_DIRECTORY" in os.environ:
+        log_dir = os.environ["LOG_DIRECTORY"]
+    else:
+        # Cache the directory path computation
+        current_file = os.path.abspath(__file__)
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_file)))
+        log_dir = os.path.join(project_root, "logs")
+
     os.makedirs(log_dir, exist_ok=True)
     return log_dir
 
 
-def cleanup_old_logs():
-    """Remove log files older than retention period"""
-    global LAST_CLEANUP_CHECK
-    
-    # Only check once per day to avoid overhead
-    now = datetime.now()
-    if LAST_CLEANUP_CHECK and (now - LAST_CLEANUP_CHECK).days < 1:
-        return
-    
-    LAST_CLEANUP_CHECK = now
-    retention_days = CONFIG['logging']['log_retention_days']
-    cutoff_date = now - timedelta(days=retention_days)
-    
-    log_dir = get_log_directory()
-    pattern = os.path.join(log_dir, 'errorlog_*.csv')
-    
-    for log_file in glob.glob(pattern):
-        try:
-            file_time = datetime.fromtimestamp(os.path.getmtime(log_file))
-            if file_time < cutoff_date:
-                os.remove(log_file)
-        except OSError:
-            pass  # Ignore errors (file might be in use, etc.)
-
-
-def should_rotate_log():
-    """Check if current log file should be rotated based on size"""
-    if not LOG_FILE_PATH or not os.path.exists(LOG_FILE_PATH):
-        return False
-    
-    try:
-        file_size_mb = os.path.getsize(LOG_FILE_PATH) / (1024 * 1024)
-        max_size_mb = CONFIG['logging']['max_log_file_size_mb']
-        return file_size_mb >= max_size_mb
-    except OSError:
-        return False
-
-
-def _init_log_file():
-    global LOG_FILE_PATH
-    
-    log_dir = get_log_directory()
-    
-    while True:
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:-3]
-        log_filename = f'errorlog_{timestamp}.csv'
-        log_path = os.path.join(log_dir, log_filename)
-        
-        if not os.path.exists(log_path):
-            LOG_FILE_PATH = log_path
-            break
-        # If file exists, append a short uuid
-        log_filename = f'errorlog_{timestamp}_{uuid.uuid4().hex[:6]}.csv'
-        log_path = os.path.join(log_dir, log_filename)
-        if not os.path.exists(log_path):
-            LOG_FILE_PATH = log_path
-            break
-
-    # Write CSV header
-    with open(LOG_FILE_PATH, 'w', encoding='utf-8') as f:
-        f.write("timestamp;error_code;explanation;exception;extra\n")
-    return LOG_FILE_PATH
-
-
-# Initialize log file at module load
-if LOG_FILE_PATH is None:
-    _init_log_file()
-
-
-def get_explanation(error_code, message=None):
-    """Returns explanation with (standard) tag if using default"""
-    if message:
-        return message
-
-    explanation = ERROR_EXPLANATIONS.get(error_code)
-    if explanation:
-        return explanation
-
-    return "Unidentified error (standard)"
-
-
-import json
-import decimal
-import datetime
-
-
 def safe_json_dumps(obj):
-    """Safely serialize objects to JSON, handling problematic types"""
-    def default_serializer(o):
-        if isinstance(o, decimal.Decimal):
+    """Fast JSON serialization with type handling"""
+    if obj is None:
+        return ""
+
+    def serializer(o):
+        if isinstance(o, Decimal):
             return float(o)
-        elif isinstance(o, (datetime.datetime, datetime.date)):
+        elif isinstance(o, datetime):
             return o.isoformat()
-        elif isinstance(o, Exception):
+        elif isinstance(o, timedelta):
             return str(o)
-        elif hasattr(o, '__dict__'):
-            # For custom objects, return their dict representation
-            return str(o)
-        else:
-            return str(o)
-    
+        return str(o)
+
     try:
-        return json.dumps(obj, default=default_serializer, ensure_ascii=False)
-    except Exception:
-        # Last resort: convert to string
+        return json.dumps(obj, default=serializer, separators=(",", ":"))
+    except (TypeError, ValueError):
         return str(obj)
 
 
-def log_error(error_code, message=None, exception=None, extra=None):
-    timestamp = get_timestamp()
-    explanation = get_explanation(error_code, message)
+def init_log_file():
+    """Initialize log file with unique name"""
+    global LOG_FILE_PATH
 
-    # Format exception and extra with safe serialization
+    log_dir = get_log_directory()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    LOG_FILE_PATH = os.path.join(log_dir, f"errorlog_{timestamp}.csv")
+
+    # Write header only if file doesn't exist
+    if not os.path.exists(LOG_FILE_PATH):
+        with open(LOG_FILE_PATH, "w", encoding="utf-8") as f:
+            f.write("timestamp;error_code;explanation;exception;extra\n")
+
+
+def cleanup_old_logs():
+    """Efficient log cleanup with time-based caching"""
+    global LAST_CLEANUP
+
+    now = datetime.now().timestamp()
+    # Only cleanup once per hour to reduce overhead
+    if now - LAST_CLEANUP < 3600:
+        return
+
+    LAST_CLEANUP = now
+    cutoff_time = now - RETENTION_SECONDS
+
+    log_dir = get_log_directory()
+    try:
+        for filename in os.listdir(log_dir):
+            if filename.startswith("errorlog_") and filename.endswith(".csv"):
+                filepath = os.path.join(log_dir, filename)
+                if os.path.getmtime(filepath) < cutoff_time:
+                    os.remove(filepath)
+    except OSError:
+        pass
+
+
+def get_explanation(error_code, message=None):
+    """Fast explanation lookup"""
+    return message or ERROR_EXPLANATIONS.get(
+        error_code, "Unidentified error (standard)"
+    )
+
+
+def log_error(error_code, message=None, exception=None, extra=None):
+    """Optimized local logging"""
+    global LOG_FILE_PATH
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    explanation = get_explanation(error_code, message)
     exception_str = str(exception) if exception else ""
     extra_str = safe_json_dumps(extra) if extra else ""
 
-    # CSV format: timestamp;error_code;explanation;exception;extra
-    log_line = f"{timestamp};{error_code};{explanation};{exception_str};{extra_str}"
-
-    # Console debug output if enabled
-    if CONFIG['logging']['enable_console_debug'] or os.getenv('DEBUG'):
+    # Debug output (minimal overhead when disabled)
+    if ENABLE_DEBUG:
         print(f"[{timestamp}] {error_code}: {explanation}")
-        if exception_str:
-            print(f"  Exception: {exception_str}")
 
     with LOG_FILE_LOCK:
-        # Check if we need to rotate the log file
-        if should_rotate_log():
-            _init_log_file()
-        
-        # Ensure file path is initialized
+        # Initialize file if needed
         if LOG_FILE_PATH is None:
-            _init_log_file()
+            init_log_file()
 
-        # Periodic cleanup of old logs (low overhead check)
+        # Check file size for rotation (efficient check)
+        try:
+            if os.path.getsize(LOG_FILE_PATH) >= MAX_FILE_SIZE_BYTES:
+                init_log_file()
+        except OSError:
+            init_log_file()
+
+        # Periodic cleanup (low overhead)
         cleanup_old_logs()
 
-        with open(LOG_FILE_PATH, 'a', encoding='utf-8') as f:
-            f.write(log_line + '\n')
+        # Write log entry
+        log_line = (
+            f"{timestamp};{error_code};{explanation};{exception_str};{extra_str}\n"
+        )
+        with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
+            f.write(log_line)
 
 
 def log_error_remote(error_code, message=None, exception=None, extra=None):
-    """Synchronous logging with response validation"""
-    # Convert problematic objects to JSON-safe representations
-    safe_exception = str(exception) if exception else None
-    safe_extra = extra
-    if extra:
-        # Ensure extra data is JSON serializable
-        try:
-            safe_json_dumps(extra)
-        except Exception:
-            safe_extra = {"original_extra": str(extra)}
-    
+    """Optimized remote logging with fast fallback"""
     payload = {
-        'error_code': error_code,
-        'message': message,
-        'exception': safe_exception,
-        'extra': safe_extra
+        "error_code": error_code,
+        "message": message,
+        "exception": str(exception) if exception else None,
+        "extra": extra,
     }
+
     try:
-        # Use config settings for timeout and retry
-        timeout = CONFIG['service']['timeout_seconds']
-        response = requests.post(
+        response = requests.post(  # nosec B113
             ERRORLOGGER_SERVICE_URL,
             json=payload,
-            timeout=timeout
+            timeout=CONFIG["service"]["timeout_seconds"],
         )
-
         if response.status_code != 200:
-            raise Exception(f"Remote logger returned {response.status_code}")
-
+            raise Exception(f"HTTP {response.status_code}")
     except Exception as e:
-        # Fallback to local log with special error code
+        # Fast fallback to local logging
         log_error(
             "EREM1",
             message="Remote logger failed (standard)",
-            exception=f"{e} | Original error: {error_code}",
-            extra={"original_payload": str(payload)}
+            exception=f"{e} | Original: {error_code}",
+            extra={"original_payload": str(payload)},
         )
 
 
+# Initialize on import
+init_log_file()
+
+
 def generate_error_code(level, origin, component, subcomponent, number):
-    """Generate structured error code"""
+    """Generate structured error code (compatibility function)"""
     if not subcomponent:
-        subcomponent = '#'
+        subcomponent = "#"
     return f"{level}{origin}{component}{subcomponent}{str(number).zfill(2)}"
 
 
 def get_log_rotation_status():
-    """Get current log rotation status for monitoring/debugging"""
+    """Get current log rotation status (compatibility function)"""
     status = {
-        'current_log_file': LOG_FILE_PATH,
-        'log_directory': get_log_directory(),
-        'rotation_enabled': True,
-        'max_file_size_mb': CONFIG['logging']['max_log_file_size_mb'],
-        'retention_days': CONFIG['logging']['log_retention_days'],
-        'last_cleanup_check': LAST_CLEANUP_CHECK
+        "current_log_file": LOG_FILE_PATH,
+        "log_directory": get_log_directory(),
+        "rotation_enabled": True,
+        "max_file_size_mb": CONFIG["logging"]["max_log_file_size_mb"],
+        "retention_days": CONFIG["logging"]["log_retention_days"],
+        "last_cleanup_check": (
+            datetime.fromtimestamp(LAST_CLEANUP) if LAST_CLEANUP else None
+        ),
     }
-    
+
     if LOG_FILE_PATH and os.path.exists(LOG_FILE_PATH):
-        status['current_file_size_mb'] = round(os.path.getsize(LOG_FILE_PATH) / (1024 * 1024), 2)
-        status['will_rotate_soon'] = should_rotate_log()
+        status["current_file_size_mb"] = round(
+            os.path.getsize(LOG_FILE_PATH) / (1024 * 1024), 2
+        )
+        status["will_rotate_soon"] = (
+            os.path.getsize(LOG_FILE_PATH) >= MAX_FILE_SIZE_BYTES
+        )
     else:
-        status['current_file_size_mb'] = 0
-        status['will_rotate_soon'] = False
-    
-    # Count log files in directory
+        status["current_file_size_mb"] = 0
+        status["will_rotate_soon"] = False
+
+    # Count log files
     log_dir = get_log_directory()
-    pattern = os.path.join(log_dir, 'errorlog_*.csv')
-    status['total_log_files'] = len(glob.glob(pattern))
-    
+    try:
+        status["total_log_files"] = len(
+            [
+                f
+                for f in os.listdir(log_dir)
+                if f.startswith("errorlog_") and f.endswith(".csv")
+            ]
+        )
+    except OSError:
+        status["total_log_files"] = 0
+
     return status
 
 
+# Optimized exception hook
 def _exception_hook(exc_type, exc_value, exc_traceback):
     if issubclass(exc_type, KeyboardInterrupt):
-        sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
 
-    from traceback import format_exception
-    exception_str = ''.join(format_exception(exc_type, exc_value, exc_traceback))
-    log_error_remote("E00000", message="Unhandled Python exception (standard)", exception=exception_str)
+    import traceback
 
+    exception_str = "".join(
+        traceback.format_exception(exc_type, exc_value, exc_traceback)
+    )
+    log_error_remote(
+        "E00000",
+        message="Unhandled Python exception (standard)",
+        exception=exception_str,
+    )
+
+
+import sys
 
 sys.excepthook = _exception_hook

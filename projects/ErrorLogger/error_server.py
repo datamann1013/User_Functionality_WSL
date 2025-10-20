@@ -1,54 +1,66 @@
 import os
 from flask import Flask, request, jsonify
-import sys
-import argparse
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
-# Add parent directory to path for proper imports
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Import optimized logger
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from logger import log_error
 
 app = Flask(__name__)
+app.config["WTF_CSRF_ENABLED"] = False
 
-# Disable CSRF protection since this is an API-only service
-app.config['WTF_CSRF_ENABLED'] = False
+# Pre-compile response templates for faster responses
+SUCCESS_RESPONSE = {"status": "logged"}
+HEALTH_RESPONSE = {"status": "ok", "service": "error_logger"}
+ERROR_RESPONSE = {"error": "Missing error_code"}
 
 
-@app.route('/log', methods=['POST'])
+@app.route("/log", methods=["POST"])
 def log_endpoint():
+    """Optimized log endpoint with fast validation"""
     data = request.get_json(force=True)
 
-    # Validate required fields
-    if 'error_code' not in data:
-        return jsonify({'error': 'Missing error_code'}), 400
+    # Fast validation
+    error_code = data.get("error_code")
+    if not error_code:
+        return jsonify(ERROR_RESPONSE), 400
 
-    # Log with local CSV writer
+    # Log with optimized logger
     log_error(
-        data.get('error_code'),
-        message=data.get('message'),
-        exception=data.get('exception'),
-        extra=data.get('extra')
+        error_code,
+        message=data.get("message"),
+        exception=data.get("exception"),
+        extra=data.get("extra"),
     )
 
-    return jsonify({'status': 'logged', 'code': data['error_code']}), 200
+    # Fast response
+    response = SUCCESS_RESPONSE.copy()
+    response["code"] = error_code
+    return jsonify(response), 200
 
 
-@app.route('/health', methods=['GET'])
+@app.route("/health", methods=["GET"])
 def health_check():
-    return jsonify({'status': 'ok', 'service': 'error_logger'}), 200
+    """Fast health check"""
+    return jsonify(HEALTH_RESPONSE), 200
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
+    # Optimized startup with minimal argument parsing
+    import argparse
+
     parser = argparse.ArgumentParser()
-    parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     args = parser.parse_args()
 
-    # Get configuration from environment
-    host = os.environ.get('ERRORLOGGER_HOST', '0.0.0.0')
-    port = int(os.environ.get('ERRORLOGGER_PORT', '5001'))
-    debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true' or args.debug
+    # Get configuration from environment with defaults
+    host = os.environ.get("ERRORLOGGER_HOST", "0.0.0.0")  # nosec B104
+    port = int(os.environ.get("ERRORLOGGER_PORT", os.environ.get("PORT", "5001")))
+    debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true" or args.debug
 
-    app.run(host=host, port=port, debug=debug)
+    app.run(host=host, port=port, debug=debug, threaded=True)

@@ -189,3 +189,94 @@ cython_debug/
 
 # ErrorLogger log files
 logs/
+
+# RuneCore Ecosystem Additions
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# IDE and Editor Files
+.vscode/
+*.swp
+*.swo
+*~
+.sublime-project
+.sublime-workspace
+
+# Node.js (AI Service Frontend)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.npm
+.eslintcache
+.stylelintcache
+.cache/
+.parcel-cache/
+.next/
+out/
+
+# Docker
+.dockerignore
+
+# Security and Sensitive Files
+*.key
+*.pem
+*.p12
+*.crt
+*.cer
+*.der
+secrets/
+.secrets/
+credentials/
+.credentials/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Benchmark data and artifacts (keep structure, exclude data)
+benchmarks/*.json
+benchmarks/results/
+artifacts/linux/
+artifacts/windows/
+artifacts/containers/
+artifacts/*.tar.gz
+artifacts/*.zip
+artifacts/*.deb
+artifacts/*.rpm
+artifacts/*.msi
+artifacts/*.exe
+
+# Hidden toolbar artifacts
+projects/hidden_toolbar/logs/
+
+# Error Logger artifacts
+projects/ErrorLogger/error_reports/
+
+# Local development files
+local/
+.local/
+scratch/
+.scratch/
+
+# GitHub Actions artifacts
+.github/workflows/artifacts/
+
+# Temporary folders
+tmp/
+temp/

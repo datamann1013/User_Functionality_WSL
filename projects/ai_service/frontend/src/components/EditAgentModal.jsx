@@ -1,33 +1,41 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
+import { logFrontendError } from "../utils/errorLogger";
 
-const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted }) => {
+const EditAgentModal = ({
+  isOpen,
+  onClose,
+  agent,
+  onAgentUpdated,
+  onAgentDeleted,
+}) => {
   const [formData, setFormData] = useState({
-    name: '',
-    model_name: '',
+    name: "",
+    model_name: "",
     temperature: 0.7,
     top_p: 0.9,
-    system_prompt: '',
+    system_prompt: "",
     max_tokens: 2048,
-    avatar_image: '🤖'
+    avatar_image: "🤖",
   });
-  const [availableModels, setAvailableModels] = useState(['llama3.2:1b']);
+  const [availableModels, setAvailableModels] = useState(["llama3.2:1b"]);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // API base URL
-  const API_BASE = process.env.NODE_ENV === 'production' ? '' : 'http://localhost:5000';
+  const API_BASE =
+    process.env.NODE_ENV === "production" ? "" : "http://localhost:5000";
 
   useEffect(() => {
     if (isOpen && agent) {
       setFormData({
-        name: agent.name || '',
-        model_name: agent.model_name || 'llama3.2:1b',
+        name: agent.name || "",
+        model_name: agent.model_name || "llama3.2:1b",
         temperature: agent.temperature || 0.7,
         top_p: agent.top_p || 0.9,
-        system_prompt: agent.system_prompt || '',
+        system_prompt: agent.system_prompt || "",
         max_tokens: agent.max_tokens || 2048,
-        avatar_image: agent.avatar_image || '🤖'
+        avatar_image: agent.avatar_image || "🤖",
       });
       fetchAvailableModels();
     }
@@ -38,28 +46,28 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
       const response = await fetch(`${API_BASE}/api/models`);
       if (response.ok) {
         const data = await response.json();
-        setAvailableModels(data.models || ['llama3.2:1b']);
+        setAvailableModels(data.models || ["llama3.2:1b"]);
       }
     } catch (error) {
-      console.error('Failed to fetch models:', error);
+      logFrontendError("FRONTEND_MODEL_ERROR", "Failed to fetch models", error);
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name.trim()) {
-      setError('Agent name is required. Please enter a name for your agent.');
+      setError("Agent name is required. Please enter a name for your agent.");
       return;
     }
 
     setIsLoading(true);
-    setError('');
+    setError("");
 
     try {
       const response = await fetch(`${API_BASE}/api/agents/${agent.id}`, {
-        method: 'PUT',
+        method: "PUT",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify(formData),
       });
@@ -71,18 +79,28 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
       } else {
         const errorData = await response.json().catch(() => ({}));
         if (response.status === 404) {
-          setError('Agent not found. It may have been deleted by another user. Please refresh the page.');
+          setError(
+            "Agent not found. It may have been deleted by another user. Please refresh the page."
+          );
         } else if (response.status === 400) {
-          setError(errorData.error || 'Invalid agent settings. Please check your input and try again.');
+          setError(
+            errorData.error ||
+              "Invalid agent settings. Please check your input and try again."
+          );
         } else {
-          setError(errorData.error || 'Unable to save changes. Please check your connection and try again.');
+          setError(
+            errorData.error ||
+              "Unable to save changes. Please check your connection and try again."
+          );
         }
       }
     } catch (error) {
-      if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        setError('Cannot connect to the server. Please check your internet connection and try again.');
+      if (error.name === "TypeError" && error.message.includes("fetch")) {
+        setError(
+          "Cannot connect to the server. Please check your internet connection and try again."
+        );
       } else {
-        setError('Connection error while saving changes. Please try again.');
+        setError("Connection error while saving changes. Please try again.");
       }
     } finally {
       setIsLoading(false);
@@ -91,11 +109,11 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
 
   const handleDelete = async () => {
     setIsLoading(true);
-    setError('');
+    setError("");
 
     try {
       const response = await fetch(`${API_BASE}/api/agents/${agent.id}`, {
-        method: 'DELETE',
+        method: "DELETE",
       });
 
       if (response.ok) {
@@ -105,18 +123,25 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
       } else {
         const errorData = await response.json().catch(() => ({}));
         if (response.status === 404) {
-          setError('Agent not found. It may have already been deleted. Please refresh the page.');
+          setError(
+            "Agent not found. It may have already been deleted. Please refresh the page."
+          );
         } else if (response.status === 403) {
-          setError('You do not have permission to delete this agent.');
+          setError("You do not have permission to delete this agent.");
         } else {
-          setError(errorData.error || 'Unable to delete agent. Please check your connection and try again.');
+          setError(
+            errorData.error ||
+              "Unable to delete agent. Please check your connection and try again."
+          );
         }
       }
     } catch (error) {
-      if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        setError('Cannot connect to the server. Please check your internet connection and try again.');
+      if (error.name === "TypeError" && error.message.includes("fetch")) {
+        setError(
+          "Cannot connect to the server. Please check your internet connection and try again."
+        );
       } else {
-        setError('Connection error while deleting agent. Please try again.');
+        setError("Connection error while deleting agent. Please try again.");
       }
     } finally {
       setIsLoading(false);
@@ -125,9 +150,9 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
 
   const handleInputChange = (e) => {
     const { name, value, type } = e.target;
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [name]: type === 'number' ? parseFloat(value) : value
+      [name]: type === "number" ? parseFloat(value) : value,
     }));
   };
 
@@ -135,17 +160,15 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()}>
+      <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>Edit Agent</h2>
-          <button className="modal-close" onClick={onClose}>×</button>
+          <button className="modal-close" onClick={onClose}>
+            ×
+          </button>
         </div>
 
-        {error && (
-          <div className="error-message">
-            {error}
-          </div>
-        )}
+        {error && <div className="error-message">{error}</div>}
 
         <form onSubmit={handleSubmit} className="modal-form">
           <div className="form-group">
@@ -182,7 +205,7 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
               onChange={handleInputChange}
               required
             >
-              {availableModels.map(model => (
+              {availableModels.map((model) => (
                 <option key={model} value={model}>
                   {model}
                 </option>
@@ -266,7 +289,7 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
                 🗑️ Delete Agent
               </button>
             </div>
-            
+
             <div className="actions-right">
               <button
                 type="button"
@@ -276,12 +299,8 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
               >
                 Cancel
               </button>
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="save-btn"
-              >
-                {isLoading ? 'Saving...' : 'Save Changes'}
+              <button type="submit" disabled={isLoading} className="save-btn">
+                {isLoading ? "Saving..." : "Save Changes"}
               </button>
             </div>
           </div>
@@ -293,7 +312,9 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
             <div className="confirm-dialog">
               <h3>Delete Agent</h3>
               <p>Are you sure you want to delete "{agent?.name}"?</p>
-              <p><strong>This action cannot be undone.</strong></p>
+              <p>
+                <strong>This action cannot be undone.</strong>
+              </p>
               <div className="confirm-actions">
                 <button
                   onClick={() => setShowDeleteConfirm(false)}
@@ -307,7 +328,7 @@ const EditAgentModal = ({ isOpen, onClose, agent, onAgentUpdated, onAgentDeleted
                   disabled={isLoading}
                   className="delete-btn"
                 >
-                  {isLoading ? 'Deleting...' : 'Delete Agent'}
+                  {isLoading ? "Deleting..." : "Delete Agent"}
                 </button>
               </div>
             </div>

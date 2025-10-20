@@ -1232,6 +1232,35 @@ body {
   transition: border-color 0.2s;
 }
 
+/* Specific select dropdown styling */
+.form-group select {
+  background-color: var(--dark-bg);
+  color: var(--text-light);
+  border: 1px solid var(--border-grey);
+  cursor: pointer;
+  /* Add arrow styling for better visibility */
+  background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 12 12"><path fill="%23e5e5e5" d="M6 8L2 4h8L6 8z"/></svg>');
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 12px;
+  padding-right: 2.5rem;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+}
+
+/* Select dropdown options styling */
+.form-group select option {
+  background-color: var(--dark-bg);
+  color: var(--text-light);
+  padding: 0.5rem;
+}
+
+/* Hover and focus states for select */
+.form-group select:hover {
+  border-color: var(--light-purple);
+}
+
 .form-group input:focus,
 .form-group select:focus,
 .form-group textarea:focus {
@@ -1243,6 +1272,11 @@ body {
 .form-group input.error,
 .form-group select.error {
   border-color: var(--error);
+  background-color: rgba(239, 68, 68, 0.05);
+}
+
+.error-input-background {
+  background-color: rgba(239, 68, 68, 0.05);
 }
 
 .form-group textarea {

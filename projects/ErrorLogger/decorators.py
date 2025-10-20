@@ -10,19 +10,19 @@ def flask_error_handler(e):
     if isinstance(e, HTTPException):
         return e.get_response()
 
-    error_code = getattr(e, 'error_code', 'E00000')
+    error_code = getattr(e, "error_code", "E00000")
     explanation = get_error_explanation(error_code)
 
     log_error_remote(
         error_code,
         message=explanation,
-        exception=f"{request.method} {request.path} | {str(e)}"
+        exception=f"{request.method} {request.path} | {str(e)}",
     )
 
     response = {
-        'error': 'Internal Server Error',
-        'message': explanation,
-        'code': error_code
+        "error": "Internal Server Error",
+        "message": explanation,
+        "code": error_code,
     }
     return jsonify(response), 500
 
@@ -41,13 +41,13 @@ def log_exceptions(error_code):
                 log_error_remote(
                     error_code,
                     message=explanation,
-                    exception=f"{request.method} {request.path} | {str(e)}"
+                    exception=f"{request.method} {request.path} | {str(e)}",
                 )
 
                 response = {
-                    'error': 'Application Error',
-                    'message': explanation,
-                    'code': error_code
+                    "error": "Application Error",
+                    "message": explanation,
+                    "code": error_code,
                 }
                 return jsonify(response), 500
 

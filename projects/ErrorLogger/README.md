@@ -1,9 +1,368 @@
-# ErrorLogger v1.1
+# RuneGuard Security & Helper
 
-> **Status**: ✅ Production Ready | **Integration**: AI Service Platform  
-> **Last Updated**: October 16, 2025
+> **Status**: ✅ Production Ready | **Role**: Security & Monitoring Module  
+> **Integration**: RuneCore Foundation | **Port**: 5001  
+> **Last Updated**: October 19, 2025
 
-Centralized error logging system for WSL-based development environments with structured error codes, web interface, and cross-project integration.
+RuneGuard serves as the security and diagnostic module of the RuneCore ecosystem, providing comprehensive error monitoring, state snapshotting, network traffic analysis, and automated troubleshooting assistance for all connected modules.
+
+## Security & Monitoring Features
+
+### Core Security Functions
+- **System-Wide Error Detection**: Real-time monitoring across all RuneCore modules
+- **Threat Pattern Recognition**: Analysis of error patterns for security threats
+- **Network Traffic Monitoring**: Basic traffic analysis and anomaly detection
+- **State Snapshotting**: Diagnostic data collection for system analysis
+- **Audit Trail**: Complete logging of all security-related events
+
+### Diagnostic Capabilities
+- **Help System**: Automated troubleshooting assistance with context awareness
+- **Error Correlation**: Cross-module error pattern analysis
+- **Performance Monitoring**: Resource usage tracking and optimization suggestions
+- **Health Scoring**: Automated system health assessment
+- **Recovery Assistance**: Guided system recovery procedures
+
+### RuneCore Integration
+- **Foundation Communication**: Secure integration with RuneCore Foundation
+- **Module Monitoring**: Health tracking for all connected RuneCore modules
+- **Centralized Logging**: Unified error collection across the ecosystem
+- **Security Reporting**: Real-time security status to Foundation core
+- **Encrypted Data**: AES-256 encryption for all sensitive information
+
+## RuneGuard Architecture
+
+```mermaid
+graph TB
+    subgraph "RuneGuard Security Module"
+        Monitor[Error Monitor]
+        Threat[Threat Detection]
+        Network[Network Analysis]
+        Snapshot[State Snapshots]
+        Help[Help System]
+    end
+    
+    subgraph "RuneCore Modules"
+        Foundation[RuneCore Foundation]
+        Mind[RuneMind AI]
+        Pulse[RunePulse Monitor]
+        Other[Other Modules...]
+    end
+    
+    subgraph "Data Storage"
+        Logs[(Error Logs)]
+        State[(System State)]
+        Config[(Security Config)]
+        Audit[(Audit Trail)]
+    end
+    
+    Monitor --> Foundation
+    Monitor --> Mind
+    Monitor --> Pulse
+    Monitor --> Other
+    
+    Threat --> Network
+    Network --> Snapshot
+    Snapshot --> Help
+    
+    Monitor --> Logs
+    Threat --> Audit
+    Network --> State
+    Help --> Config
+    
+    style Monitor fill:#ff6b6b
+    style Threat fill:#ff8e53
+    style Network fill:#ffa726
+    style Foundation fill:#4ecdc4
+```
+
+## 🚨 Error Code Structure
+
+RuneGuard uses a structured error code system for precise error identification and automated response:
+
+| Segment       | Values      | Description                     |
+|---------------|-------------|---------------------------------|
+| Type (1 char) | E, W, I     | Error, Warning, Info           |
+| Origin (1)    | R, G, M, P  | RuneCore, RuneGuard, RuneMind, RunePulse |
+| Component (1) | S, B, F, N  | Setup, Backend, Frontend, Network |
+| Subcomponent  | A-Z, #      | Specific module or # for general |
+| Number (2)    | 00-99       | Unique error ID                |
+
+### Example Error Codes
+- `ERGS01` - RuneCore + RuneGuard + Setup + Security + Error 01
+- `WMNA12` - Warning + RuneMind + Network + API + Error 12  
+- `IPBH05` - Info + RunePulse + Backend + Health + Info 05
+
+## Security Monitoring
+
+### Network Traffic Analysis
+```python
+# Basic network monitoring
+from runeguard import NetworkMonitor
+
+monitor = NetworkMonitor()
+monitor.start_monitoring()
+
+# Detect suspicious patterns
+threats = monitor.analyze_traffic()
+for threat in threats:
+    runeguard.log_security_event(threat)
+```
+
+### Threat Detection Patterns
+- **Unusual Connection Patterns**: Unexpected network activity
+- **Resource Exhaustion**: Memory/CPU overuse detection
+- **Authentication Failures**: Failed access attempts
+- **Configuration Changes**: Unauthorized system modifications
+- **Module Communication Anomalies**: Suspicious inter-module traffic
+
+### State Snapshotting
+```python
+# Capture system state for diagnostics
+from runeguard import StateSnapshot
+
+snapshot = StateSnapshot()
+snapshot.capture_system_state()
+snapshot.include_module_status()
+snapshot.save_diagnostic_data()
+
+# Analyze for issues
+issues = snapshot.analyze_health()
+runeguard.generate_help_suggestions(issues)
+```
+
+## RuneGuard API
+
+### Security Endpoints
+```bash
+# Get security status
+GET /security/status
+
+# Retrieve threat analysis
+GET /security/threats
+
+# Get system health score
+GET /health/score
+
+# Trigger security scan
+POST /security/scan
+```
+
+### Error Logging Endpoints  
+```bash
+# Log error from module
+POST /log
+{
+  "error_code": "ERGS01",
+  "message": "Security configuration error",
+  "exception": "ConfigurationError: Missing encryption keys",
+  "extra": {"module": "RuneCore", "severity": "high"}
+}
+
+# Get error patterns
+GET /errors/patterns
+
+# Export security logs
+GET /logs/export?format=json&timerange=24h
+```
+
+### Help System Endpoints
+```bash
+# Get help for error code
+GET /help/{error_code}
+
+# Request automated diagnosis
+POST /help/diagnose
+{
+  "symptoms": ["slow_response", "high_memory"],
+  "module": "RuneMind"
+}
+
+# Get recovery suggestions
+GET /help/recovery/{error_code}
+```
+
+## Monitoring Dashboard
+
+### Security Status Display
+```mermaid
+graph LR
+    subgraph "Security Metrics"
+        THREATS[Threat Level]
+        AUTH[Auth Status]
+        ENCRYPT[Encryption]
+        AUDIT[Audit Status]
+    end
+    
+    subgraph "System Health"
+        CPU[CPU Usage]
+        MEM[Memory Usage]
+        NET[Network Status]
+        DISK[Disk Usage]
+    end
+    
+    subgraph "Module Status"
+        CORE[RuneCore]
+        MIND[RuneMind]
+        PULSE[RunePulse]
+    end
+    
+    THREATS --> GREEN[🟢 Low]
+    AUTH --> GREEN[🟢 Active]
+    ENCRYPT --> GREEN[🟢 Enabled]
+    AUDIT --> GREEN[🟢 Logging]
+    
+    CPU --> GREEN[🟢 Normal]
+    MEM --> YELLOW[🟡 Elevated]
+    NET --> GREEN[🟢 Stable]
+    DISK --> GREEN[🟢 Available]
+    
+    CORE --> GREEN[🟢 Healthy]
+    MIND --> GREEN[🟢 Healthy]
+    PULSE --> ORANGE[🟠 Planned]
+```
+
+### Web Interface Features
+- **Real-time Security Dashboard**: Live threat monitoring
+- **Error Pattern Visualization**: Trend analysis and correlation
+- **Help Wizard**: Interactive troubleshooting assistance
+- **Audit Log Viewer**: Complete security event history
+- **System Health Overview**: Comprehensive status display
+
+## Configuration
+
+### Security Configuration (`security_config.json`)
+```json
+{
+  "threat_detection": {
+    "enable_network_monitoring": true,
+    "suspicious_connection_threshold": 100,
+    "resource_usage_threshold": 80,
+    "authentication_failure_limit": 5
+  },
+  "encryption": {
+    "algorithm": "AES-256",
+    "key_rotation_interval": "weekly",
+    "enforce_module_encryption": true
+  },
+  "logging": {
+    "error_retention_days": 30,
+    "audit_retention_days": 90,
+    "enable_security_alerts": true,
+    "alert_email": null
+  },
+  "help_system": {
+    "enable_auto_diagnosis": true,
+    "provide_recovery_suggestions": true,
+    "context_awareness": true
+  }
+}
+```
+
+### Error Code Configuration (`error_codes.json`)
+```json
+{
+  "error_explanations": {
+    "ERGS01": "Security configuration missing or invalid",
+    "WMNA12": "Network API response time elevated",
+    "IPBH05": "Health check completed successfully"
+  },
+  "severity_mapping": {
+    "E": "error",
+    "W": "warning", 
+    "I": "info"
+  },
+  "auto_responses": {
+    "ERGS01": "restart_security_service",
+    "WMNA12": "check_network_connectivity"
+  }
+}
+```
+
+## Quick Start
+
+### Installation
+```bash
+# Install RuneGuard dependencies
+pip install -e ./projects/ErrorLogger
+
+# Configure security settings
+cp security_config.example.json security_config.json
+```
+
+### Start RuneGuard Service
+```bash
+# Start as part of RuneCore ecosystem
+./start_runecore.sh
+
+# Or start independently
+./projects/ErrorLogger/start_runeguard.sh
+```
+
+### Integration with RuneCore Modules
+```python
+# RuneCore module integration
+import sys
+sys.path.append('/path/to/projects')
+from ErrorLogger.logger import log_error_remote
+
+def log_to_runeguard(error_code, message=None, exception=None, extra=None):
+    """Log security/error event to RuneGuard"""
+    if extra is None:
+        extra = {}
+    extra['module'] = 'RuneMind'  # or current module name
+    return log_error_remote(error_code, message, exception, extra)
+
+# Usage in RuneCore modules
+try:
+    # Module operation
+    result = perform_sensitive_operation()
+except SecurityException as e:
+    log_to_runeguard('ERGS03', 'Security violation detected', exception=e)
+```
+
+## 🔍 Advanced Features
+
+### Automated Threat Response
+- **Intrusion Detection**: Automatic detection of unauthorized access
+- **Response Escalation**: Graduated response to security threats  
+- **Module Isolation**: Ability to isolate compromised modules
+- **Emergency Shutdown**: System protection during critical threats
+
+### Intelligent Help System
+- **Context-Aware Assistance**: Help tailored to current system state
+- **Learning System**: Improves recommendations based on resolution success
+- **Interactive Diagnosis**: Step-by-step troubleshooting guidance
+- **Knowledge Base**: Comprehensive database of solutions and workarounds
+
+### Integration Testing
+```bash
+# Test RuneGuard security features
+pytest projects/ErrorLogger/test_security.py
+
+# Test help system responses
+pytest projects/ErrorLogger/test_help_system.py
+
+# Test RuneCore integration
+pytest projects/ErrorLogger/test_integration.py
+```
+
+## Success Metrics
+
+### Security Monitoring
+- **Threat Detection Rate**: >95% accuracy in identifying security issues
+- **False Positive Rate**: <5% incorrect threat identifications
+- **Response Time**: <100ms for critical security events
+- **System Coverage**: 100% of RuneCore modules monitored
+
+### Help System Effectiveness  
+- **Issue Resolution Rate**: >80% of problems resolved via help system
+- **User Satisfaction**: Measured via feedback on help effectiveness
+- **Knowledge Base Growth**: Continuous expansion of solution database
+- **Automated Recovery**: >60% of issues resolved without user intervention
+
+---
+
+**RuneGuard**: Your vigilant security companion in the RuneCore ecosystem, ensuring system integrity, providing intelligent assistance, and maintaining the highest standards of operational security.
 
 ## Features
 

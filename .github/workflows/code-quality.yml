@@ -1,0 +1,125 @@
+name: Code Quality & Linting
+
+on:
+  push:
+    branches: [ main, AI_service_dev, AI_service, develop ]
+  pull_request:
+    branches: [ main, AI_service, develop ]
+  workflow_dispatch:
+
+jobs:
+  code-quality:
+    name: Code Quality & Standards
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: '**/package-lock.json'
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Install quality tools
+      run: |
+        # JavaScript/TypeScript tools
+        npm install -g eslint@latest prettier@latest
+        
+        # Python tools - handle externally managed environment gracefully
+        pip install pylint black isort mypy flake8 bandit safety pydocstyle || \
+        pip install --break-system-packages pylint black isort mypy flake8 bandit safety pydocstyle
+
+    - name: ESLint Check
+      run: |
+        # Skip ESLint if no JS/TS files or if configuration issues exist
+        JS_FILES=$(find . -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" | grep -v node_modules | wc -l)
+        if [ "$JS_FILES" -gt 0 ]; then
+          echo "Found $JS_FILES JavaScript/TypeScript files, running ESLint..."
+          find . -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" | 
+          grep -v node_modules | 
+          head -10 |
+          xargs -r npx eslint --max-warnings 10 || echo "ESLint completed with warnings (non-blocking)"
+        else
+          echo "No JavaScript/TypeScript files found, skipping ESLint"
+        fi
+
+    - name: Python Linting
+      run: |
+        find projects/ -name "*.py" -not -path "*/node_modules/*" | \
+        xargs -r pylint --fail-under=8.0 --disable=C0114,C0115,C0116,C0303,E0401,E1120
+
+    - name: Code Formatting Check
+      run: |
+        # Install Prettier locally to ensure consistent version
+        npm install --no-save prettier@latest
+        
+        # Check JavaScript/TypeScript formatting - STRICT: Fail on any formatting issues
+        find . -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" | \
+        grep -v node_modules | \
+        xargs -r npx prettier --check
+        
+        # Check Python formatting - STRICT: Fail on any formatting issues
+        find . -name "*.py" -not -path "./venv/*" | \
+        xargs -r black --check --diff
+
+    - name: Complexity Analysis
+      run: |
+        # Python complexity check
+        find . -name "*.py" -not -path "./venv/*" | \
+        xargs -r python -m mccabe --min 10
+
+    - name: Code Duplication Detection
+      run: |
+        echo "Checking for duplicate code patterns..."
+        
+        # Simple duplicate detection using basic tools
+        # Look for repeated function signatures
+        find projects/ -name "*.py" -exec grep -l "def " {} \; | \
+        xargs grep "def " | \
+        awk '{print $2}' | \
+        sort | \
+        uniq -d | \
+        head -10 | \
+        while read func; do
+          echo "Potential duplicate function: $func"
+        done || echo "No obvious function duplicates found"
+        
+        # Look for repeated imports
+        find projects/ -name "*.py" -exec grep -h "^import\|^from.*import" {} \; | \
+        sort | \
+        uniq -c | \
+        sort -nr | \
+        head -5 | \
+        while read count import; do
+          if [ "$count" -gt 5 ]; then
+            echo "Frequently used import ($count times): $import"
+          fi
+        done || echo "Import analysis complete"
+        
+        echo "Duplicate code check completed (non-blocking)"
+
+    - name: Documentation Coverage
+      run: |
+        find . -name "*.py" -not -path "./venv/*" | \
+        xargs -r pydocstyle --convention=google --add-ignore=D100,D101,D102,D103,D104,D107,D200,D205,D212,D415
+
+    - name: Security Linting (Bandit)
+      run: |
+        find . -name "*.py" -not -path "./venv/*" | \
+        xargs -r bandit -r --skip=B101,B108,B104,B608 -ll
+
+    - name: Type Checking (MyPy) - Non-blocking
+      run: |
+        find . -name "*.py" -not -path "./venv/*" | \
+        xargs -r mypy --ignore-missing-imports --no-strict-optional || echo "MyPy warnings found but not blocking CI"
