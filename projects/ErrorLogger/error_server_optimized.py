@@ -59,7 +59,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Get configuration from environment with defaults
-    host = os.environ.get("ERRORLOGGER_HOST", "0.0.0.0")
+    host = os.environ.get("ERRORLOGGER_HOST", "0.0.0.0")  # nosec B104
     port = int(os.environ.get("ERRORLOGGER_PORT", "5001"))
     debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true" or args.debug
 

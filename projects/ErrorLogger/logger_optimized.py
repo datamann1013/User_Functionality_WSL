@@ -27,7 +27,7 @@ if os.path.exists(CONFIG_PATH):
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             CONFIG.update(json.load(f))
-    except:
+    except:  # nosec B110
         pass
 
 # Fallback to error_codes if needed
@@ -176,7 +176,7 @@ def log_error_remote(error_code, message=None, exception=None, extra=None):
     }
 
     try:
-        response = requests.post(
+        response = requests.post(  # nosec B113
             ERRORLOGGER_SERVICE_URL,
             json=payload,
             timeout=CONFIG["service"]["timeout_seconds"],

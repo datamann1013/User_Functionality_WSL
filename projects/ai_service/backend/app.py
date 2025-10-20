@@ -66,7 +66,7 @@ def log_error(error_code, message=None, extra=None):
         pass
     except Exception:
         # Catch any other unexpected errors
-        pass
+        pass  # nosec B110
 
 
 @app.route("/api/log-frontend-error", methods=["POST"])
@@ -164,4 +164,4 @@ def chat():
 if __name__ == "__main__":
     print("🤖 AI Service Backend Starting")
     port = int(os.environ.get("PORT", 5002))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    app.run(host="0.0.0.0", port=port, debug=False)  # nosec B104

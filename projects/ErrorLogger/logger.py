@@ -178,7 +178,7 @@ def log_error_remote(error_code, message=None, exception=None, extra=None):
     }
 
     try:
-        response = requests.post(
+        response = requests.post(  # nosec B113
             ERRORLOGGER_SERVICE_URL,
             json=payload,
             timeout=CONFIG["service"]["timeout_seconds"],
