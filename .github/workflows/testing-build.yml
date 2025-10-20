@@ -211,27 +211,27 @@ jobs:
 
     - name: Run Python Tests with Coverage
       run: |
-        # Find and run all Python tests
+        # Find and run all Python tests with STRICT coverage requirements
         find . -name "test_*.py" -o -name "*_test.py" | head -1 | xargs -r dirname | \
         while read testdir; do
           if [ -n "$testdir" ]; then
             cd "$testdir"
-            python -m pytest --cov=. --cov-report=xml --cov-report=term-missing || true
+            python -m pytest --cov=. --cov-report=xml --cov-report=term-missing --cov-fail-under=85
             cd - > /dev/null
           fi
         done
 
     - name: Run JavaScript Tests with Coverage
       run: |
-        # Find and run all Node.js tests
-        find . -name package.json -execdir npm test \; || true
+        # Find and run all Node.js tests - STRICT: Fail on any test failure
+        find . -name package.json -execdir npm test \;
 
     - name: Coverage Report
       uses: codecov/codecov-action@v3
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ./coverage.xml
-        fail_ci_if_error: false
+        fail_ci_if_error: true
 
   # ============================================================================
   # BUILD & PACKAGE ARTIFACTS  

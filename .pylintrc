@@ -30,16 +30,21 @@ disable=
     
     # Style preferences
     line-too-long,  # Handled by black
-    bad-continuation,  # Handled by black
     
     # Common patterns in our codebase
     too-few-public-methods,
     too-many-arguments,
-    broad-except,
     
     # Import organization - handled by isort
     wrong-import-order,
-    ungrouped-imports
+    ungrouped-imports,
+    
+    # GTK-specific issues
+    no-member,
+    c-extension-no-member,
+    
+    # Import issues for project structure
+    wrong-import-position
 
 # Enable specific warnings
 enable=
@@ -50,15 +55,12 @@ enable=
 # Set the output format
 output-format=colorized
 
-# Include message's id in output
-include-ids=yes
-
 # Template used to display messages
 msg-template={path}:{line}:{column}: {msg_id}: {msg} ({symbol})
 
 [BASIC]
 # Good variable names regexes
-good-names=i,j,k,ex,Run,_,id,db,pk,ui
+good-names=i,j,k,ex,Run,_,id,db,pk,ui,x,y,pos_x,pos_y
 
 # Bad variable names regexes
 bad-names=foo,bar,baz,toto,tutu,tata

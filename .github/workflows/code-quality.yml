@@ -44,32 +44,26 @@ jobs:
       run: |
         find . -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" | 
         grep -v node_modules | 
-        xargs -r npx eslint --max-warnings 15
+        xargs -r npx eslint --max-warnings 0
 
     - name: Python Linting
       run: |
         find . -name "*.py" -not -path "./venv/*" -not -path "./.env/*" | \
-        xargs -r pylint --fail-under=6.0 --disable=C0114,C0115,C0116,C0303,E0401,C0413,C0103,W0611,R0801
+        xargs -r pylint --fail-under=8.0 --disable=C0114,C0115,C0116,C0303,E0401
 
     - name: Code Formatting Check
       run: |
         # Install Prettier locally to ensure consistent version
         npm install --no-save prettier@latest
         
-        # Check JavaScript/TypeScript formatting
+        # Check JavaScript/TypeScript formatting - STRICT: Fail on any formatting issues
         find . -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" | \
         grep -v node_modules | \
-        xargs -r npx prettier --check || {
-          echo "Code formatting issues found. Running auto-fix..."
-          find . -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" | \
-          grep -v node_modules | \
-          xargs -r npx prettier --write
-          echo "Code has been auto-formatted. Please commit the changes."
-        }
+        xargs -r npx prettier --check
         
-        # Check Python formatting (optional, non-blocking)
+        # Check Python formatting - STRICT: Fail on any formatting issues
         find . -name "*.py" -not -path "./venv/*" | \
-        xargs -r black --check --diff || echo "Python formatting suggestions above (non-blocking)"
+        xargs -r black --check --diff
 
     - name: Complexity Analysis
       run: |
@@ -110,4 +104,14 @@ jobs:
     - name: Documentation Coverage
       run: |
         find . -name "*.py" -not -path "./venv/*" | \
-        xargs -r pydocstyle --convention=google --add-ignore=D100,D101,D102,D103,D107,D200,D205,D212,D415 || echo "Documentation suggestions above (non-blocking)"
+        xargs -r pydocstyle --convention=google --add-ignore=D100,D101,D102,D103,D107
+
+    - name: Security Linting (Bandit)
+      run: |
+        find . -name "*.py" -not -path "./venv/*" | \
+        xargs -r bandit -r
+
+    - name: Type Checking (MyPy)
+      run: |
+        find . -name "*.py" -not -path "./venv/*" | \
+        xargs -r mypy --ignore-missing-imports --strict-optional

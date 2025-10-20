@@ -39,7 +39,6 @@ jobs:
       uses: github/codeql-action/analyze@v3
 
     - name: Run Semgrep SAST
-      continue-on-error: true
       uses: semgrep/semgrep-action@v1
       with:
         config: >-
@@ -53,7 +52,6 @@ jobs:
         SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
 
     - name: Secret Detection with TruffleHog
-      continue-on-error: true
       uses: trufflesecurity/trufflehog@main
       with:
         path: ./
@@ -62,7 +60,6 @@ jobs:
         extra_args: --debug --only-verified
 
     - name: Secret Detection with Gitleaks
-      continue-on-error: true
       uses: gitleaks/gitleaks-action@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -74,10 +71,9 @@ jobs:
         python-version: '3.11'
 
     - name: Dependency Vulnerability Scan - Python
-      continue-on-error: true
       run: |
         pip install safety
-        find . -name requirements.txt -exec safety check -r {} \; || echo "Safety scan completed with warnings"
+        find . -name requirements.txt -exec safety check -r {} \;
 
     - name: Setup Node.js for Security Tools
       uses: actions/setup-node@v4
@@ -85,21 +81,19 @@ jobs:
         node-version: '18'
 
     - name: Dependency Vulnerability Scan - Node.js
-      continue-on-error: true
-      if: secrets.SNYK_TOKEN != ''
+      if: hashFiles('**/package.json') != ''
       uses: snyk/actions/node@master
       env:
         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
     - name: OSV Scanner
-      continue-on-error: true
       run: |
         # Install OSV Scanner
         curl -L https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_amd64 -o osv-scanner
         chmod +x osv-scanner
         
         # Run OSV Scanner
-        ./osv-scanner --recursive --skip-git . || echo "OSV Scanner completed with warnings"
+        ./osv-scanner --recursive --skip-git .
 
     - name: License Compliance Check
       continue-on-error: true
@@ -109,7 +103,6 @@ jobs:
         api-key: ${{ secrets.FOSSA_API_KEY }}
         
     - name: Container Security Scan
-      continue-on-error: true
       if: hashFiles('**/Dockerfile*') != ''
       run: |
         # Install Trivy
@@ -120,11 +113,10 @@ jobs:
         sudo apt-get update
         sudo apt-get install trivy
         
-        # Scan Dockerfiles
-        find . -name "Dockerfile*" -exec trivy fs --security-checks vuln,config {} \;
+        # Scan Dockerfiles with STRICT security standards
+        find . -name "Dockerfile*" -exec trivy fs --security-checks vuln,config --severity HIGH,CRITICAL {} \;
 
     - name: Dockerfile Linting
-      continue-on-error: true
       if: hashFiles('**/Dockerfile*') != ''
       uses: hadolint/hadolint-action@v3.1.0
       with:

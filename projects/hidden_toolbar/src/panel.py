@@ -1,8 +1,10 @@
 import gi
-gi.require_version('Gtk', '3.0')
+
+gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
 
 from utils import run_command
+
 
 class HiddenToolbar(Gtk.Window):
     def __init__(self):
@@ -21,7 +23,8 @@ class HiddenToolbar(Gtk.Window):
         self.set_type_hint(Gdk.WindowTypeHint.DOCK)
 
         css_provider = Gtk.CssProvider()
-        css_provider.load_from_data(b"""
+        css_provider.load_from_data(
+            b"""
             window {
                 background-color: #2b2b2b;
                 border-radius: 6px;
@@ -31,11 +34,12 @@ class HiddenToolbar(Gtk.Window):
                 border: none;
                 padding: 2px;
             }
-        """)
+        """
+        )
         Gtk.StyleContext.add_provider_for_screen(
             Gdk.Screen.get_default(),
             css_provider,
-            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
 
         outer_box = Gtk.Box()
@@ -84,7 +88,7 @@ class HiddenToolbar(Gtk.Window):
 
     def position_window(self):
         if self.positioned:
-             return False
+            return False
 
         self.positioned = True
 
@@ -95,15 +99,16 @@ class HiddenToolbar(Gtk.Window):
         window_width = self.get_allocated_width()
         window_height = self.get_allocated_height()
 
-        x = geometry.x + (geometry.width - window_width) // 2
-        y = geometry.y + geometry.height - window_height
+        pos_x = geometry.x + (geometry.width - window_width) // 2
+        pos_y = geometry.y + geometry.height - window_height
 
         print(
-            f"[DEBUG] Monitor geometry: x={geometry.x}, y={geometry.y}, width={geometry.width}, height={geometry.height}")
+            f"[DEBUG] Monitor geometry: x={geometry.x}, y={geometry.y}, width={geometry.width}, height={geometry.height}"
+        )
         print(f"[DEBUG] Window size: width={window_width}, height={window_height}")
-        print(f"[DEBUG] Moving window to: x={x}, y={y}")
+        print(f"[DEBUG] Moving window to: x={pos_x}, y={pos_y}")
 
-        self.move(x, y)
+        self.move(pos_x, pos_y)
         return False
 
 
