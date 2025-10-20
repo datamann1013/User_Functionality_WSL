@@ -1,7 +1,12 @@
 import os
+import sys
 import glob
-from projects.ErrorLogger import logger
 import json
+
+# Add the parent directory to the path so we can import from ErrorLogger
+sys.path.insert(0, os.path.dirname(__file__))
+from logger import log_error, get_explanation, get_log_rotation_status, CONFIG
+import logger
 
 
 def get_latest_log_file():

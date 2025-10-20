@@ -107,7 +107,12 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
       }
       return false;
     } catch (error) {
-      logFrontendError("FRONTEND_MODEL_ERROR", "Failed to check model availability", error, { modelName });
+      logFrontendError(
+        "FRONTEND_MODEL_ERROR",
+        "Failed to check model availability",
+        error,
+        { modelName }
+      );
       return false;
     }
   };
@@ -128,17 +133,37 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
         if (data.success) {
           // Refresh available models
           await fetchAvailableModels();
-          logFrontendError("FRONTEND_MODEL_INFO", `Model ${modelName} download completed successfully`, null, { modelName });
+          logFrontendError(
+            "FRONTEND_MODEL_INFO",
+            `Model ${modelName} download completed successfully`,
+            null,
+            { modelName }
+          );
         } else {
-          logFrontendError("FRONTEND_MODEL_ERROR", `Model ${modelName} download failed`, new Error(data.error), { modelName });
+          logFrontendError(
+            "FRONTEND_MODEL_ERROR",
+            `Model ${modelName} download failed`,
+            new Error(data.error),
+            { modelName }
+          );
           throw new Error(data.error || "Download failed");
         }
       } else {
-        logFrontendError("FRONTEND_MODEL_ERROR", `Failed to start download for ${modelName}`, null, { modelName });
+        logFrontendError(
+          "FRONTEND_MODEL_ERROR",
+          `Failed to start download for ${modelName}`,
+          null,
+          { modelName }
+        );
         throw new Error("Failed to start download");
       }
     } catch (error) {
-      logFrontendError("FRONTEND_MODEL_ERROR", `Model download error for ${modelName}`, error, { modelName });
+      logFrontendError(
+        "FRONTEND_MODEL_ERROR",
+        `Model download error for ${modelName}`,
+        error,
+        { modelName }
+      );
       // Only set errors if this is a foreground download (user initiated from model list)
       if (modelDownloading === modelName) {
         setErrors((prev) => ({
@@ -201,7 +226,12 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
           downloadInProgress = true;
           // Start download in background - don't wait for it
           handleModelDownload(formData.model_name).catch((error) => {
-            logFrontendError("FRONTEND_MODEL_ERROR", "Background model download failed", error, { modelName: formData.model_name });
+            logFrontendError(
+              "FRONTEND_MODEL_ERROR",
+              "Background model download failed",
+              error,
+              { modelName: formData.model_name }
+            );
           });
         }
       }
@@ -312,7 +342,9 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
         }
       }
     } catch (error) {
-      logFrontendError("FRONTEND_API_ERROR", "Agent creation error", error, { formData });
+      logFrontendError("FRONTEND_API_ERROR", "Agent creation error", error, {
+        formData,
+      });
       setErrors({
         submit:
           "Unable to create agent. Please check your internet connection and try again.",
