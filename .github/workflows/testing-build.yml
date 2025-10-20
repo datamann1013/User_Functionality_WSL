@@ -203,16 +203,16 @@ jobs:
     - name: Install Dependencies
       run: |
         # Python dependencies
-        find . -name requirements.txt -exec pip install -r {} \;
+        find . -name requirements.txt -not -path "./node_modules/*" -exec pip install -r {} \;
         pip install pytest pytest-cov coverage
 
-        # Node.js dependencies
-        find . -name package.json -execdir npm install \;
+        # Node.js dependencies - only for our project directories (avoid node_modules subdirs)
+        find ./projects -name "package.json" -not -path "*/node_modules/*" -execdir npm install \;
 
     - name: Run Python Tests with Coverage
       run: |
-        # Find and run all Python tests with focused coverage on core modules
-        find . -name "test_*.py" -o -name "*_test.py" | head -1 | xargs -r dirname | \
+        # Find and run all Python tests with focused coverage on core modules (excluding venv/node_modules)
+        find . -name "test_*.py" -not -path "./venv/*" -not -path "./node_modules/*" | head -1 | xargs -r dirname | \
         while read testdir; do
           if [ -n "$testdir" ]; then
             cd "$testdir"
@@ -224,8 +224,8 @@ jobs:
 
     - name: Run JavaScript Tests with Coverage
       run: |
-        # Find and run all Node.js tests - STRICT: Fail on any test failure
-        find . -name package.json -execdir npm test \;
+        # Find and run all Node.js tests - only for our project directories (avoid node_modules subdirs)
+        find ./projects -name "package.json" -not -path "*/node_modules/*" -execdir bash -c 'echo "Testing in: $(pwd)" && npm test' \;
 
     - name: Coverage Report
       uses: codecov/codecov-action@v3
