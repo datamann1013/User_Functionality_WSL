@@ -7,7 +7,6 @@ ERROR_CODE_DEFINITIONS = {
     "E00000": "Python exception occurred (standard)",
     "E00001": "React exception occurred (standard)",
     "EREM1": "Remote logger failed (standard)",
-
     # ===== Setup/Model =====
     "IABS1": "Setup model script started",
     "IABS2": "All required model files present",
@@ -17,8 +16,7 @@ ERROR_CODE_DEFINITIONS = {
     "EABS1": "Missing required model files",
     "EABS2": "Failed to download model file",
     "EABS3": "Missing Hugging Face access token",
-
-     # ===== Model Registry Errors =====
+    # ===== Model Registry Errors =====
     "EMR01": "Failed to load model registry",
     "EMR02": "Failed to save model registry",
     "EMR03": "Failed to list models",
@@ -35,7 +33,6 @@ ERROR_CODE_DEFINITIONS = {
     "EMR14": "Model not found for deletion",
     "EMR15": "Failed to save after deletion",
     "EMR16": "Failed to delete model",
-
     # ===== Backend/Inference =====
     "IABB1": "Inference request received",
     "IABB2": "Inference response sent",
@@ -44,14 +41,11 @@ ERROR_CODE_DEFINITIONS = {
     "EABB3": "Model loading failed - unsupported format",
     "EABB4": "Inference timeout",
     "IABS6": "Model loaded successfully",
-
     # ===== Frontend =====
     "IAFX1": "Frontend transmission received",
     "IAFX2": "Frontend transmission sent",
     "EAFX1": "Frontend error occurred",
-
     # ===== Health/Info =====
     "IAXX1": "Health check called",
-
     # ===== Add new codes below =====
 }
