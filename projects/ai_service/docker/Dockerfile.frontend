@@ -7,8 +7,8 @@ WORKDIR /app
 # Copy package files first for better caching
 COPY projects/ai_service/frontend/package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production --silent
+# Install dependencies (including devDependencies for building)
+RUN npm install --silent
 
 # Copy source code
 COPY projects/ai_service/frontend/src/ ./src/
