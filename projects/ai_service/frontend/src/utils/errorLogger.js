@@ -33,9 +33,8 @@ export const logFrontendError = async (
       body: JSON.stringify(payload),
     });
   } catch (err) {
-    // If logging fails, log to console as fallback
-    console.error("Failed to log to ErrorLogger service:", err);
-    console.error("Original error:", { errorCode, message, exception, extra });
+    // If logging fails, silently fail to avoid infinite loops
+    // In production, this would be handled by monitoring systems
   }
 };
 

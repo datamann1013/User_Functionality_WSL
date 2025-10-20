@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { logFrontendError } from "../utils/errorLogger";
 
 const EditAgentModal = ({
   isOpen,
@@ -48,7 +49,7 @@ const EditAgentModal = ({
         setAvailableModels(data.models || ["llama3.2:1b"]);
       }
     } catch (error) {
-      console.error("Failed to fetch models:", error);
+      logFrontendError("FRONTEND_MODEL_ERROR", "Failed to fetch models", error);
     }
   };
 
