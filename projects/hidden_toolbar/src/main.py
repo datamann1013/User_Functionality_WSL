@@ -10,7 +10,9 @@ import subprocess  # nosec B404
 def find_vcxsrv_display():
     # Try to find a running VcXsrv process and guess the DISPLAY
     try:
-        result = subprocess.run(["ps", "aux"], capture_output=True, text=True)  # nosec B603
+        result = subprocess.run(
+            ["ps", "aux"], capture_output=True, text=True
+        )  # nosec B603
         for line in result.stdout.splitlines():
             if "VcXsrv" in line:
                 # Default VcXsrv display is :0.0, but could be different
