@@ -4,10 +4,11 @@ import threading
 import requests
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import Dict, Any, Optional, Union
 
 # Pre-load configuration for faster access
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
-DEFAULT_CONFIG = {
+DEFAULT_CONFIG: Dict[str, Any] = {
     "error_explanations": {},
     "logging": {
         "enable_console_debug": False,
@@ -22,7 +23,7 @@ DEFAULT_CONFIG = {
 }
 
 # Load config once at module import
-CONFIG = DEFAULT_CONFIG.copy()
+CONFIG: Dict[str, Any] = DEFAULT_CONFIG.copy()
 if os.path.exists(CONFIG_PATH):
     try:
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:

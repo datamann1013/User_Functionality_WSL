@@ -1,26 +1,29 @@
 #!/usr/bin/env python3
 """
-Token-based authentication and encryption for AI Service
-Simple, secure, no user accounts - perfect for local use with future expansion
+Authentication and Authorization module for AI Service
+JWT token generation, validation, and role-based access control
 """
+
 import os
-import sys
 import jwt
+import bcrypt
 import secrets
-import hashlib
-from datetime import datetime, timedelta
-from cryptography.fernet import Fernet
-from typing import Optional, Dict, Any
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Optional, Union, Any, List
 from functools import wraps
-from flask import request, jsonify, current_app
+from cryptography.fernet import Fernet
+import json
 
 # Import project-wide ErrorLogger
-sys.path.append("/home/administrator/gitcontrol/User_Functionality_WSL/projects")
-from ErrorLogger.logger import log_error_remote
+import sys
+
+sys.path.append("/app")
 
 
 class TokenAuth:
-    def __init__(self, secret_key: str = None, encryption_key: str = None):
+    def __init__(
+        self, secret_key: Optional[str] = None, encryption_key: Optional[str] = None
+    ):
         """Initialize authentication with secure defaults"""
         self.secret_key = secret_key or os.environ.get(
             "JWT_SECRET_KEY", "jwt_super_secure_key_2025_change_in_production"
@@ -28,18 +31,16 @@ class TokenAuth:
 
         # Generate or use encryption key for sensitive data
         if encryption_key:
-            self.cipher = Fernet(encryption_key.encode())
+            self.encryption_key = encryption_key
         else:
-            # Generate a key if none provided (store this securely in production)
-            key = os.environ.get("ENCRYPTION_KEY")
-            if not key:
-                key = Fernet.generate_key().decode()
-                log_error_remote(
-                    "WAAT01",
-                    "Generated new encryption key - store securely!",
-                    extra={"service": "ai_service", "key_length": len(key)},
-                )
-            self.cipher = Fernet(key.encode())
+            # Try to get from environment or generate new one
+            env_key = os.environ.get("ENCRYPTION_KEY")
+            if env_key:
+                self.encryption_key = env_key
+            else:
+                self.encryption_key = Fernet.generate_key().decode()
+
+        self.cipher_suite = Fernet(self.encryption_key.encode())
 
     def generate_session_token(self, expires_hours: int = 24) -> Dict[str, Any]:
         """Generate a session token for local use (no user ID needed)"""

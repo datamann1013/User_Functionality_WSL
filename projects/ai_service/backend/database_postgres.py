@@ -20,7 +20,7 @@ from ErrorLogger.logger import log_error_remote
 
 
 class PostgreSQLDatabase:
-    def __init__(self, database_url: str = None):
+    def __init__(self, database_url: Optional[str] = None):
         """Initialize PostgreSQL connection pool"""
         if database_url is None:
             database_url = os.environ.get(
@@ -282,8 +282,8 @@ class PostgreSQLDatabase:
         agent_id: str,
         user_message: str,
         ai_response: str,
-        response_time_ms: int = None,
-        token_count: int = None,
+        response_time_ms: Optional[int] = None,
+        token_count: Optional[int] = None,
     ) -> str:
         """Log conversation with performance metrics"""
         try:

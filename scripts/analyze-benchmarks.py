@@ -1,3 +1,5 @@
+from typing import Any, Dict, List, Optional, Tuple
+
 #!/usr/bin/env python3
 """
 Benchmark Analysis Script for RuneCore Ecosystem
@@ -20,7 +22,9 @@ class BenchmarkAnalyzer:
         self.benchmarks_dir = Path(benchmarks_dir)
         self.regression_threshold = 1.10  # 10% performance degradation
 
-    def load_benchmark_files(self, benchmark_type: str = None) -> List[Dict[str, any]]:
+    def load_benchmark_files(
+        self, benchmark_type: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """Load all benchmark files of specified type"""
         if benchmark_type:
             pattern = f"{benchmark_type}-*.json"
@@ -61,7 +65,7 @@ class BenchmarkAnalyzer:
 
         return recent
 
-    def analyze_memory_trends(self, memory_benchmarks: List[Dict]) -> Dict[str, any]:
+    def analyze_memory_trends(self, memory_benchmarks: List[Dict]) -> Dict[str, Any]:
         """Analyze memory usage trends"""
         if not memory_benchmarks:
             return {"status": "no_data"}
@@ -126,12 +130,12 @@ class BenchmarkAnalyzer:
             "total_benchmarks": len(memory_benchmarks),
         }
 
-    def analyze_cpu_trends(self, cpu_benchmarks: List[Dict]) -> Dict[str, any]:
+    def analyze_cpu_trends(self, cpu_benchmarks: List[Dict]) -> Dict[str, Any]:
         """Analyze CPU performance trends"""
         if not cpu_benchmarks:
             return {"status": "no_data"}
 
-        trends = {}
+        trends: Dict[str, Any] = {}
         components = set()
 
         # Collect all component names
@@ -254,8 +258,8 @@ class BenchmarkAnalyzer:
         }
 
     def detect_regressions(
-        self, analysis_results: Dict[str, any]
-    ) -> List[Dict[str, any]]:
+        self, analysis_results: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
         """Detect and categorize performance regressions"""
         regressions = []
 
@@ -329,7 +333,7 @@ class BenchmarkAnalyzer:
 
         return "negligible"
 
-    def generate_report(self, days: int = 7) -> Dict[str, any]:
+    def generate_report(self, days: int = 7) -> Dict[str, Any]:
         """Generate comprehensive performance analysis report"""
         print(f"🔍 Analyzing benchmark data from the last {days} days...")
 
@@ -387,7 +391,7 @@ class BenchmarkAnalyzer:
 
         return report
 
-    def save_report(self, report: Dict[str, any]) -> str:
+    def save_report(self, report: Dict[str, Any]) -> str:
         """Save analysis report to file"""
         timestamp = int(datetime.now().timestamp())
         filename = f"analysis-{timestamp}.json"

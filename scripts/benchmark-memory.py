@@ -1,3 +1,5 @@
+from typing import Any, Dict, List, Optional, Tuple
+
 #!/usr/bin/env python3
 """
 Memory Benchmark Collection Script for RuneCore Ecosystem
@@ -65,7 +67,7 @@ class MemoryBenchmark:
             "swap_percent": swap.percent,
         }
 
-    def benchmark_ai_service(self) -> Dict[str, any]:
+    def benchmark_ai_service(self) -> Dict[str, Any]:
         """Benchmark AI service memory usage"""
         print("🔍 Benchmarking AI Service memory usage...")
 
@@ -124,7 +126,7 @@ class MemoryBenchmark:
                 ai_process.terminate()
                 ai_process.wait(timeout=5)
 
-    def benchmark_error_logger(self) -> Dict[str, any]:
+    def benchmark_error_logger(self) -> Dict[str, Any]:
         """Benchmark ErrorLogger memory usage"""
         print("🔍 Benchmarking ErrorLogger memory usage...")
 
@@ -177,7 +179,7 @@ class MemoryBenchmark:
         except Exception as e:
             return {"component": "error_logger", "error": str(e), "status": "failed"}
 
-    def benchmark_hidden_toolbar(self) -> Dict[str, any]:
+    def benchmark_hidden_toolbar(self) -> Dict[str, Any]:
         """Benchmark hidden toolbar memory usage"""
         print("🔍 Benchmarking hidden toolbar memory usage...")
 
@@ -225,7 +227,7 @@ class MemoryBenchmark:
         except Exception as e:
             return {"component": "hidden_toolbar", "error": str(e), "status": "failed"}
 
-    def run_comprehensive_benchmark(self) -> Dict[str, any]:
+    def run_comprehensive_benchmark(self) -> Dict[str, Any]:
         """Run comprehensive memory benchmark across all components"""
         print("🚀 Starting comprehensive memory benchmark...")
 
@@ -284,7 +286,7 @@ class MemoryBenchmark:
         else:
             return 40.0
 
-    def save_results(self, results: Dict[str, any]) -> str:
+    def save_results(self, results: Dict[str, Any]) -> str:
         """Save benchmark results to file"""
         filename = f"memory-{self.platform}-{int(time.time())}.json"
         filepath = self.output_dir / filename

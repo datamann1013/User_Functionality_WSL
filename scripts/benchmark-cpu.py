@@ -13,7 +13,7 @@ import subprocess  # nosec B404
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class CPUBenchmark:
@@ -34,7 +34,7 @@ class CPUBenchmark:
         arch = platform.machine()
         return f"{system}-{arch}"
 
-    def _get_cpu_info(self) -> Dict[str, any]:
+    def _get_cpu_info(self) -> Dict[str, Any]:
         """Get detailed CPU information"""
         import platform
 
@@ -60,7 +60,7 @@ class CPUBenchmark:
 
     def _monitor_cpu_usage(
         self, duration: int, interval: float = 0.1
-    ) -> List[Dict[str, any]]:
+    ) -> List[Dict[str, Any]]:
         """Monitor CPU usage over specified duration"""
         samples = []
         start_time = time.time()
@@ -84,7 +84,7 @@ class CPUBenchmark:
 
         return samples
 
-    def _calculate_cpu_metrics(self, samples: List[Dict[str, any]]) -> Dict[str, float]:
+    def _calculate_cpu_metrics(self, samples: List[Dict[str, Any]]) -> Dict[str, float]:
         """Calculate CPU performance metrics from samples"""
         if not samples:
             return {}
@@ -111,7 +111,7 @@ class CPUBenchmark:
         variance = sum((x - mean) ** 2 for x in values) / len(values)
         return variance
 
-    def _run_cpu_stress_test(self, duration: int = 5) -> Dict[str, any]:
+    def _run_cpu_stress_test(self, duration: int = 5) -> Dict[str, Any]:
         """Run a controlled CPU stress test"""
         print(f"  Running {duration}s CPU stress test...")
 
@@ -158,7 +158,7 @@ class CPUBenchmark:
             "cores_used": self.cpu_count,
         }
 
-    def benchmark_ai_service(self) -> Dict[str, any]:
+    def benchmark_ai_service(self) -> Dict[str, Any]:
         """Benchmark AI service CPU performance"""
         print("🔍 Benchmarking AI Service CPU performance...")
 
@@ -200,7 +200,7 @@ class CPUBenchmark:
                 ai_process.terminate()
                 ai_process.wait(timeout=5)
 
-    def benchmark_error_logger(self) -> Dict[str, any]:
+    def benchmark_error_logger(self) -> Dict[str, Any]:
         """Benchmark ErrorLogger CPU performance"""
         print("🔍 Benchmarking ErrorLogger CPU performance...")
 
@@ -264,7 +264,7 @@ class CPUBenchmark:
         except Exception as e:
             return {"component": "error_logger", "error": str(e), "status": "failed"}
 
-    def benchmark_system_stress(self) -> Dict[str, any]:
+    def benchmark_system_stress(self) -> Dict[str, Any]:
         """Benchmark system under stress conditions"""
         print("🔍 Running system stress benchmark...")
 
@@ -296,7 +296,7 @@ class CPUBenchmark:
         efficiency = max(0, 100 - avg_cpu) * max(0, 100 - variance * 10) / 100
         return min(100, efficiency)
 
-    def _detect_thermal_throttling(self, stress_results: Dict[str, any]) -> bool:
+    def _detect_thermal_throttling(self, stress_results: Dict[str, Any]) -> bool:
         """Detect if thermal throttling occurred during stress test"""
         stress_metrics = stress_results.get("stress", {})
         baseline_metrics = stress_results.get("baseline", {})
@@ -310,7 +310,7 @@ class CPUBenchmark:
 
         return stress_max < expected_max * 0.7
 
-    def _calculate_performance_score(self, stress_results: Dict[str, any]) -> float:
+    def _calculate_performance_score(self, stress_results: Dict[str, Any]) -> float:
         """Calculate overall performance score based on stress test"""
         stress_metrics = stress_results.get("stress", {})
         recovery_metrics = stress_results.get("recovery", {})
@@ -325,7 +325,7 @@ class CPUBenchmark:
         score = (sustained_perf + recovery_speed) / 2
         return min(100, max(0, score))
 
-    def run_comprehensive_benchmark(self) -> Dict[str, any]:
+    def run_comprehensive_benchmark(self) -> Dict[str, Any]:
         """Run comprehensive CPU benchmark across all components"""
         print("🚀 Starting comprehensive CPU benchmark...")
 
@@ -384,7 +384,7 @@ class CPUBenchmark:
 
         return results
 
-    def save_results(self, results: Dict[str, any]) -> str:
+    def save_results(self, results: Dict[str, Any]) -> str:
         """Save benchmark results to file"""
         filename = f"cpu-{self.platform}-{int(time.time())}.json"
         filepath = self.output_dir / filename
