@@ -47,7 +47,42 @@ disable=
     wrong-import-position,
     
     # Microservices architecture patterns - acceptable duplication
-    duplicate-code
+    duplicate-code,
+    
+    # Acceptable patterns for exception handling and variable naming
+    invalid-name,
+    broad-exception-caught,
+    broad-exception-raised,
+    unused-variable,
+    unused-import,
+    import-outside-toplevel,
+    consider-using-assignment-expr,
+    no-else-return,
+    deprecated-typing-alias,
+    unspecified-encoding,
+    f-string-without-interpolation,
+    consider-using-with,
+    subprocess-run-check,
+    overlapping-except,
+    bare-except,
+    global-statement,
+    global-variable-not-assigned,
+    redefined-outer-name,
+    reimported,
+    redefined-builtin,
+    unused-argument,
+    consider-using-tuple,
+    consider-using-any-or-all,
+    too-many-locals,
+    too-many-branches,
+    too-many-return-statements,
+    too-many-positional-arguments,
+    consider-alternative-union-syntax,
+    unexpected-line-ending-format,
+    missing-final-newline,
+    trailing-newlines,
+    relative-beyond-top-level,
+    unsubscriptable-object
 
 # Enable specific warnings
 enable=

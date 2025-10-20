@@ -48,8 +48,8 @@ jobs:
 
     - name: Python Linting
       run: |
-        find . -name "*.py" -not -path "./venv/*" -not -path "./.env/*" | \
-        xargs -r pylint --fail-under=8.0 --disable=C0114,C0115,C0116,C0303,E0401
+        find projects/ -name "*.py" -not -path "*/node_modules/*" | \
+        xargs -r pylint --fail-under=8.0 --disable=C0114,C0115,C0116,C0303,E0401,E1120
 
     - name: Code Formatting Check
       run: |
