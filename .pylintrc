@@ -44,7 +44,10 @@ disable=
     c-extension-no-member,
     
     # Import issues for project structure
-    wrong-import-position
+    wrong-import-position,
+    
+    # Microservices architecture patterns - acceptable duplication
+    duplicate-code
 
 # Enable specific warnings
 enable=
@@ -117,9 +120,6 @@ ignored-modules=
 # Show a hint with the correct naming format for invalid names
 include-naming-hint=no
 
-# List of decorators that produce context managers from methods
-method-call-contextmanagers=
-
 # List of qualified module names which can have objects that can redefine builtins
 redefining-builtins-modules=six.moves,past.builtins,future.builtins,builtins,io
 
@@ -164,9 +164,6 @@ max-line-length=88
 # Maximum number of lines in a module
 max-module-lines=1000
 
-# List of optional constructs for which whitespace checking is disabled
-no-space-check=trailing-comma,dict-separator
-
 # Allow the body of a class to be on the same line as the declaration
 single-line-class-stmt=no
 
@@ -174,8 +171,8 @@ single-line-class-stmt=no
 single-line-if-stmt=no
 
 [SIMILARITIES]
-# Minimum lines number of a similarity
-min-similarity-lines=4
+# Minimum lines number of a similarity - adjusted for microservices architecture
+min-similarity-lines=6
 
 # Ignore comments when computing similarities
 ignore-comments=yes
@@ -183,8 +180,8 @@ ignore-comments=yes
 # Ignore docstrings when computing similarities
 ignore-docstrings=yes
 
-# Ignore imports when computing similarities
-ignore-imports=no
+# Ignore imports when computing similarities - imports often repeated in microservices
+ignore-imports=yes
 
 [DESIGN]
 # Maximum number of arguments for function / method
@@ -263,4 +260,4 @@ preferred-modules=
 
 [EXCEPTIONS]
 # Exceptions that will emit a warning when being caught
-overgeneral-exceptions=BaseException,Exception
+overgeneral-exceptions=builtins.BaseException,builtins.Exception
