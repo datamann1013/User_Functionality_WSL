@@ -35,40 +35,42 @@ def test_get_explanation():
     # Test known error code
     explanation = get_explanation("EABS1")
     assert explanation == "Missing required model files"
-    
+
     # Test unknown error code
     explanation = get_explanation("UNKNOWN_CODE")
     assert "(standard)" in explanation
     assert "Unidentified error" in explanation
-    
+
     # Test custom message
     custom_explanation = get_explanation("EABS1", "Custom message")
     assert custom_explanation == "Custom message"
+
+
 def test_safe_json_dumps():
     """Test safe JSON serialization"""
     from decimal import Decimal
     from datetime import datetime, timedelta
-    
+
     # Test None
     result = safe_json_dumps(None)
     assert result == ""
-    
+
     # Test simple object
     simple_obj = {"key": "value", "number": 42}
     result = safe_json_dumps(simple_obj)
     assert json.loads(result) == simple_obj
-    
+
     # Test complex object with special types
     complex_obj = {
         "decimal": Decimal("123.45"),
         "datetime": datetime(2023, 1, 1, 12, 0, 0),
         "timedelta": timedelta(hours=1),
         "string": "test",
-        "number": 42
+        "number": 42,
     }
     result = safe_json_dumps(complex_obj)
     parsed = json.loads(result)
-    
+
     assert parsed["decimal"] == 123.45
     assert parsed["string"] == "test"
     assert parsed["number"] == 42
