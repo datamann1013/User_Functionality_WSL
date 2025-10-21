@@ -167,7 +167,7 @@ def chat():
         
         # Build enhanced message with context
         if conversation_context:
-            enhanced_message = f"{conversation_context}Human: {message}\nAssistant:"
+            enhanced_message = f"{conversation_context}Current user message: {message}\n\nPlease respond naturally and helpfully:"
         else:
             enhanced_message = message
 
@@ -188,7 +188,7 @@ def chat():
             }
 
             response = requests.post(
-                f"{OLLAMA_SERVICE_URL}/api/chat", json=payload, timeout=30
+                f"{OLLAMA_SERVICE_URL}/api/chat", json=payload, timeout=15
             )
 
             if response.status_code == 200:
@@ -201,32 +201,32 @@ def chat():
         except Exception as e:
             log_error("OLLAMA_ERROR", str(e))
             
-            # Attempt reconnection with multiple retries
-            retry_count = 3
-            retry_delay = 1  # seconds
-            
-            for attempt in range(retry_count):
-                try:
-                    import time
-                    time.sleep(retry_delay)
+            # Quick single retry with shorter timeout to avoid hanging
+            try:
+                # Single retry with reduced timeout
+                response = requests.post(
+                    f"{OLLAMA_SERVICE_URL}/api/chat", 
+                    json=payload, 
+                    timeout=10  # Shorter timeout
+                )
+                
+                if response.status_code == 200:
+                    ollama_response = response.json()
+                    ai_response = ollama_response.get("response", "Connection restored!")
+                    response_mode = "ollama_retry"
+                else:
+                    raise Exception(f"Retry failed with status {response.status_code}")
                     
-                    # Retry the Ollama connection
-                    response = requests.post(
-                        f"{OLLAMA_SERVICE_URL}/api/chat", json=payload, timeout=15
-                    )
-                    
-                    if response.status_code == 200:
-                        ollama_response = response.json()
-                        ai_response = ollama_response.get("response", "Connection restored!")
-                        response_mode = f"ollama_retry_{attempt + 1}"
-                        break
-                        
-                except Exception as retry_error:
-                    log_error("OLLAMA_RETRY", f"Attempt {attempt + 1} failed: {str(retry_error)}")
-                    if attempt == retry_count - 1:
-                        # Final fallback - but with helpful message
-                        ai_response = "⚠️ I'm experiencing connection issues with my AI service. I'm trying to reconnect, but in the meantime, I can acknowledge that I received your message and will respond properly once the connection is restored. Please try again in a moment."
-                        response_mode = "connection_failure"
+            except Exception as retry_error:
+                log_error("OLLAMA_RETRY_FAILED", str(retry_error))
+                # Intelligent fallback based on message content
+                if any(word in message.lower() for word in ["hello", "hi", "hey"]):
+                    ai_response = "Hello! I'm having some connection issues but I'm here to help. Please try your message again."
+                elif "test" in message.lower():
+                    ai_response = "Test received! I'm experiencing some connectivity issues but the system is working. Please retry your request."
+                else:
+                    ai_response = f"I received your message but I'm having trouble connecting to my AI service right now. Please try again in a moment, and I should be able to give you a proper response."
+                response_mode = "intelligent_fallback"
 
         # Store conversation in cache
         try:
