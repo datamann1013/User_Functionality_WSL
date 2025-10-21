@@ -16,7 +16,7 @@ CORS(app)
 
 # Configuration
 ERRORLOGGER_URL = os.environ.get("ERRORLOGGER_SERVICE_URL", "http://127.0.0.1:5001/log")
-OLLAMA_SERVICE_URL = os.environ.get("OLLAMA_SERVICE_URL", "http://127.0.0.1:5003")
+OLLAMA_SERVICE_URL = os.environ.get("OLLAMA_SERVICE_URL", "http://127.0.0.1:5002")
 
 # Pre-defined agent data for fast response
 AGENTS_DATA = {
@@ -201,17 +201,32 @@ def chat():
         except Exception as e:
             log_error("OLLAMA_ERROR", str(e))
             
-            # Fast fallback response with context awareness
-            context_msgs = conversation_cache.get_conversation_context(agent_id, limit=2)
+            # Attempt reconnection with multiple retries
+            retry_count = 3
+            retry_delay = 1  # seconds
             
-            if context_msgs and any("hello" in msg["user_message"].lower() for msg in context_msgs):
-                ai_response = "Hello again! How can I help you further?"
-            elif "hello" in message.lower():
-                ai_response = "Hello! I'm running in fallback mode but ready to help."
-            elif "test" in message.lower():
-                ai_response = "System test successful - fallback mode active with conversation cache."
-            else:
-                ai_response = f"I received your message: '{message}' (fallback mode with context)"
+            for attempt in range(retry_count):
+                try:
+                    import time
+                    time.sleep(retry_delay)
+                    
+                    # Retry the Ollama connection
+                    response = requests.post(
+                        f"{OLLAMA_SERVICE_URL}/api/chat", json=payload, timeout=15
+                    )
+                    
+                    if response.status_code == 200:
+                        ollama_response = response.json()
+                        ai_response = ollama_response.get("response", "Connection restored!")
+                        response_mode = f"ollama_retry_{attempt + 1}"
+                        break
+                        
+                except Exception as retry_error:
+                    log_error("OLLAMA_RETRY", f"Attempt {attempt + 1} failed: {str(retry_error)}")
+                    if attempt == retry_count - 1:
+                        # Final fallback - but with helpful message
+                        ai_response = "⚠️ I'm experiencing connection issues with my AI service. I'm trying to reconnect, but in the meantime, I can acknowledge that I received your message and will respond properly once the connection is restored. Please try again in a moment."
+                        response_mode = "connection_failure"
 
         # Store conversation in cache
         try:
