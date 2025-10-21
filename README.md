@@ -78,6 +78,7 @@ graph TB
 
 ### Foundation Components
 - **Central RuneCore**: Mandatory foundation managing all module interactions
+- **Configuration Management**: Unified configuration system for entire ecosystem portability
 - **Microservice Modules**: Independent services connecting through the core
 - **Encrypted Communication**: AES-256 encryption for all inter-module communication
 - **Service Discovery**: Core-managed registry for module location and health
@@ -102,6 +103,8 @@ graph TB
 
 #### RuneCore Foundation (Planned - Central Architecture)
 - **Service Registry**: Module discovery and registration
+- **Configuration Manager**: Unified ecosystem configuration and portability system
+- **Remote Configuration Service** *(Optional)*: Git-based configuration synchronization for multi-machine and enterprise deployments
 - **Authentication System**: Security and access management  
 - **Inter-Module Router**: Communication coordination
 - **Health Monitoring**: Real-time system status tracking
@@ -176,6 +179,503 @@ graph TB
 - **Disaster Recovery**: One-click system restore from backup archives
 - **Multi-Destination Sync**: 3-2-1 backup strategy with multiple storage destinations
 - **Backup Verification**: Automatic integrity checks and restoration testing
+
+---
+
+## RuneCore Configuration Management: Universal Ecosystem Portability
+
+### Overview
+The RuneCore Configuration Management system provides a unified, portable configuration framework that allows users to set up their entire RuneCore ecosystem once and seamlessly deploy it across multiple systems with complete consistency.
+
+### Core Concept
+
+#### Unified Configuration Architecture
+- **Single Source of Truth**: One configuration bundle defines the entire ecosystem
+- **Cross-System Portability**: Export/import configurations between different machines
+- **Version Control Ready**: Git-friendly configuration format for tracking changes
+- **Environment Adaptation**: Smart adaptation to different system capabilities and constraints
+- **Hierarchical Overrides**: Global, module-specific, and machine-specific configuration layers
+
+#### Configuration Bundle Structure
+```
+runecore-config/
+├── core.toml                 # Core system settings
+├── modules/                  # Module-specific configurations
+│   ├── runemind.toml         # AI subsystem settings
+│   ├── runeguard.toml        # Security configuration
+│   ├── runepulse.toml        # Monitoring settings
+│   ├── runedrop.toml         # File sharing configuration
+│   ├── runeenv.toml          # Project management settings
+│   ├── runeremote.toml       # Mobile/remote control
+│   ├── runelab.toml          # Homelab assistant
+│   ├── runeforge.toml        # Bootable media creator
+│   └── runevault.toml        # Backup storage settings
+├── profiles/                 # Environment-specific profiles
+│   ├── development.toml      # Development environment overrides
+│   ├── production.toml       # Production environment settings
+│   ├── homelab.toml          # Homelab-specific configuration
+│   └── minimal.toml          # Lightweight/resource-constrained setups
+├── machines/                 # Machine-specific overrides
+│   ├── desktop-workstation.toml
+│   ├── laptop-mobile.toml
+│   └── server-headless.toml
+├── templates/                # Configuration templates and presets
+│   ├── gaming-setup.toml
+│   ├── development-stack.toml
+│   ├── security-focused.toml
+│   └── homelab-manager.toml
+└── metadata.toml            # Bundle metadata and validation
+```
+
+### Key Features
+
+#### Configuration Portability
+- **Export/Import System**: One-click configuration bundle creation and deployment
+- **Machine Discovery**: Automatic detection of system capabilities and constraints
+- **Adaptive Configuration**: Smart adjustment of settings based on available resources
+- **Conflict Resolution**: Intelligent handling of incompatible settings across systems
+- **Rollback Support**: Configuration versioning with easy rollback to previous states
+
+#### Environment Management
+- **Profile System**: Pre-defined configuration profiles for different use cases
+- **Dynamic Switching**: Runtime switching between configuration profiles
+- **Inheritance Model**: Configuration inheritance with override capabilities
+- **Validation Framework**: Comprehensive configuration validation before deployment
+- **Migration Tools**: Automated migration between configuration versions
+
+#### Security & Encryption
+- **Encrypted Bundles**: AES-256 encryption for sensitive configuration data
+- **Key Management**: Secure handling of API keys, certificates, and credentials
+- **Access Control**: Fine-grained permissions for configuration modification
+- **Audit Logging**: Complete tracking of configuration changes and deployments
+- **Secure Synchronization**: Encrypted configuration sync between authorized systems
+
+#### Remote Configuration Synchronization (Optional Microservice)
+- **Git-Based Automation**: Automatic configuration sync via GitHub/GitLab repositories
+- **Multi-Machine Orchestration**: Push configuration changes to multiple systems simultaneously
+- **Enterprise Policy Management**: Central configuration enforcement for organizational standards
+- **Personal Cloud Sync**: Seamless configuration updates across personal device ecosystem
+- **Selective Synchronization**: Choose which configuration components to sync remotely vs keep local
+
+### Integration with RuneCore Ecosystem
+
+#### Core System Integration
+- **Centralized Management**: Configuration managed as core RuneCore function
+- **Service Coordination**: Automatic service restart and reconfiguration on changes
+- **Health Monitoring**: Configuration health checks and consistency validation
+- **Hot Reloading**: Runtime configuration updates without system restart
+- **Dependency Management**: Automatic handling of inter-module configuration dependencies
+
+#### Module-Specific Features
+```toml
+# Example: RuneMind AI Configuration
+[runemind]
+enabled = true
+default_model = "llama2:7b"
+max_context_tokens = 4096
+temperature = 0.7
+api_endpoints = ["http://localhost:11434"]
+
+[runemind.models]
+download_on_startup = ["llama2:7b", "codellama:13b"]
+auto_update = true
+storage_path = "/var/lib/runecore/models"
+
+[runemind.security]
+api_key_required = false
+rate_limit = "100/hour"
+allowed_origins = ["localhost:3000"]
+
+# Example: RuneVault Backup Configuration  
+[runevault]
+enabled = true
+strategy = "3_2_1_backup"
+encryption = "aes256_user_managed"
+
+[runevault.destinations]
+primary = { type = "external_drive", path = "/media/backup-drive" }
+secondary = { type = "cloud", provider = "google_drive", folder = "RuneCore-Backups" }
+tertiary = { type = "nas", address = "192.168.1.100", share = "backups" }
+
+[runevault.schedule]
+full_backup = "weekly"
+incremental_backup = "daily"
+retention = "30_days_local_1_year_cloud"
+```
+
+#### Cross-System Scenarios
+- **Developer Workflow**: Identical development environment across laptop, desktop, and cloud instances
+- **Homelab Management**: Consistent configuration across multiple servers and workstations  
+- **Team Deployment**: Standardized RuneCore setup for development teams
+- **Disaster Recovery**: Rapid system reconstruction from configuration bundles
+- **Testing Environments**: Quick provisioning of test systems with known configurations
+
+### Configuration Templates
+
+#### Gaming-Optimized Setup
+```toml
+[template.gaming]
+name = "Gaming Performance Setup"
+description = "Optimized for gaming performance and system monitoring"
+
+[template.gaming.runepulse]
+monitoring_interval = "1s"
+performance_mode = "gaming"
+overlay_enabled = true
+
+[template.gaming.runemind]
+enabled = false  # Disabled to conserve resources
+
+[template.gaming.runeguard]
+real_time_protection = true
+game_mode_optimization = true
+```
+
+#### Development Environment
+```toml
+[template.development]
+name = "Full Development Stack"
+description = "Complete development environment with all tools"
+
+[template.development.runeenv]
+auto_containerization = true
+ide_integration = ["vscode", "intellij", "vim"]
+language_support = ["python", "javascript", "go", "rust"]
+
+[template.development.runemind] 
+code_completion_enabled = true
+documentation_assistant = true
+model_preference = "codellama:13b"
+
+[template.development.runevault]
+project_backup_enabled = true
+git_integration = true
+```
+
+#### Security-Focused Configuration
+```toml
+[template.security]
+name = "Security Professional Setup"  
+description = "Enhanced security monitoring and protection"
+
+[template.security.runeguard]
+threat_detection = "maximum"
+network_monitoring = "aggressive"
+forensic_logging = true
+
+[template.security.runeforge]
+security_tools_enabled = true
+penetration_testing_images = true
+
+[template.security.runevault]
+encryption = "aes256_military_grade"
+air_gap_backup = true
+```
+
+### Remote Configuration Service (Optional Microservice)
+
+#### Overview
+The Remote Configuration Service is an optional, lightweight microservice that enables automated configuration synchronization across multiple machines using Git repositories as the backend. This service bridges personal multi-device workflows and enterprise configuration management needs.
+
+#### Architecture Design
+- **Opt-In Service**: Completely optional - RuneCore functions fully without it
+- **Lightweight Footprint**: Minimal resource usage, runs as background service
+- **Git-Native**: Leverages existing Git infrastructure (GitHub, GitLab, Gitea, self-hosted)
+- **Zero-Config Setup**: Works out-of-the-box with sensible defaults
+- **Privacy-First**: All synchronization happens through user-controlled repositories
+
+#### Core Functionality
+
+##### Personal Use Cases
+```toml
+# Personal sync configuration
+[remote_sync]
+enabled = true
+mode = "personal"
+repository = "https://github.com/username/runecore-configs.git"
+branch = "main"
+sync_interval = "1h"
+auto_pull = true
+auto_push = false  # Manual push for safety
+
+[remote_sync.components]
+sync_modules = ["runemind", "runevault", "runepulse"]
+exclude_sensitive = true  # Exclude API keys, passwords
+sync_machine_specific = false  # Don't sync hardware-specific configs
+```
+
+##### Enterprise Use Cases
+```toml
+# Enterprise policy enforcement
+[remote_sync]
+enabled = true
+mode = "enterprise"
+repository = "https://github.com/company/runecore-standard.git"
+branch = "production"
+policy_enforcement = true
+local_overrides = "limited"  # Only allow specific local customizations
+
+[remote_sync.enterprise]
+mandatory_modules = ["runeguard", "runepulse"]  # Required by policy
+update_window = "02:00-04:00"  # Maintenance window for updates
+compliance_reporting = true
+approval_workflow = "pull_request"  # Changes require PR approval
+```
+
+#### Synchronization Modes
+
+##### Pull-Only Mode (Enterprise Standard)
+- **Central Authority**: Enterprise IT maintains master configuration
+- **Policy Enforcement**: Automatic application of organization-wide standards
+- **Compliance Monitoring**: Track which systems are compliant with current policy
+- **Scheduled Updates**: Apply updates during designated maintenance windows
+- **Override Controls**: Limit which settings users can modify locally
+
+##### Bidirectional Sync (Personal/Team)
+- **Collaborative Configuration**: Team members can contribute configuration improvements
+- **Conflict Resolution**: Intelligent merging of configuration changes from multiple sources
+- **Change Tracking**: Full audit trail of who made what changes when
+- **Rollback Capability**: Easy reversion to previous configuration states
+- **Selective Sync**: Choose which machines contribute changes vs consume only
+
+##### Hybrid Mode (Advanced Organizations)
+- **Tiered Authority**: Different sync rules for different user roles
+- **Environment Segregation**: Separate sync channels for dev/staging/production
+- **Approval Workflows**: Configuration changes require review before propagation
+- **Gradual Rollouts**: Test configuration changes on subset before full deployment
+
+#### Security Model
+
+##### Repository Security
+```toml
+[remote_sync.security]
+# Repository access control
+ssh_key_authentication = true
+gpg_signed_commits = true
+encrypted_sensitive_data = true  # Encrypt secrets before commit
+
+# Access patterns  
+read_only_repositories = ["company/runecore-base"]
+read_write_repositories = ["team/runecore-shared"]
+private_repository = "personal/runecore-private"
+
+# Validation
+signature_verification = "required"
+trusted_contributors = ["admin@company.com", "devops@company.com"]
+automatic_security_scanning = true
+```
+
+##### Data Protection
+- **Selective Encryption**: Automatically encrypt sensitive configuration data
+- **Key Isolation**: API keys and secrets never leave local machine
+- **Sanitized Commits**: Remove sensitive data before pushing to remote
+- **Access Logging**: Complete audit trail of all remote sync operations
+- **Network Security**: TLS 1.3 for all remote communications
+
+#### Integration Scenarios
+
+##### Developer Workflow
+```mermaid
+graph LR
+    A[Developer Laptop] -->|Push Config| B[GitHub Repo]
+    B -->|Auto-Pull| C[Desktop Workstation]
+    B -->|Auto-Pull| D[Cloud Development Server]
+    B -->|Scheduled Pull| E[Home Lab Server]
+    
+    F[Team Lead] -->|Review & Approve| B
+    B -->|Policy Enforcement| G[Team Members]
+```
+
+##### Enterprise Deployment
+```mermaid
+graph TD
+    A[IT Admin] -->|Push Policy| B[Enterprise Config Repo]
+    B -->|Automatic Deployment| C[Development Teams]
+    B -->|Scheduled Updates| D[Production Servers]
+    B -->|Compliance Check| E[Security Audit]
+    
+    C -->|Usage Analytics| F[Configuration Dashboard]
+    D -->|Compliance Report| F
+    E -->|Security Assessment| F
+```
+
+#### Service Architecture
+
+##### Microservice Components
+- **Configuration Watcher**: Monitor local configuration changes
+- **Git Synchronizer**: Handle repository operations (clone, pull, push, merge)
+- **Conflict Resolver**: Intelligent handling of configuration conflicts  
+- **Policy Engine**: Enforce enterprise policies and restrictions
+- **Security Scanner**: Validate configurations before sync operations
+
+##### Integration Points
+- **RuneCore Core**: Register as configuration change listener
+- **ErrorLogger**: Log all sync operations and errors
+- **Health Monitor**: Service health checks and status reporting
+- **Web UI**: Optional web interface for sync status and manual operations
+- **CLI Tools**: Command-line interface for advanced sync management
+
+#### Configuration Templates
+
+##### Personal Multi-Device Setup
+```bash
+# Quick setup for personal use
+runecore config remote-sync init \
+  --mode personal \
+  --repository git@github.com:username/runecore-configs.git \
+  --auto-pull \
+  --exclude-sensitive \
+  --sync-interval 30m
+```
+
+##### Enterprise Policy Enforcement
+```bash
+# Enterprise deployment
+runecore config remote-sync init \
+  --mode enterprise \
+  --repository https://github.com/company/runecore-standard.git \
+  --policy-enforcement \
+  --compliance-reporting \
+  --update-window "02:00-04:00" \
+  --approval-workflow pull_request
+```
+
+##### Hybrid Team Setup
+```bash
+# Team collaboration with approval workflow
+runecore config remote-sync init \
+  --mode hybrid \
+  --base-repository https://github.com/company/runecore-base.git \
+  --team-repository https://github.com/team/runecore-shared.git \
+  --personal-repository git@github.com:username/runecore-personal.git \
+  --approval-required \
+  --gradual-rollout
+```
+
+#### Benefits & Use Cases
+
+##### Personal Benefits
+- **Effortless Sync**: Set up RuneCore once, enjoy everywhere
+- **Device Consistency**: Identical experience across laptop, desktop, server
+- **Backup & Recovery**: Configuration automatically backed up to Git
+- **Version History**: Track evolution of your RuneCore setup over time
+- **Selective Sharing**: Share specific configurations while keeping others private
+
+##### Enterprise Benefits  
+- **Standardization**: Ensure all employees use approved RuneCore configurations
+- **Compliance**: Automated enforcement of security and operational policies
+- **Rapid Deployment**: New employee onboarding with pre-configured RuneCore
+- **Change Management**: Controlled rollout of configuration updates
+- **Audit & Reporting**: Complete visibility into configuration compliance
+
+##### Advanced Scenarios
+- **Multi-Environment Management**: Different configs for dev/staging/prod
+- **Role-Based Configuration**: Different setups for developers, admins, analysts
+- **Gradual Migration**: Smooth transition when updating RuneCore standards
+- **Disaster Recovery**: Rapid restoration of entire team's configurations
+- **Configuration Testing**: A/B testing of different RuneCore setups
+
+### Implementation Architecture
+
+#### Configuration Engine
+- **Parser Framework**: Multi-format support (TOML, YAML, JSON)
+- **Validation Engine**: Schema validation and constraint checking  
+- **Merge Logic**: Intelligent configuration merging and conflict resolution
+- **Template System**: Dynamic template expansion and customization
+- **Migration Framework**: Automated configuration format upgrades
+
+#### Deployment Pipeline
+```mermaid
+graph TD
+    A[Configuration Bundle] --> B[Validation Engine]
+    B --> C{Valid Configuration?}
+    C -->|No| D[Error Reporting]
+    C -->|Yes| E[Machine Detection]
+    E --> F[Adaptive Processing]
+    F --> G[Module Configuration]
+    G --> H[Service Coordination]
+    H --> I[Health Verification]
+    I --> J[Deployment Complete]
+    
+    D --> K[Configuration Correction]
+    K --> B
+```
+
+#### Runtime Management
+- **Hot Configuration Updates**: Runtime reconfiguration without service interruption
+- **Configuration Monitoring**: Real-time tracking of configuration drift and changes
+- **Automatic Healing**: Self-correction of configuration inconsistencies
+- **Performance Optimization**: Configuration-based performance tuning
+- **Resource Management**: Dynamic resource allocation based on configuration
+
+### Use Cases
+
+#### Individual User Scenarios
+- **Multi-Device Consistency**: Same RuneCore setup across desktop, laptop, and server
+- **Environment Switching**: Quick switching between work, gaming, and development configurations
+- **System Migration**: Seamless migration to new hardware with identical setup
+- **Backup & Restore**: Configuration backup as part of disaster recovery strategy
+
+#### Team & Enterprise Scenarios  
+- **Standardized Deployments**: Consistent RuneCore setup across development teams
+- **Environment Provisioning**: Rapid provisioning of new development/testing environments
+- **Configuration Compliance**: Ensure all systems meet organizational security standards
+- **Change Management**: Controlled rollout of configuration updates across infrastructure
+
+#### Advanced Scenarios
+- **A/B Configuration Testing**: Compare performance of different configuration profiles
+- **Conditional Configurations**: Environment-specific configurations with smart activation
+- **Configuration as Code**: Git-based configuration management with CI/CD integration
+- **Multi-Tenant Setup**: Different configurations for different user roles or projects
+
+### Development Roadmap
+
+#### Priority 1: Core Configuration Framework
+- [ ] Basic TOML-based configuration system
+- [ ] Configuration validation and schema definition
+- [ ] Simple export/import functionality
+- [ ] Core module configuration integration
+
+#### Priority 2: Advanced Features & Remote Sync Foundation
+- [ ] Configuration templates and profiles
+- [ ] Machine-specific adaptation logic  
+- [ ] Hot reloading and runtime updates
+- [ ] Configuration versioning and rollback
+- [ ] **Remote Configuration Service (Optional Microservice)**
+  - [ ] Git-based synchronization backend
+  - [ ] Personal multi-device sync capability
+  - [ ] Basic conflict resolution and merging
+
+#### Priority 3: Enterprise Features & Policy Management
+- [ ] Encrypted configuration bundles
+- [ ] Multi-environment management
+- [ ] Configuration compliance and auditing
+- [ ] Team collaboration features
+- [ ] **Enterprise Remote Sync Features**
+  - [ ] Policy enforcement and compliance monitoring
+  - [ ] Approval workflows and change management
+  - [ ] Role-based configuration access control
+  - [ ] Automated security scanning and validation
+
+#### Priority 4: Advanced Automation & Intelligence
+- [ ] AI-powered configuration optimization
+- [ ] Automatic configuration drift detection
+- [ ] Performance-based configuration tuning
+- [ ] Complete ecosystem integration
+- [ ] **Advanced Remote Sync Capabilities**
+  - [ ] Hybrid sync modes and tiered authority
+  - [ ] Gradual rollout and A/B configuration testing
+  - [ ] Advanced analytics and configuration insights
+  - [ ] Zero-downtime configuration migrations
+
+### Security & Privacy
+- **Encrypted Storage**: All sensitive configuration data encrypted at rest
+- **Secure Transport**: TLS 1.3 for configuration synchronization
+- **Access Control**: Role-based access to configuration management
+- **Audit Trail**: Complete logging of all configuration changes
+- **Key Management**: Secure handling of encryption keys and credentials
+
+---
 
 ## RuneForge: Bootable Media Creation Suite
 
