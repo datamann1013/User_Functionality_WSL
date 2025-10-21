@@ -119,11 +119,25 @@ confirm_uninstall() {
     print_warning "Docker itself and other Docker containers will NOT be removed"
     echo ""
     
-    read -p "Are you sure you want to continue? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        print_info "Uninstall cancelled"
-        exit 0
+    # Fix for piped input from curl - redirect from /dev/tty
+    if [[ -t 0 ]]; then
+        # Interactive terminal
+        read -p "Are you sure you want to continue? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_info "Uninstall cancelled"
+            exit 0
+        fi
+    else
+        # Piped input - try to read from terminal directly
+        print_warning "Script is running from pipe (curl). Attempting to read from terminal..."
+        exec < /dev/tty
+        read -p "Are you sure you want to continue? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_info "Uninstall cancelled"
+            exit 0
+        fi
     fi
 }
 
