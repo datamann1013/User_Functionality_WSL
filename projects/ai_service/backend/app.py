@@ -167,9 +167,9 @@ def chat():
         
         # Build enhanced message with context
         if conversation_context:
-            enhanced_message = f"{conversation_context}User: {message}"
+            enhanced_message = f"{conversation_context}CURRENT USER MESSAGE: {message}\n\nRespond naturally to the current message above, using the conversation history only for context:"
         else:
-            enhanced_message = f"User: {message}"
+            enhanced_message = f"USER MESSAGE: {message}\n\nRespond naturally and helpfully:"
 
         ai_response = None
         response_mode = "fallback"
@@ -188,7 +188,7 @@ def chat():
                 "temperature": 0.7,
                 "top_p": 0.9,
                 "max_tokens": 2048,
-                "system_prompt": "You are a helpful AI assistant. Answer directly and conversationally without referencing conversation formats or prefixes.",
+                "system_prompt": "You are a helpful AI assistant. When you see conversation history, it's just for context - only respond to the CURRENT USER MESSAGE. Don't reference the conversation format itself or get confused about who said what.",
                 "timestamp": datetime.now().isoformat(),
             }
 
