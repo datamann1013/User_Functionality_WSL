@@ -162,14 +162,20 @@ def chat():
         if not message:
             return jsonify({"error": "Message is required"}), 400
 
-        # Get conversation context from cache
-        conversation_context = conversation_cache.format_context_for_ai(agent_id)
+        # Get conversation context from cache as structured format
+        chat_history = conversation_cache.format_context_for_ai(agent_id)
         
-        # Build enhanced message with context
-        if conversation_context:
-            enhanced_message = f"{conversation_context}CURRENT USER MESSAGE: {message}\n\nRespond naturally to the current message above, using the conversation history only for context:"
-        else:
-            enhanced_message = f"USER MESSAGE: {message}\n\nRespond naturally and helpfully:"
+        # Add current user message to chat history
+        chat_history.append({
+            "role": "user",
+            "content": message
+        })
+        
+        # Convert to string format for Ollama
+        enhanced_message = conversation_cache.format_chat_history_to_string(chat_history)
+        
+        # Add the assistant prompt at the end
+        enhanced_message += "\n<|assistant|>\n"
 
         ai_response = None
         response_mode = "fallback"
@@ -188,7 +194,7 @@ def chat():
                 "temperature": 0.7,
                 "top_p": 0.9,
                 "max_tokens": 2048,
-                "system_prompt": "You are a helpful AI assistant. When you see conversation history, it's just for context - only respond to the CURRENT USER MESSAGE. Don't reference the conversation format itself or get confused about who said what.",
+                "system_prompt": "",  # System prompt is now handled in chat history
                 "timestamp": datetime.now().isoformat(),
             }
 
@@ -242,7 +248,7 @@ def chat():
             "agent_id": agent_id,
             "timestamp": datetime.now().isoformat(),
             "mode": response_mode,
-            "context_used": len(conversation_context) > 0,
+            "context_used": len(chat_history) > 2,  # More than just system + current message
             "cached_messages": len(conversation_cache.get_conversation_context(agent_id))
         })
 
