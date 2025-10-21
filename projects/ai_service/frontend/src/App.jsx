@@ -59,27 +59,31 @@ const calculateDowntime = (lastActive) => {
   return "Just now";
 };
 
-const getAgentStatusDisplay = (agent) => {
-  // Parse metadata once
-  let metadata = {};
-  try {
-    metadata =
-      typeof agent.metadata === "string"
-        ? JSON.parse(agent.metadata)
-        : agent.metadata || {};
-  } catch (e) {
-    metadata = {};
+const getAgentStatusDisplay = (agent, isThinking = false) => {
+  // If agent is currently thinking, show as busy
+  if (isThinking) {
+    return { text: "busy", class: "busy" };
   }
 
-  if (metadata.model_downloading || agent.status === "offline") {
-    return { text: "offline", class: "offline" };
+  // Determine downtime
+  if (!agent || !agent.last_active) {
+    return { text: "online", class: "idle" };
+  }
+
+  const lastActiveTime = new Date(agent.last_active).getTime();
+  const now = Date.now();
+  const downtime = now - lastActiveTime;
+
+  // If more than 5 minutes inactive, show as online
+  if (downtime > 300000) {
+    return { text: "online", class: "idle" };
   }
 
   switch (agent.status) {
     case "idle":
-      return { text: "ready", class: "idle" };
+      return { text: "online", class: "idle" };
     case "busy":
-      return { text: "thinking", class: "busy" };
+      return { text: "busy", class: "busy" };
     default:
       return { text: agent.status, class: agent.status };
   }
@@ -96,7 +100,7 @@ function App() {
   const [toolsOpen, setToolsOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [connecting, setConnecting] = useState(true);
-  const [thinking, setThinking] = useState(false);
+  const [thinkingAgents, setThinkingAgents] = useState(new Set()); // Track which agents are thinking
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [agentToEdit, setAgentToEdit] = useState(null);
@@ -205,11 +209,14 @@ function App() {
   );
 
   const handleSend = useCallback(async () => {
-    if (connecting || !inputText.trim() || thinking) return;
+    const isAgentThinking = thinkingAgents.has(selectedAgent);
+    if (connecting || !inputText.trim() || isAgentThinking) return;
 
     const userMessage = inputText.trim();
     setInputText("");
-    setThinking(true);
+    
+    // Mark this agent as thinking
+    setThinkingAgents(prev => new Set([...prev, selectedAgent]));
 
     // Generate unique IDs once
     const messageId = Date.now() + Math.random();
@@ -315,8 +322,13 @@ function App() {
       logFrontendError("FRONTEND_CHAT_ERROR", "Chat request failed", error);
     }
 
-    setThinking(false);
-  }, [connecting, inputText, thinking, selectedFiles, selectedAgent]);
+    // Remove this agent from thinking set
+    setThinkingAgents(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(selectedAgent);
+      return newSet;
+    });
+  }, [connecting, inputText, thinkingAgents, selectedFiles, selectedAgent]);
 
   // Check backend connection and load agents on mount
   useEffect(() => {
@@ -477,7 +489,7 @@ function App() {
               </div>
             ) : (
               validAgents.map((agent) => {
-                const statusDisplay = getAgentStatusDisplay(agent);
+                const statusDisplay = getAgentStatusDisplay(agent, thinkingAgents.has(agent.id));
                 const avatarColor = getAvatarColor(agent.name);
                 const downtime = calculateDowntime(agent.last_active);
 
@@ -633,7 +645,7 @@ function App() {
                     ? "Connecting..."
                     : `Message ${currentAgent?.name || "AI"}...`
                 }
-                disabled={connecting || thinking}
+                disabled={connecting || thinkingAgents.has(selectedAgent)}
                 rows={1}
                 className="message-input"
               />
@@ -642,7 +654,7 @@ function App() {
                 <button
                   className="file-upload-btn"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={connecting || thinking}
+                  disabled={connecting || thinkingAgents.has(selectedAgent)}
                   title="Upload files"
                 >
                   📎
@@ -652,7 +664,7 @@ function App() {
                   <button
                     className={`tools-btn ${toolsOpen ? "open" : ""}`}
                     onClick={() => setToolsOpen(!toolsOpen)}
-                    disabled={connecting || thinking}
+                    disabled={connecting || thinkingAgents.has(selectedAgent)}
                     title="Agent Management"
                   >
                     ⚙️
@@ -702,9 +714,9 @@ function App() {
                 <button
                   className="send-btn"
                   onClick={handleSend}
-                  disabled={connecting || thinking || !inputText.trim()}
+                  disabled={connecting || thinkingAgents.has(selectedAgent) || !inputText.trim()}
                 >
-                  {thinking ? "⏳" : "➤"}
+                  {thinkingAgents.has(selectedAgent) ? "⏳" : "➤"}
                 </button>
               </div>
             </div>
