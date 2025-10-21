@@ -167,7 +167,7 @@ def chat():
         
         # Build enhanced message with context
         if conversation_context:
-            enhanced_message = f"{conversation_context}\nUser: {message}\nAssistant:"
+            enhanced_message = f"{conversation_context}Human: {message}\nAssistant:"
         else:
             enhanced_message = message
 
