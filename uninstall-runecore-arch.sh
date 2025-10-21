@@ -119,43 +119,24 @@ confirm_uninstall() {
     print_warning "Docker itself and other Docker containers will NOT be removed"
     echo ""
     
-    # Multiple methods to handle piped input
-    local response=""
-    
-    # Try method 1: Check if we have a controlling terminal
-    if [[ -t 0 ]] && [[ -t 1 ]]; then
-        # Direct interactive mode
-        read -p "Are you sure you want to continue? (y/N): " -n 1 -r response
-        echo
-    else
-        # Try method 2: Redirect from controlling terminal
-        if [[ -c /dev/tty ]]; then
-            print_info "Reading from terminal..."
-            read -p "Are you sure you want to continue? (y/N): " -n 1 -r response < /dev/tty
-            echo
-        else
-            # Method 3: Timeout with default to no
-            print_warning "Cannot read from terminal. Auto-cancelling in 10 seconds..."
-            print_info "Use --force flag to skip confirmation: curl ... | bash -s -- --force"
-            
-            # Countdown with proper cleanup
-            for i in {10..1}; do
-                echo -n "Cancelling in $i seconds... (Press Ctrl+C to stop)"
-                sleep 1 2>/dev/null || {
-                    echo ""
-                    print_info "Interrupted by user"
-                    exit 130
-                }
-                echo -ne "\r\033[K"  # Clear line
-            done
-            echo ""
-            print_info "Uninstall cancelled (no user input detected)"
-            exit 0
-        fi
+    # Simple and reliable approach - just check if we're in a pipe
+    if [[ ! -t 0 ]]; then
+        # We're piped from curl - automatically cancel for safety
+        print_warning "Script is running from curl pipe - cannot safely read user input"
+        print_info "For safety, uninstall has been cancelled"
+        echo ""
+        print_info "To proceed with uninstall, use one of these options:"
+        echo "  1. Force uninstall: curl ... | bash -s -- --force"
+        echo "  2. Download and run locally: wget <script-url> && bash <script-name>"
+        echo "  3. Use local uninstaller: ./local-uninstall.sh"
+        echo ""
+        exit 0
     fi
     
-    # Check response
-    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+    # We have a real terminal - this will work
+    read -p "Are you sure you want to continue? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         print_info "Uninstall cancelled"
         exit 0
     fi
