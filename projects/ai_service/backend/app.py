@@ -16,7 +16,7 @@ CORS(app)
 
 # Configuration
 ERRORLOGGER_URL = os.environ.get("ERRORLOGGER_SERVICE_URL", "http://127.0.0.1:5001/log")
-OLLAMA_SERVICE_URL = os.environ.get("OLLAMA_SERVICE_URL", "http://127.0.0.1:5002")
+OLLAMA_SERVICE_URL = os.environ.get("OLLAMA_SERVICE_URL", "http://127.0.0.1:5003")
 
 # Pre-defined agent data for fast response
 AGENTS_DATA = {
