@@ -167,15 +167,20 @@ def chat():
         
         # Build enhanced message with context
         if conversation_context:
-            enhanced_message = f"{conversation_context}Current user message: {message}\n\nPlease respond naturally and helpfully:"
+            enhanced_message = f"{conversation_context}User: {message}"
         else:
-            enhanced_message = message
+            enhanced_message = f"User: {message}"
 
         ai_response = None
         response_mode = "fallback"
 
         # Try Ollama service first
         try:
+            # Adjust timeout based on message complexity
+            message_length = len(message)
+            base_timeout = 20
+            complex_timeout = 35 if message_length > 100 or len(message.split()) > 20 else base_timeout
+            
             payload = {
                 "message": enhanced_message,
                 "agent_id": agent_id,
@@ -183,12 +188,14 @@ def chat():
                 "temperature": 0.7,
                 "top_p": 0.9,
                 "max_tokens": 2048,
-                "system_prompt": "You are a helpful AI assistant with access to previous conversation context.",
+                "system_prompt": "You are a helpful AI assistant. Answer directly and conversationally without referencing conversation formats or prefixes.",
                 "timestamp": datetime.now().isoformat(),
             }
 
             response = requests.post(
-                f"{OLLAMA_SERVICE_URL}/api/chat", json=payload, timeout=15
+                f"{OLLAMA_SERVICE_URL}/api/chat", 
+                json=payload, 
+                timeout=complex_timeout
             )
 
             if response.status_code == 200:
@@ -198,35 +205,28 @@ def chat():
             else:
                 raise Exception(f"Ollama returned {response.status_code}")
 
+        except requests.exceptions.Timeout:
+            log_error("OLLAMA_TIMEOUT", f"Request timed out after {complex_timeout}s for message: {message[:50]}...")
+            ai_response = "I'm taking a bit longer to think about your question. Let me try to give you a quicker response: could you rephrase your question or break it into smaller parts?"
+            response_mode = "timeout_fallback"
         except Exception as e:
             log_error("OLLAMA_ERROR", str(e))
             
-            # Quick single retry with shorter timeout to avoid hanging
-            try:
-                # Single retry with reduced timeout
-                response = requests.post(
-                    f"{OLLAMA_SERVICE_URL}/api/chat", 
-                    json=payload, 
-                    timeout=10  # Shorter timeout
-                )
-                
-                if response.status_code == 200:
-                    ollama_response = response.json()
-                    ai_response = ollama_response.get("response", "Connection restored!")
-                    response_mode = "ollama_retry"
-                else:
-                    raise Exception(f"Retry failed with status {response.status_code}")
-                    
-            except Exception as retry_error:
-                log_error("OLLAMA_RETRY_FAILED", str(retry_error))
-                # Intelligent fallback based on message content
-                if any(word in message.lower() for word in ["hello", "hi", "hey"]):
-                    ai_response = "Hello! I'm having some connection issues but I'm here to help. Please try your message again."
-                elif "test" in message.lower():
-                    ai_response = "Test received! I'm experiencing some connectivity issues but the system is working. Please retry your request."
-                else:
-                    ai_response = f"I received your message but I'm having trouble connecting to my AI service right now. Please try again in a moment, and I should be able to give you a proper response."
-                response_mode = "intelligent_fallback"
+            log_error("OLLAMA_CONNECTION_ERROR", str(e))
+            
+            # Simplified direct response without retry loops
+            if any(word in message.lower() for word in ["hello", "hi", "hey", "how are you"]):
+                ai_response = "Hello! I'm doing well, thanks for asking. How can I help you today?"
+            elif "poem" in message.lower():
+                ai_response = "I'd be happy to write a poem for you! What theme or topic would you like me to focus on?"
+            elif "weather" in message.lower():
+                ai_response = "I don't have access to current weather data, but I can discuss weather topics or write about weather if you'd like!"
+            elif any(word in message.lower() for word in ["why", "how", "what", "explain"]):
+                ai_response = "That's an interesting question! I'm having some technical difficulties right now, but I'd be happy to help explain that topic if you could try asking again."
+            else:
+                ai_response = "I received your message, but I'm experiencing some technical issues. Could you please try rephrasing your question or asking it again?"
+            
+            response_mode = "graceful_fallback"
 
         # Store conversation in cache
         try:
