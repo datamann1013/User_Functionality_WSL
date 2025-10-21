@@ -119,26 +119,48 @@ confirm_uninstall() {
     print_warning "Docker itself and other Docker containers will NOT be removed"
     echo ""
     
-    # Fix for piped input from curl - redirect from /dev/tty
-    if [[ -t 0 ]]; then
-        # Interactive terminal
-        read -p "Are you sure you want to continue? (y/N): " -n 1 -r
+    # Multiple methods to handle piped input
+    local response=""
+    
+    # Try method 1: Check if we have a controlling terminal
+    if [[ -t 0 ]] && [[ -t 1 ]]; then
+        # Direct interactive mode
+        read -p "Are you sure you want to continue? (y/N): " -n 1 -r response
         echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_info "Uninstall cancelled"
-            exit 0
-        fi
     else
-        # Piped input - try to read from terminal directly
-        print_warning "Script is running from pipe (curl). Attempting to read from terminal..."
-        exec < /dev/tty
-        read -p "Are you sure you want to continue? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_info "Uninstall cancelled"
+        # Try method 2: Redirect from controlling terminal
+        if [[ -c /dev/tty ]]; then
+            print_info "Reading from terminal..."
+            read -p "Are you sure you want to continue? (y/N): " -n 1 -r response < /dev/tty
+            echo
+        else
+            # Method 3: Timeout with default to no
+            print_warning "Cannot read from terminal. Auto-cancelling in 10 seconds..."
+            print_info "Use --force flag to skip confirmation: curl ... | bash -s -- --force"
+            
+            # Countdown with proper cleanup
+            for i in {10..1}; do
+                echo -n "Cancelling in $i seconds... (Press Ctrl+C to stop)"
+                sleep 1 2>/dev/null || {
+                    echo ""
+                    print_info "Interrupted by user"
+                    exit 130
+                }
+                echo -ne "\r\033[K"  # Clear line
+            done
+            echo ""
+            print_info "Uninstall cancelled (no user input detected)"
             exit 0
         fi
     fi
+    
+    # Check response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        print_info "Uninstall cancelled"
+        exit 0
+    fi
+    
+    print_status "Confirmed - proceeding with uninstall"
 }
 
 stop_systemd_service() {
@@ -344,6 +366,7 @@ show_arch_completion() {
     echo "  curl -sSL https://raw.githubusercontent.com/datamann1013/RuneCore_Ecosystem/AI_service/install-runecore-arch.sh | bash -s -- --version=AI_service --use-aur"
     echo ""
     print_arch "Thank you for using RuneCore AI Ecosystem on Arch Linux! 🏛️👋"
+    echo ""
 }
 
 # Main uninstall flow
@@ -366,7 +389,11 @@ main() {
     cleanup_arch_packages
     
     show_arch_completion
+    
+    # Explicit exit to ensure script terminates
+    exit 0
 }
 
-# Run main function
+# Run main function and ensure exit
 main "$@"
+exit $?
