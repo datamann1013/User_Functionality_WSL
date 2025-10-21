@@ -132,11 +132,16 @@ def get_agent_conversations(agent_id):
         
     except Exception as e:
         log_error("CACHE_ERROR", str(e))
-        return jsonify({
-            "conversations": [],
-            "count": 0,
-            "error": "Failed to retrieve conversations"
-        }), 500
+        return (
+            jsonify(
+                {
+                    "conversations": [],
+                    "count": 0,
+                    "error": "Failed to retrieve conversations",
+                }
+            ),
+            500,
+        )
 
 
 @app.route("/health", methods=["GET"])
@@ -185,7 +190,11 @@ def chat():
             # Adjust timeout based on message complexity
             message_length = len(message)
             base_timeout = 20
-            complex_timeout = 35 if message_length > 100 or len(message.split()) > 20 else base_timeout
+            complex_timeout = (
+                35
+                if message_length > 100 or len(message.split()) > 20
+                else base_timeout
+            )
             
             payload = {
                 "message": enhanced_message,
@@ -199,9 +208,7 @@ def chat():
             }
 
             response = requests.post(
-                f"{OLLAMA_SERVICE_URL}/api/chat", 
-                json=payload, 
-                timeout=complex_timeout
+                f"{OLLAMA_SERVICE_URL}/api/chat", json=payload, timeout=complex_timeout
             )
 
             if response.status_code == 200:
@@ -212,26 +219,34 @@ def chat():
                 raise Exception(f"Ollama returned {response.status_code}")
 
         except requests.exceptions.Timeout:
-            log_error("OLLAMA_TIMEOUT", f"Request timed out after {complex_timeout}s for message: {message[:50]}...")
+            log_error(
+                "OLLAMA_TIMEOUT",
+                f"Request timed out after {complex_timeout}s for message: {message[:50]}...",
+            )
             ai_response = "I'm taking a bit longer to think about your question. Let me try to give you a quicker response: could you rephrase your question or break it into smaller parts?"
             response_mode = "timeout_fallback"
         except Exception as e:
             log_error("OLLAMA_ERROR", str(e))
-            
+
             log_error("OLLAMA_CONNECTION_ERROR", str(e))
-            
+
             # Simplified direct response without retry loops
-            if any(word in message.lower() for word in ["hello", "hi", "hey", "how are you"]):
+            if any(
+                word in message.lower()
+                for word in ["hello", "hi", "hey", "how are you"]
+            ):
                 ai_response = "Hello! I'm doing well, thanks for asking. How can I help you today?"
             elif "poem" in message.lower():
                 ai_response = "I'd be happy to write a poem for you! What theme or topic would you like me to focus on?"
             elif "weather" in message.lower():
                 ai_response = "I don't have access to current weather data, but I can discuss weather topics or write about weather if you'd like!"
-            elif any(word in message.lower() for word in ["why", "how", "what", "explain"]):
+            elif any(
+                word in message.lower() for word in ["why", "how", "what", "explain"]
+            ):
                 ai_response = "That's an interesting question! I'm having some technical difficulties right now, but I'd be happy to help explain that topic if you could try asking again."
             else:
                 ai_response = "I received your message, but I'm experiencing some technical issues. Could you please try rephrasing your question or asking it again?"
-            
+
             response_mode = "graceful_fallback"
 
         # Store conversation in cache
@@ -239,18 +254,25 @@ def chat():
             conversation_cache.add_conversation(agent_id, message, ai_response)
             log_error("CACHE_SUCCESS", f"Conversation cached for agent {agent_id}")
         except Exception as cache_error:
-            log_error("CACHE_ERROR", f"Failed to cache conversation: {str(cache_error)}")
+            log_error(
+                "CACHE_ERROR", f"Failed to cache conversation: {str(cache_error)}"
+            )
             # Continue anyway - caching failure shouldn't break the response
 
         # Return response
-        return jsonify({
-            "response": ai_response,
-            "agent_id": agent_id,
-            "timestamp": datetime.now().isoformat(),
-            "mode": response_mode,
-            "context_used": len(chat_history) > 2,  # More than just system + current message
-            "cached_messages": len(conversation_cache.get_conversation_context(agent_id))
-        })
+        return jsonify(
+            {
+                "response": ai_response,
+                "agent_id": agent_id,
+                "timestamp": datetime.now().isoformat(),
+                "mode": response_mode,
+                "context_used": len(chat_history)
+                > 2,  # More than just system + current message
+                "cached_messages": len(
+                    conversation_cache.get_conversation_context(agent_id)
+                ),
+            }
+        )
 
     except Exception as e:
         log_error("CHAT_ERROR", str(e))
@@ -262,7 +284,9 @@ if __name__ == "__main__":
     
     # Print cache configuration
     cache_status = conversation_cache.get_cache_stats()
-    print(f"💾 Cache Status: {'Redis' if cache_status['using_redis'] else 'Fallback Dict'}")
+    print(
+        f"💾 Cache Status: {'Redis' if cache_status['using_redis'] else 'Fallback Dict'}"
+    )
     print(f"📝 Message Limit: {cache_status['message_limit']} per agent")
     print(f"🧠 Context Size: {cache_status['context_size']} messages for AI")
     
