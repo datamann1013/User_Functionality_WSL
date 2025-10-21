@@ -21,9 +21,12 @@ if current_dir not in sys.path:
 
 # Try multiple import strategies for different environments
 conversation_cache = None
+async_agent_manager = None
+
 try:
     # Standard import (development)
     from cache.conversation_cache import conversation_cache
+    from async_agent_manager import async_agent_manager
 except (ModuleNotFoundError, ImportError):
     try:
         # CI/CD environment fallback
@@ -31,10 +34,12 @@ except (ModuleNotFoundError, ImportError):
         if cache_dir not in sys.path:
             sys.path.insert(0, cache_dir)
         from conversation_cache import conversation_cache as _cache
+        from async_agent_manager import async_agent_manager as _async_manager
 
         conversation_cache = _cache
+        async_agent_manager = _async_manager
     except (ModuleNotFoundError, ImportError):
-        # Create a mock cache for testing environments
+        # Create mock classes for testing environments
         class MockConversationCache:
             def get_cache_stats(self):
                 return {
@@ -59,7 +64,24 @@ except (ModuleNotFoundError, ImportError):
             def get_conversation_context(self, agent_id):
                 return []
 
+        class MockAsyncAgentManager:
+            async def submit_request(self, agent_id, user_id, message, priority=0, timeout=60.0):
+                return "mock_request_id"
+            
+            async def get_response(self, request_id):
+                return None
+            
+            async def get_request_status(self, request_id):
+                return "completed"
+            
+            async def start_workers(self):
+                pass
+            
+            def get_stats(self):
+                return {"mock": True}
+
         conversation_cache = MockConversationCache()
+        async_agent_manager = MockAsyncAgentManager()
 
 app = Flask(__name__)
 CORS(app)
@@ -332,8 +354,273 @@ def chat():
         return jsonify({"error": "Chat failed"}), 500
 
 
+# === ASYNC MULTI-AGENT ENDPOINTS ===
+
+@app.route("/api/chat/async", methods=["POST"])
+def submit_async_chat():
+    """
+    Submit a chat request for async processing and return immediately with a tag/request_id
+    User can then poll for the response using the request_id
+    """
+    try:
+        data = request.json
+        message = data.get("message", "")
+        agent_id = data.get("agent_id", "71dc06c0-7b49-4a7d-9afb-a2d7fdcde53b")
+        user_id = data.get("user_id", "anonymous")
+        priority = data.get("priority", 0)
+        timeout = data.get("timeout", 60.0)
+
+        if not message:
+            return jsonify({"error": "Message is required"}), 400
+
+        # Submit async request
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            # Start workers if not already running
+            loop.run_until_complete(async_agent_manager.start_workers())
+            
+            # Submit the request
+            request_id = loop.run_until_complete(
+                async_agent_manager.submit_request(
+                    agent_id=agent_id,
+                    user_id=user_id, 
+                    message=message,
+                    priority=priority,
+                    timeout=timeout
+                )
+            )
+            
+            return jsonify({
+                "request_id": request_id,
+                "status": "submitted",
+                "agent_id": agent_id,
+                "user_id": user_id,
+                "message": message,
+                "timestamp": datetime.now().isoformat(),
+                "estimated_time": "30-60 seconds",
+                "poll_url": f"/api/chat/async/{request_id}"
+            })
+            
+        finally:
+            loop.close()
+
+    except Exception as e:
+        log_error("ASYNC_CHAT_SUBMIT_ERROR", str(e))
+        return jsonify({"error": "Failed to submit async request"}), 500
+
+
+@app.route("/api/chat/async/<request_id>", methods=["GET"])
+def get_async_response(request_id):
+    """
+    Poll for async chat response by request_id (tag)
+    Returns response if ready, or status if still processing
+    """
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            # Get response
+            response = loop.run_until_complete(
+                async_agent_manager.get_response(request_id)
+            )
+            
+            if response:
+                # Response is ready
+                return jsonify({
+                    "request_id": request_id,
+                    "status": response.status.value,
+                    "response": response.response,
+                    "agent_id": response.agent_id,
+                    "user_id": response.user_id,
+                    "timestamp": response.timestamp,
+                    "processing_time": response.processing_time,
+                    "model_used": response.model_used,
+                    "tokens_used": response.tokens_used,
+                    "error_message": response.error_message,
+                    "ready": True
+                })
+            else:
+                # Still processing or not found
+                status = loop.run_until_complete(
+                    async_agent_manager.get_request_status(request_id)
+                )
+                
+                if status:
+                    return jsonify({
+                        "request_id": request_id,
+                        "status": status.value,
+                        "ready": False,
+                        "message": "Request is still being processed",
+                        "poll_again_in": "5-10 seconds"
+                    })
+                else:
+                    return jsonify({
+                        "request_id": request_id,
+                        "status": "not_found",
+                        "ready": False,
+                        "error": "Request not found"
+                    }), 404
+                    
+        finally:
+            loop.close()
+
+    except Exception as e:
+        log_error("ASYNC_CHAT_GET_ERROR", str(e))
+        return jsonify({"error": "Failed to get async response"}), 500
+
+
+@app.route("/api/chat/async/batch", methods=["POST"])
+def submit_batch_requests():
+    """
+    Submit multiple chat requests simultaneously and return request_ids for each
+    Enables parallel processing of multiple agents
+    """
+    try:
+        data = request.json
+        requests_data = data.get("requests", [])
+        
+        if not requests_data:
+            return jsonify({"error": "Requests array is required"}), 400
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            # Start workers if not already running
+            loop.run_until_complete(async_agent_manager.start_workers())
+            
+            # Submit all requests
+            request_ids = []
+            for req_data in requests_data:
+                message = req_data.get("message", "")
+                agent_id = req_data.get("agent_id", "71dc06c0-7b49-4a7d-9afb-a2d7fdcde53b")
+                user_id = req_data.get("user_id", "anonymous")
+                priority = req_data.get("priority", 0)
+                
+                if message:
+                    request_id = loop.run_until_complete(
+                        async_agent_manager.submit_request(
+                            agent_id=agent_id,
+                            user_id=user_id,
+                            message=message,
+                            priority=priority
+                        )
+                    )
+                    request_ids.append({
+                        "request_id": request_id,
+                        "agent_id": agent_id,
+                        "message": message[:50] + "..." if len(message) > 50 else message
+                    })
+            
+            return jsonify({
+                "batch_id": str(datetime.now().timestamp()),
+                "request_ids": request_ids,
+                "total_submitted": len(request_ids),
+                "timestamp": datetime.now().isoformat(),
+                "poll_url": "/api/chat/async/batch/status"
+            })
+            
+        finally:
+            loop.close()
+
+    except Exception as e:
+        log_error("ASYNC_BATCH_SUBMIT_ERROR", str(e))
+        return jsonify({"error": "Failed to submit batch requests"}), 500
+
+
+@app.route("/api/chat/async/batch/status", methods=["POST"])
+def get_batch_status():
+    """
+    Get status of multiple async requests at once
+    Accepts list of request_ids and returns status for each
+    """
+    try:
+        data = request.json
+        request_ids = data.get("request_ids", [])
+        
+        if not request_ids:
+            return jsonify({"error": "request_ids array is required"}), 400
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
+        try:
+            results = []
+            for request_id in request_ids:
+                # Try to get completed response first
+                response = loop.run_until_complete(
+                    async_agent_manager.get_response(request_id)
+                )
+                
+                if response:
+                    results.append({
+                        "request_id": request_id,
+                        "status": response.status.value,
+                        "ready": True,
+                        "response": response.response,
+                        "processing_time": response.processing_time,
+                        "agent_id": response.agent_id
+                    })
+                else:
+                    # Check if still processing
+                    status = loop.run_until_complete(
+                        async_agent_manager.get_request_status(request_id)
+                    )
+                    results.append({
+                        "request_id": request_id,
+                        "status": status.value if status else "not_found",
+                        "ready": False,
+                        "processing": True if status else False
+                    })
+            
+            # Calculate summary stats
+            completed = sum(1 for r in results if r.get("ready", False))
+            processing = sum(1 for r in results if r.get("processing", False))
+            failed = sum(1 for r in results if r.get("status") in ["failed", "timeout"])
+            
+            return jsonify({
+                "results": results,
+                "summary": {
+                    "total": len(results),
+                    "completed": completed,
+                    "processing": processing,
+                    "failed": failed,
+                    "completion_rate": f"{(completed/len(results)*100):.1f}%" if results else "0%"
+                },
+                "timestamp": datetime.now().isoformat()
+            })
+            
+        finally:
+            loop.close()
+
+    except Exception as e:
+        log_error("ASYNC_BATCH_STATUS_ERROR", str(e))
+        return jsonify({"error": "Failed to get batch status"}), 500
+
+
+@app.route("/api/chat/async/stats", methods=["GET"])
+def get_async_stats():
+    """
+    Get statistics about the async agent system
+    """
+    try:
+        stats = async_agent_manager.get_stats()
+        return jsonify({
+            "async_system": stats,
+            "cache_system": conversation_cache.get_cache_stats(),
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        log_error("ASYNC_STATS_ERROR", str(e))
+        return jsonify({"error": "Failed to get stats"}), 500
+
+
 if __name__ == "__main__":
-    print("🤖 AI Service Backend Starting with Redis Conversation Cache")
+    print("🤖 AI Service Backend Starting with Redis Conversation Cache & Async Multi-Agent System")
 
     # Print cache configuration
     cache_status = conversation_cache.get_cache_stats()
@@ -342,6 +629,18 @@ if __name__ == "__main__":
     )
     print(f"📝 Message Limit: {cache_status['message_limit']} per agent")
     print(f"🧠 Context Size: {cache_status['context_size']} messages for AI")
-
+    
+    # Print async system info
+    async_stats = async_agent_manager.get_stats()
+    print(f"⚡ Async System: {'Available' if not async_stats.get('mock') else 'Mock Mode'}")
+    
     port = int(os.environ.get("PORT", 5000))
+    print(f"🌐 Starting server on port {port}")
+    print("📡 Async Endpoints Available:")
+    print("   POST /api/chat/async - Submit async request (returns request_id)")
+    print("   GET  /api/chat/async/<request_id> - Poll for response") 
+    print("   POST /api/chat/async/batch - Submit multiple requests")
+    print("   POST /api/chat/async/batch/status - Check batch status")
+    print("   GET  /api/chat/async/stats - System statistics")
+    
     app.run(host="0.0.0.0", port=port, debug=False)  # nosec B104

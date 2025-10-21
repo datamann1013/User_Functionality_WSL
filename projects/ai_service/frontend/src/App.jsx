@@ -10,6 +10,7 @@ import { logFrontendError } from "./utils/errorLogger";
 import CreateAgentModal from "./components/CreateAgentModal";
 import EditAgentModal from "./components/EditAgentModal";
 import ModelManager from "./components/ModelManager";
+import AsyncChatDemo from "./components/AsyncChatDemo";
 
 // API base URL
 const API_BASE =
@@ -101,6 +102,7 @@ function App() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [agentToEdit, setAgentToEdit] = useState(null);
   const [showModelManager, setShowModelManager] = useState(false);
+  const [currentView, setCurrentView] = useState('chat'); // 'chat' or 'async-demo'
 
   const fileInputRef = useRef(null);
   const chatAreaRef = useRef(null);
@@ -457,6 +459,43 @@ function App() {
         <div className="top-bar-spacer"></div>
       </div>
 
+      {/* Navigation Bar */}
+      <div style={{
+        background: '#f8f9fa',
+        borderBottom: '1px solid #e5e7eb',
+        padding: '10px 20px',
+        display: 'flex',
+        gap: '20px'
+      }}>
+        <button
+          onClick={() => setCurrentView('chat')}
+          style={{
+            padding: '8px 16px',
+            background: currentView === 'chat' ? '#3b82f6' : 'transparent',
+            color: currentView === 'chat' ? 'white' : '#374151',
+            border: '1px solid #d1d5db',
+            borderRadius: '6px',
+            cursor: 'pointer'
+          }}
+        >
+          💬 Regular Chat
+        </button>
+        <button
+          onClick={() => setCurrentView('async-demo')}
+          style={{
+            padding: '8px 16px',
+            background: currentView === 'async-demo' ? '#3b82f6' : 'transparent',
+            color: currentView === 'async-demo' ? 'white' : '#374151',
+            border: '1px solid #d1d5db',
+            borderRadius: '6px',
+            cursor: 'pointer'
+          }}
+        >
+          🚀 Async Multi-Agent Demo
+        </button>
+      </div>
+
+      {currentView === 'chat' ? (
       <div className="main-layout">
         {/* Left Sidebar - Agents */}
         <div className="agents-sidebar">
@@ -711,6 +750,10 @@ function App() {
           </div>
         </div>
       </div>
+      ) : (
+        /* Async Demo View */
+        <AsyncChatDemo apiBase={API_BASE} />
+      )}
 
       {/* Hidden file input */}
       <input
