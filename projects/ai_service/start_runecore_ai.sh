@@ -671,6 +671,34 @@ start_ollama_service() {
     fi
 }
 
+start_redis() {
+    log_header "Starting Redis Service"
+    
+    # Check if Redis is already running
+    if pgrep -f "redis-server.*6379" > /dev/null || pgrep -f "valkey-server.*6379" > /dev/null; then
+        log_success "Redis already running"
+        return 0
+    fi
+    
+    log_install "Starting Redis for conversation caching..."
+    
+    # Use the Redis startup script
+    if [[ -f "$AI_SERVICE_DIR/start_redis_dev.sh" ]]; then
+        cd "$AI_SERVICE_DIR"
+        ./start_redis_dev.sh
+        if [[ $? -eq 0 ]]; then
+            log_success "Redis started successfully"
+            return 0
+        else
+            log_warning "Redis failed to start, will use Python fallback"
+            return 1
+        fi
+    else
+        log_warning "Redis startup script not found, will use Python fallback"
+        return 1
+    fi
+}
+
 start_backend() {
     log_header "Starting Backend Service"
     
@@ -780,6 +808,14 @@ cleanup_services() {
         rm -f "$ERRORLOGGER_DIR/errorlogger.pid"
     fi
     
+    # Stop Redis if it was started by this script
+    if pgrep -f "redis-server.*6379" > /dev/null || pgrep -f "valkey-server.*6379" > /dev/null; then
+        log_info "Stopping Redis service..."
+        pkill -f "redis-server.*6379" 2>/dev/null || true
+        pkill -f "valkey-server.*6379" 2>/dev/null || true
+        rm -f /tmp/redis_runecore.pid
+    fi
+    
     log_success "All services stopped"
 }
 
@@ -879,6 +915,8 @@ main() {
         log_error "Critical: ErrorLogger failed to start"
         exit 1
     fi
+    
+    start_redis  # Non-critical, will fallback to Python dict
     
     start_ollama_service  # Non-critical
     

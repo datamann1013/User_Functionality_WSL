@@ -175,7 +175,7 @@ def chat():
         enhanced_message = conversation_cache.format_chat_history_to_string(chat_history)
         
         # Add the assistant prompt at the end
-        enhanced_message += "\n<|assistant|>\n"
+        enhanced_message += "\n\nAssistant:"
 
         ai_response = None
         response_mode = "fallback"
