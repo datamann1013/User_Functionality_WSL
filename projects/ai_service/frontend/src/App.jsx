@@ -94,7 +94,8 @@ function App() {
   const [agents, setAgents] = useState([]);
   const [agentsLoading, setAgentsLoading] = useState(true);
   const [selectedAgent, setSelectedAgent] = useState(null);
-  const [messages, setMessages] = useState([]);
+  // Store messages per agent: { [agentId]: [messages] }
+  const [agentMessages, setAgentMessages] = useState({});
   const [inputText, setInputText] = useState("");
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -177,7 +178,7 @@ function App() {
           },
         ]);
 
-        setMessages(historyMessages);
+        setAgentMessages((prev) => ({ ...prev, [agentId]: historyMessages }));
         logFrontendError(
           "CONVERSATION_HISTORY_LOADED",
           `Loaded ${conversations.length} conversations for agent ${agentId}`
@@ -189,7 +190,7 @@ function App() {
         `Failed to load conversation history for agent ${agentId}`,
         error
       );
-      setMessages([]);
+      setAgentMessages((prev) => ({ ...prev, [agentId]: [] }));
     }
   }, []);
 
@@ -198,14 +199,14 @@ function App() {
       if (agentId === selectedAgent) return;
 
       setSelectedAgent(agentId);
-      setMessages([]);
       setInputText("");
 
-      if (agentId) {
+      // Load history if not already loaded
+      if (!agentMessages[agentId]) {
         await loadConversationHistory(agentId);
       }
     },
-    [selectedAgent, loadConversationHistory]
+    [selectedAgent, loadConversationHistory, agentMessages]
   );
 
   const handleSend = useCallback(async () => {
@@ -214,7 +215,8 @@ function App() {
 
     const userMessage = inputText.trim();
     setInputText("");
-    
+    setSelectedFiles([]);
+
     // Mark this agent as thinking
     setThinkingAgents(prev => new Set([...prev, selectedAgent]));
 
@@ -223,28 +225,30 @@ function App() {
     const thinkingId = messageId + 1;
     const timestamp = new Date().toISOString();
 
-    // Add user message
-    const newMessage = {
-      id: messageId,
-      sender: "user",
-      text: userMessage,
-      timestamp,
-      files: selectedFiles.length > 0 ? [...selectedFiles] : undefined,
-    };
-    setMessages((prev) => [...prev, newMessage]);
-    setSelectedFiles([]);
-
-    // Add thinking indicator
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: thinkingId,
-        sender: "ai",
-        text: "Thinking...",
-        timestamp,
-        isThinking: true,
-      },
-    ]);
+    // Add user message to agentMessages
+    setAgentMessages((prev) => {
+      const prevMsgs = prev[selectedAgent] || [];
+      return {
+        ...prev,
+        [selectedAgent]: [
+          ...prevMsgs,
+          {
+            id: messageId,
+            sender: "user",
+            text: userMessage,
+            timestamp,
+            files: selectedFiles.length > 0 ? [...selectedFiles] : undefined,
+          },
+          {
+            id: thinkingId,
+            sender: "ai",
+            text: "Thinking...",
+            timestamp,
+            isThinking: true,
+          },
+        ],
+      };
+    });
 
     try {
       const response = await fetch(`${API_BASE}/api/chat`, {
@@ -259,17 +263,27 @@ function App() {
       const data = await response.json();
 
       if (response.ok) {
-        // Remove thinking message and add AI response
-        setMessages((prev) => [
-          ...prev.filter((msg) => msg.id !== thinkingId),
-          {
-            id: Date.now() + Math.random(),
-            sender: "ai",
-            text: data.response,
-            timestamp: new Date().toISOString(),
-            agentId: selectedAgent,
-          },
-        ]);
+        // Remove thinking message and add AI response ONLY if still on this agent
+        setAgentMessages((prev) => {
+          const prevMsgs = (prev[selectedAgent] || []).filter((msg) => msg.id !== thinkingId);
+          // Only add response if still on this agent
+          if (selectedAgent in prev) {
+            return {
+              ...prev,
+              [selectedAgent]: [
+                ...prevMsgs,
+                {
+                  id: Date.now() + Math.random(),
+                  sender: "ai",
+                  text: data.response,
+                  timestamp: new Date().toISOString(),
+                  agentId: selectedAgent,
+                },
+              ],
+            };
+          }
+          return prev;
+        });
         logFrontendError(
           "FRONTEND_CHAT_SUCCESS",
           "Chat message sent successfully"
@@ -309,16 +323,22 @@ function App() {
           "Can't connect to the AI service. Please check your internet connection and try again.";
       }
 
-      setMessages((prev) => [
-        ...prev.filter((msg) => msg.id !== thinkingId),
-        {
-          id: Date.now() + Math.random(),
-          sender: "ai",
-          text: userFriendlyMessage,
-          timestamp: new Date().toISOString(),
-          error: true,
-        },
-      ]);
+      setAgentMessages((prev) => {
+        const prevMsgs = (prev[selectedAgent] || []).filter((msg) => msg.id !== thinkingId);
+        return {
+          ...prev,
+          [selectedAgent]: [
+            ...prevMsgs,
+            {
+              id: Date.now() + Math.random(),
+              sender: "ai",
+              text: userFriendlyMessage,
+              timestamp: new Date().toISOString(),
+              error: true,
+            },
+          ],
+        };
+      });
       logFrontendError("FRONTEND_CHAT_ERROR", "Chat request failed", error);
     }
 
@@ -362,12 +382,12 @@ function App() {
     return () => clearInterval(refreshInterval);
   }, [connecting, loadAgents]);
 
-  // Auto scroll to bottom when new messages arrive
+  // Auto scroll to bottom when new messages arrive for selected agent
   useEffect(() => {
     if (chatAreaRef.current) {
       chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [agentMessages, selectedAgent]);
 
   // Event handlers (optimized with useCallback)
   const handleKeyPress = useCallback(
@@ -567,7 +587,7 @@ function App() {
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
           >
-            {messages.length === 0 ? (
+            {(agentMessages[selectedAgent]?.length ?? 0) === 0 ? (
               <div className="empty-chat">
                 <div className="empty-message">
                   <h3>Start a conversation</h3>
@@ -578,7 +598,7 @@ function App() {
                 </div>
               </div>
             ) : (
-              messages.map((message) => (
+              agentMessages[selectedAgent]?.map((message) => (
                 <div key={message.id} className="message-wrapper">
                   <div
                     className={`message ${message.sender} ${message.error ? "error" : ""} ${message.isThinking ? "thinking" : ""}`}

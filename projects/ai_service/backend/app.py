@@ -70,6 +70,13 @@ except (ModuleNotFoundError, ImportError):
 app = Flask(__name__)
 CORS(app)
 
+# Log which cache implementation is being used
+try:
+    cache_type = conversation_cache.__class__.__name__
+except Exception:
+    cache_type = str(type(conversation_cache))
+print(f"[RuneCore] Using conversation cache: {cache_type}")
+
 # Configuration
 ERRORLOGGER_URL = os.environ.get("ERRORLOGGER_SERVICE_URL", "http://127.0.0.1:5001/log")
 OLLAMA_SERVICE_URL = os.environ.get("OLLAMA_SERVICE_URL", "http://127.0.0.1:5002")
