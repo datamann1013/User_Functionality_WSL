@@ -14,28 +14,23 @@ from flask_cors import CORS
 import sys
 import os
 
-# Add current directory to Python path for imports
-current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
+# Add backend root and cache directory to sys.path for robust import
+backend_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(backend_dir, ".."))
+cache_dir = os.path.join(backend_dir, "cache")
+for p in [backend_dir, project_root, cache_dir]:
+    if p not in sys.path:
+        sys.path.insert(0, p)
 
-# Try multiple import strategies for different environments
 conversation_cache = None
 async_agent_manager = None
-
 try:
-    # Standard import (development)
     from cache.conversation_cache import conversation_cache
     from async_agent_manager import async_agent_manager
 except (ModuleNotFoundError, ImportError):
     try:
-        # CI/CD environment fallback
-        cache_dir = os.path.join(current_dir, "cache")
-        if cache_dir not in sys.path:
-            sys.path.insert(0, cache_dir)
         from conversation_cache import conversation_cache as _cache
         from async_agent_manager import async_agent_manager as _async_manager
-
         conversation_cache = _cache
         async_agent_manager = _async_manager
     except (ModuleNotFoundError, ImportError):
@@ -48,38 +43,27 @@ except (ModuleNotFoundError, ImportError):
                     "message_limit": 10,
                     "context_size": 5,
                 }
-
             def format_context_for_ai(self, agent_id):
                 return []
-
             def format_chat_history_to_string(self, history):
                 return ""
-
             def get_full_conversation(self, agent_id):
                 return []
-
             def add_conversation(self, agent_id, user_msg, ai_msg):
                 pass
-
             def get_conversation_context(self, agent_id):
                 return []
-
         class MockAsyncAgentManager:
             async def submit_request(self, agent_id, user_id, message, priority=0, timeout=60.0):
                 return "mock_request_id"
-            
             async def get_response(self, request_id):
                 return None
-            
             async def get_request_status(self, request_id):
                 return "completed"
-            
             async def start_workers(self):
                 pass
-            
             def get_stats(self):
                 return {"mock": True}
-
         conversation_cache = MockConversationCache()
         async_agent_manager = MockAsyncAgentManager()
 
