@@ -6,6 +6,7 @@ import os
 import requests
 import asyncio
 import threading
+import time
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -281,16 +282,65 @@ def chat():
                 "timestamp": datetime.now().isoformat(),
             }
 
-            response = requests.post(
-                f"{OLLAMA_SERVICE_URL}/api/chat", json=payload, timeout=complex_timeout
-            )
+            # Run the Ollama request in a background thread and poll the
+            # Ollama /health endpoint while the request runs. If health
+            # fails repeatedly we abort waiting and fall back.
+            result = {"response": None, "error": None, "status_code": None}
 
-            if response.status_code == 200:
-                ollama_response = response.json()
-                ai_response = ollama_response.get("response", "No response from AI")
+            def call_ollama():
+                try:
+                    resp = requests.post(f"{OLLAMA_SERVICE_URL}/api/chat", json=payload)
+                    result["status_code"] = resp.status_code
+                    if resp.status_code == 200:
+                        jr = resp.json()
+                        result["response"] = jr.get("response", "No response from AI")
+                    else:
+                        # capture body for diagnostics (trimmed)
+                        result["error"] = f"Ollama returned {resp.status_code}: {resp.text[:500]}"
+                except Exception as e:
+                    result["error"] = f"RequestException: {str(e)}"
+
+            th = threading.Thread(target=call_ollama, daemon=True)
+            th.start()
+
+            # Poll health while the request runs
+            consecutive_health_failures = 0
+            max_health_failures = int(os.environ.get("OLLAMA_HEALTH_FAILS_BEFORE_ABORT", 3))
+            health_check_interval = float(os.environ.get("OLLAMA_HEALTH_POLL_INTERVAL", 10.0))
+
+            while th.is_alive():
+                try:
+                    h = requests.get(f"{OLLAMA_SERVICE_URL}/health", timeout=2)
+                    if h.status_code == 200:
+                        consecutive_health_failures = 0
+                    else:
+                        consecutive_health_failures += 1
+                        log_error("OLLAMA_HEALTH_NON200", f"Health returned {h.status_code}: {h.text[:200]}")
+                except Exception as he:
+                    consecutive_health_failures += 1
+                    log_error("OLLAMA_HEALTH_ERR", f"Health check failed: {str(he)}")
+
+                if consecutive_health_failures >= max_health_failures:
+                    # Abort waiting and record error; thread may still be running
+                    log_error(
+                        "OLLAMA_HEALTH_FAIL",
+                        f"Ollama health failed {consecutive_health_failures} consecutive times; aborting wait."
+                    )
+                    result["error"] = "Ollama service became unresponsive during generation"
+                    break
+
+                time.sleep(health_check_interval)
+
+            # If we have a response use it; otherwise escalate the captured error
+            if result.get("response"):
+                ai_response = result.get("response")
                 response_mode = "ollama"
             else:
-                raise Exception(f"Ollama returned {response.status_code}")
+                if result.get("error"):
+                    # Raise to trigger graceful fallback handling below
+                    raise Exception(result.get("error"))
+                else:
+                    raise Exception("Ollama request did not complete")
 
         except requests.exceptions.Timeout:
             log_error(
