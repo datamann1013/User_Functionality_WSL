@@ -262,14 +262,22 @@ def chat():
                 else base_timeout
             )
 
+            # Lookup agent config from AGENTS_DATA
+            agent_config = next((a for a in AGENTS_DATA["agents"] if a["id"] == agent_id), None)
+            model_name = agent_config["model_name"] if agent_config and "model_name" in agent_config else "llama3.2:1b"
+            temperature = agent_config["temperature"] if agent_config and "temperature" in agent_config else 0.7
+            top_p = agent_config["top_p"] if agent_config and "top_p" in agent_config else 0.9
+            max_tokens = agent_config["max_tokens"] if agent_config and "max_tokens" in agent_config else 2048
+            system_prompt = agent_config["system_prompt"] if agent_config and "system_prompt" in agent_config else ""
+
             payload = {
                 "message": enhanced_message,
                 "agent_id": agent_id,
-                "model_name": "llama3.2:1b",
-                "temperature": 0.7,
-                "top_p": 0.9,
-                "max_tokens": 2048,
-                "system_prompt": "",  # System prompt is now handled in chat history
+                "model_name": model_name,
+                "temperature": temperature,
+                "top_p": top_p,
+                "max_tokens": max_tokens,
+                "system_prompt": system_prompt,
                 "timestamp": datetime.now().isoformat(),
             }
 
