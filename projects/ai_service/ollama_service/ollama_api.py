@@ -95,6 +95,12 @@ def chat():
         system_prompt = data.get("system_prompt", "")
 
         # Build prompt
+        # Debug: log incoming fields to help trace missing user content
+        try:
+            print(f"[OLLAMA_DEBUG] incoming message: '{message[:200]}' system_prompt: '{system_prompt[:200]}'")
+        except Exception:
+            pass
+
         full_prompt = (
             f"{system_prompt}\n\nUser: {message}\n\nAssistant:"
             if system_prompt

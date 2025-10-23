@@ -47,7 +47,25 @@ except (ModuleNotFoundError, ImportError):
             def format_context_for_ai(self, agent_id):
                 return []
             def format_chat_history_to_string(self, history):
-                return ""
+                """
+                Minimal string formatter for mock cache so debug payloads include
+                the user's message when the real cache implementation isn't available.
+                """
+                if not history:
+                    return ""
+
+                formatted_lines = []
+                for message in history:
+                    role = message.get("role", "")
+                    content = message.get("content", "")
+                    if role == "system":
+                        formatted_lines.append(f"System: {content}")
+                    elif role == "user":
+                        formatted_lines.append(f"User: {content}")
+                    elif role == "assistant":
+                        formatted_lines.append(f"Assistant: {content}")
+
+                return "\n\n".join(formatted_lines)
             def get_full_conversation(self, agent_id):
                 return []
             def add_conversation(self, agent_id, user_msg, ai_msg):
@@ -282,6 +300,12 @@ def chat():
                 "timestamp": datetime.now().isoformat(),
             }
 
+            # Debug: log what we're sending to Ollama (truncated for safety)
+            try:
+                print(f"[AI_DEBUG] Sending to Ollama for agent {agent_id}: message_preview='{enhanced_message[:200]}' system_prompt='{system_prompt[:200]}'")
+            except Exception:
+                pass
+
             # Run the Ollama request in a background thread and poll the
             # Ollama /health endpoint while the request runs. If health
             # fails repeatedly we abort waiting and fall back.
@@ -371,6 +395,43 @@ def chat():
     except Exception as e:
         log_error("CHAT_ERROR", str(e))
         return jsonify({"error": "Chat failed"}), 500
+
+
+@app.route("/api/debug/payload", methods=["POST"])
+def debug_payload():
+    """Return the constructed payload for inspection without sending to Ollama"""
+    try:
+        data = request.get_json() or {}
+        message = data.get("message", "").strip()
+        agent_id = data.get("agent_id", "assistant-1")
+
+        # Diagnostic: show which cache implementation we're using
+        try:
+            print(f"[DEBUG_PAYLOAD] conversation_cache type: {conversation_cache.__class__.__name__}")
+        except Exception:
+            pass
+
+        chat_history = conversation_cache.format_context_for_ai(agent_id)
+        print(f"[DEBUG_PAYLOAD] raw chat_history before append: {chat_history}")
+        chat_history.append({"role": "user", "content": message})
+        print(f"[DEBUG_PAYLOAD] chat_history after append: {chat_history}")
+        try:
+            enhanced_message = conversation_cache.format_chat_history_to_string(chat_history)
+        except Exception as e:
+            print(f"[DEBUG_PAYLOAD] format_chat_history_to_string error: {e}")
+            enhanced_message = ""
+
+        agent_config = next((a for a in AGENTS_DATA["agents"] if a["id"] == agent_id), None)
+        system_prompt = agent_config["system_prompt"] if agent_config and "system_prompt" in agent_config else ""
+
+        return jsonify({
+            "agent_id": agent_id,
+            "message_preview": enhanced_message[:200],
+            "system_prompt": system_prompt,
+            "full_message": enhanced_message,
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # === ASYNC MULTI-AGENT ENDPOINTS ===
