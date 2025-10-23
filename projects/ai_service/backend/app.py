@@ -55,7 +55,7 @@ except (ModuleNotFoundError, ImportError):
             def get_conversation_context(self, agent_id):
                 return []
         class MockAsyncAgentManager:
-            async def submit_request(self, agent_id, user_id, message, priority=0, timeout=60.0):
+            async def submit_request(self, agent_id, user_id, message, priority=0, timeout=None):
                 return "mock_request_id"
             async def get_response(self, request_id):
                 return None
@@ -303,33 +303,10 @@ def chat():
             th = threading.Thread(target=call_ollama, daemon=True)
             th.start()
 
-            # Poll health while the request runs
-            consecutive_health_failures = 0
-            max_health_failures = int(os.environ.get("OLLAMA_HEALTH_FAILS_BEFORE_ABORT", 3))
-            health_check_interval = float(os.environ.get("OLLAMA_HEALTH_POLL_INTERVAL", 10.0))
-
-            while th.is_alive():
-                try:
-                    h = requests.get(f"{OLLAMA_SERVICE_URL}/health", timeout=2)
-                    if h.status_code == 200:
-                        consecutive_health_failures = 0
-                    else:
-                        consecutive_health_failures += 1
-                        log_error("OLLAMA_HEALTH_NON200", f"Health returned {h.status_code}: {h.text[:200]}")
-                except Exception as he:
-                    consecutive_health_failures += 1
-                    log_error("OLLAMA_HEALTH_ERR", f"Health check failed: {str(he)}")
-
-                if consecutive_health_failures >= max_health_failures:
-                    # Abort waiting and record error; thread may still be running
-                    log_error(
-                        "OLLAMA_HEALTH_FAIL",
-                        f"Ollama health failed {consecutive_health_failures} consecutive times; aborting wait."
-                    )
-                    result["error"] = "Ollama service became unresponsive during generation"
-                    break
-
-                time.sleep(health_check_interval)
+            # Wait for the Ollama request thread to complete without aborting.
+            # This removes any health-poll based aborts so the backend will
+            # wait as long as the upstream service takes to respond.
+            th.join()  # blocking wait - preserves request result or error
 
             # If we have a response use it; otherwise escalate the captured error
             if result.get("response"):
@@ -342,13 +319,6 @@ def chat():
                 else:
                     raise Exception("Ollama request did not complete")
 
-        except requests.exceptions.Timeout:
-            log_error(
-                "OLLAMA_TIMEOUT",
-                f"Request timed out after {complex_timeout}s for message: {message[:50]}...",
-            )
-            ai_response = "I'm taking a bit longer to think about your question. Let me try to give you a quicker response: could you rephrase your question or break it into smaller parts?"
-            response_mode = "timeout_fallback"
         except Exception as e:
             log_error("OLLAMA_ERROR", str(e))
 
