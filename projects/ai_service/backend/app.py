@@ -332,40 +332,54 @@ def chat():
             # wait as long as the upstream service takes to respond.
             th.join()  # blocking wait - preserves request result or error
 
+            # Debug: print the result captured from the Ollama call for diagnosis
+            try:
+                print(f"[AI_DEBUG_RESULT] for agent {agent_id}: {result}")
+            except Exception:
+                pass
+
             # If we have a response use it; otherwise escalate the captured error
             if result.get("response"):
                 ai_response = result.get("response")
                 response_mode = "ollama"
             else:
                 if result.get("error"):
-                    # Raise to trigger graceful fallback handling below
-                    raise Exception(result.get("error"))
+                    # Ollama returned an error or failed to respond. Instead
+                    # of returning a friendly fallback as a normal 200 response,
+                    # return a 503 with a standardized error_code so the frontend
+                    # can handle it explicitly.
+                    error_payload = {
+                        "error": "OLLAMA_UNAVAILABLE",
+                        "error_code": "EABB5",
+                        "message": "Upstream AI service unavailable",
+                        "details": result.get("error"),
+                    }
+                    return jsonify(error_payload), 503
                 else:
-                    raise Exception("Ollama request did not complete")
+                    error_payload = {
+                        "error": "OLLAMA_TIMEOUT",
+                        "error_code": "EABB5",
+                        "message": "Upstream AI service did not complete the request",
+                    }
+                    return jsonify(error_payload), 503
 
         except Exception as e:
+            # Log and print the exception for debugging; then return a
+            # standardized 503 so the frontend can react to upstream failures.
             log_error("OLLAMA_ERROR", str(e))
-
             log_error("OLLAMA_CONNECTION_ERROR", str(e))
+            try:
+                print(f"[AI_EXCEPTION] chat handler exception: {str(e)}")
+            except Exception:
+                pass
 
-            # Simplified direct response without retry loops
-            if any(
-                word in message.lower()
-                for word in ["hello", "hi", "hey", "how are you"]
-            ):
-                ai_response = "Hello! I'm doing well, thanks for asking. How can I help you today?"
-            elif "poem" in message.lower():
-                ai_response = "I'd be happy to write a poem for you! What theme or topic would you like me to focus on?"
-            elif "weather" in message.lower():
-                ai_response = "I don't have access to current weather data, but I can discuss weather topics or write about weather if you'd like!"
-            elif any(
-                word in message.lower() for word in ["why", "how", "what", "explain"]
-            ):
-                ai_response = "That's an interesting question! I'm having some technical difficulties right now, but I'd be happy to help explain that topic if you could try asking again."
-            else:
-                ai_response = "I received your message, but I'm experiencing some technical issues. Could you please try rephrasing your question or asking it again?"
-
-            response_mode = "graceful_fallback"
+            error_payload = {
+                "error": "OLLAMA_UNAVAILABLE",
+                "error_code": "EABB5",
+                "message": "Upstream AI service unavailable or failed to complete the request",
+                "details": str(e),
+            }
+            return jsonify(error_payload), 503
 
         # Store conversation in cache
         try:

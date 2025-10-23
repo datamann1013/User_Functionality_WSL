@@ -94,8 +94,7 @@ function App() {
   const [agents, setAgents] = useState([]);
   const [agentsLoading, setAgentsLoading] = useState(true);
   const [selectedAgent, setSelectedAgent] = useState(null);
-  // Store messages per agent: { [agentId]: [messages] }
-  const [agentMessages, setAgentMessages] = useState({});
+  const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState("");
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -178,7 +177,7 @@ function App() {
           },
         ]);
 
-        setAgentMessages((prev) => ({ ...prev, [agentId]: historyMessages }));
+        setMessages(historyMessages);
         logFrontendError(
           "CONVERSATION_HISTORY_LOADED",
           `Loaded ${conversations.length} conversations for agent ${agentId}`
@@ -190,7 +189,7 @@ function App() {
         `Failed to load conversation history for agent ${agentId}`,
         error
       );
-      setAgentMessages((prev) => ({ ...prev, [agentId]: [] }));
+      setMessages([]);
     }
   }, []);
 
@@ -199,24 +198,26 @@ function App() {
       if (agentId === selectedAgent) return;
 
       setSelectedAgent(agentId);
+      setMessages([]);
       setInputText("");
 
-      // Load history if not already loaded
-      if (!agentMessages[agentId]) {
+      if (agentId) {
         await loadConversationHistory(agentId);
       }
     },
-    [selectedAgent, loadConversationHistory, agentMessages]
+    [selectedAgent, loadConversationHistory]
   );
 
   const handleSend = useCallback(async () => {
     const isAgentThinking = thinkingAgents.has(selectedAgent);
     if (connecting || !inputText.trim() || isAgentThinking) return;
 
+  // If true, we will keep the agent in the thinking state (used for EABB5)
+  let keepThinkingVisible = false;
+
     const userMessage = inputText.trim();
     setInputText("");
-    setSelectedFiles([]);
-
+    
     // Mark this agent as thinking
     setThinkingAgents(prev => new Set([...prev, selectedAgent]));
 
@@ -225,30 +226,28 @@ function App() {
     const thinkingId = messageId + 1;
     const timestamp = new Date().toISOString();
 
-    // Add user message to agentMessages
-    setAgentMessages((prev) => {
-      const prevMsgs = prev[selectedAgent] || [];
-      return {
-        ...prev,
-        [selectedAgent]: [
-          ...prevMsgs,
-          {
-            id: messageId,
-            sender: "user",
-            text: userMessage,
-            timestamp,
-            files: selectedFiles.length > 0 ? [...selectedFiles] : undefined,
-          },
-          {
-            id: thinkingId,
-            sender: "ai",
-            text: "Thinking...",
-            timestamp,
-            isThinking: true,
-          },
-        ],
-      };
-    });
+    // Add user message
+    const newMessage = {
+      id: messageId,
+      sender: "user",
+      text: userMessage,
+      timestamp,
+      files: selectedFiles.length > 0 ? [...selectedFiles] : undefined,
+    };
+    setMessages((prev) => [...prev, newMessage]);
+    setSelectedFiles([]);
+
+    // Add thinking indicator
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: thinkingId,
+        sender: "ai",
+        text: "Thinking...",
+        timestamp,
+        isThinking: true,
+      },
+    ]);
 
     try {
       const response = await fetch(`${API_BASE}/api/chat`, {
@@ -263,55 +262,68 @@ function App() {
       const data = await response.json();
 
       if (response.ok) {
-        // Remove thinking message and add AI response ONLY if still on this agent
-        setAgentMessages((prev) => {
-          const prevMsgs = (prev[selectedAgent] || []).filter((msg) => msg.id !== thinkingId);
-          // Only add response if still on this agent
-          if (selectedAgent in prev) {
-            return {
-              ...prev,
-              [selectedAgent]: [
-                ...prevMsgs,
-                {
-                  id: Date.now() + Math.random(),
-                  sender: "ai",
-                  text: data.response,
-                  timestamp: new Date().toISOString(),
-                  agentId: selectedAgent,
-                },
-              ],
-            };
-          }
-          return prev;
-        });
+        // Remove thinking message and add AI response
+        setMessages((prev) => [
+          ...prev.filter((msg) => msg.id !== thinkingId),
+          {
+            id: Date.now() + Math.random(),
+            sender: "ai",
+            text: data.response,
+            timestamp: new Date().toISOString(),
+            agentId: selectedAgent,
+          },
+        ]);
         logFrontendError(
           "FRONTEND_CHAT_SUCCESS",
           "Chat message sent successfully"
         );
       } else {
-        let errorMessage = "Sorry, I couldn't process your message. ";
+        // If backend returned the specific EABB5 code, show server message
+        // but keep the thinking indicator visible so the UI indicates
+        // the request is still pending upstream.
+        if (data && data.error_code === "EABB5") {
+          const serverMsg = data.message || "Upstream AI service unavailable";
+          setMessages((prev) => [
+            // Keep thinking indicator (do not remove thinkingId)
+            ...prev,
+            {
+              id: Date.now() + Math.random(),
+              sender: "ai",
+              text: serverMsg,
+              timestamp: new Date().toISOString(),
+              agentId: selectedAgent,
+              error: true,
+              errorCode: "EABB5",
+            },
+          ]);
+          // Keep the thinking indicator visible for this agent
+          keepThinkingVisible = true;
+          logFrontendError("FRONTEND_CHAT_EABB5", "Received EABB5 from backend", data);
+        } else {
+          let errorMessage = "Sorry, I couldn't process your message. ";
 
-        if (data.message) {
-          errorMessage = data.message;
-        } else if (data.error) {
-          switch (data.error) {
-            case "AI service unavailable":
-              errorMessage =
-                "The AI service is currently offline. Please wait a moment and try again.";
-              break;
-            case "AI processing failed":
-              errorMessage =
-                "I'm having trouble understanding your message. Could you try rephrasing it?";
-              break;
-            case "Empty message":
-              errorMessage = "Please type a message to send.";
-              break;
-            default:
-              errorMessage = data.error;
+          if (data.message) {
+            errorMessage = data.message;
+          } else if (data.error) {
+            switch (data.error) {
+              case "AI service unavailable":
+                errorMessage =
+                  "The AI service is currently offline. Please wait a moment and try again.";
+                break;
+              case "AI processing failed":
+                errorMessage =
+                  "I'm having trouble understanding your message. Could you try rephrasing it?";
+                break;
+              case "Empty message":
+                errorMessage = "Please type a message to send.";
+                break;
+              default:
+                errorMessage = data.error;
+            }
           }
-        }
 
-        throw new Error(errorMessage);
+          throw new Error(errorMessage);
+        }
       }
     } catch (error) {
       let userFriendlyMessage = "Sorry, something went wrong. ";
@@ -323,31 +335,28 @@ function App() {
           "Can't connect to the AI service. Please check your internet connection and try again.";
       }
 
-      setAgentMessages((prev) => {
-        const prevMsgs = (prev[selectedAgent] || []).filter((msg) => msg.id !== thinkingId);
-        return {
-          ...prev,
-          [selectedAgent]: [
-            ...prevMsgs,
-            {
-              id: Date.now() + Math.random(),
-              sender: "ai",
-              text: userFriendlyMessage,
-              timestamp: new Date().toISOString(),
-              error: true,
-            },
-          ],
-        };
-      });
+      setMessages((prev) => [
+        ...prev.filter((msg) => msg.id !== thinkingId),
+        {
+          id: Date.now() + Math.random(),
+          sender: "ai",
+          text: userFriendlyMessage,
+          timestamp: new Date().toISOString(),
+          error: true,
+        },
+      ]);
       logFrontendError("FRONTEND_CHAT_ERROR", "Chat request failed", error);
     }
 
-    // Remove this agent from thinking set
-    setThinkingAgents(prev => {
-      const newSet = new Set(prev);
-      newSet.delete(selectedAgent);
-      return newSet;
-    });
+    // Remove this agent from thinking set unless we intentionally
+    // want to keep the thinking indicator visible (EABB5 case)
+    if (!keepThinkingVisible) {
+      setThinkingAgents(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(selectedAgent);
+        return newSet;
+      });
+    }
   }, [connecting, inputText, thinkingAgents, selectedFiles, selectedAgent]);
 
   // Check backend connection and load agents on mount
@@ -382,12 +391,12 @@ function App() {
     return () => clearInterval(refreshInterval);
   }, [connecting, loadAgents]);
 
-  // Auto scroll to bottom when new messages arrive for selected agent
+  // Auto scroll to bottom when new messages arrive
   useEffect(() => {
     if (chatAreaRef.current) {
       chatAreaRef.current.scrollTop = chatAreaRef.current.scrollHeight;
     }
-  }, [agentMessages, selectedAgent]);
+  }, [messages]);
 
   // Event handlers (optimized with useCallback)
   const handleKeyPress = useCallback(
@@ -587,7 +596,7 @@ function App() {
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
           >
-            {(agentMessages[selectedAgent]?.length ?? 0) === 0 ? (
+            {messages.length === 0 ? (
               <div className="empty-chat">
                 <div className="empty-message">
                   <h3>Start a conversation</h3>
@@ -598,7 +607,7 @@ function App() {
                 </div>
               </div>
             ) : (
-              agentMessages[selectedAgent]?.map((message) => (
+              messages.map((message) => (
                 <div key={message.id} className="message-wrapper">
                   <div
                     className={`message ${message.sender} ${message.error ? "error" : ""} ${message.isThinking ? "thinking" : ""}`}

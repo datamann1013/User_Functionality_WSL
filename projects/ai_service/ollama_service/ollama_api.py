@@ -7,7 +7,14 @@ import os
 import requests
 from datetime import datetime
 from flask import Flask, request, jsonify
-from flask_cors import CORS
+try:
+    from flask_cors import CORS
+except Exception:
+    # Running in a constrained environment where Flask-Cors isn't available.
+    # We'll provide a no-op CORS placeholder so the app can start.
+    def CORS(app, *args, **kwargs):
+        return None
+import time
 
 app = Flask(__name__)
 CORS(app)
@@ -119,11 +126,51 @@ def chat():
             },
         }
 
-        response = requests.post(
-            f"{OLLAMA_HOST}/api/generate", json=ollama_payload, timeout=60
-        )
+        # Try the generate endpoint with retries to mitigate transient timeouts
+        max_retries = 3
+        backoff = 1
+        response = None
+        for attempt in range(max_retries):
+            try:
+                print(f"[OLLAMA_RETRY] attempt {attempt+1}/{max_retries} -> {OLLAMA_HOST}/api/generate")
+                start_ts = datetime.now()
+                response = requests.post(
+                    f"{OLLAMA_HOST}/api/generate",
+                    json=ollama_payload,
+                    timeout=180,
+                )
+                duration_ms = int((datetime.now() - start_ts).total_seconds() * 1000)
+                if response is not None:
+                    print(f"[OLLAMA_RETRY] response status={response.status_code} duration_ms={duration_ms}")
 
-        if response.status_code == 200:
+                # Break on successful HTTP response code
+                if response and response.status_code == 200:
+                    break
+                else:
+                    # non-200 - wait and retry
+                    try:
+                        # attempt to show snippet of response body for diagnostics
+                        body_snippet = response.text[:300] if response is not None else "<no-body>"
+                        print(f"[OLLAMA_RETRY] non-200 response body_snippet={body_snippet}")
+                    except Exception:
+                        pass
+                    time.sleep(backoff)
+                    backoff *= 2
+            except requests.exceptions.Timeout as te:
+                print(f"[OLLAMA_RETRY] timeout on attempt {attempt+1}: {repr(te)}")
+                # retry on timeout
+                time.sleep(backoff)
+                backoff *= 2
+                response = None
+            except Exception as ex:
+                # Log unexpected exceptions to help diagnose connection issues
+                try:
+                    print(f"[OLLAMA_RETRY] exception on attempt {attempt+1}: {repr(ex)}")
+                except Exception:
+                    pass
+                response = None
+
+        if response and response.status_code == 200:
             result = response.json()
             ai_response = result.get("response", "No response")
 
@@ -145,7 +192,8 @@ def chat():
                 }
             )
         else:
-            return jsonify({"error": f"Ollama error: {response.status_code}"}), 502
+            # If we couldn't obtain a good response after retries, surface a timeout
+            return jsonify({"error": "Request timeout or upstream failure"}), 504
 
     except requests.exceptions.Timeout:
         return jsonify({"error": "Request timeout"}), 504
