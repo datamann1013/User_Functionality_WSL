@@ -1,9 +1,9 @@
-use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
+use sqlx::{SqlitePool, sqlite::SqlitePoolOptions, FromRow};
 use std::path::Path;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
 pub struct ServiceRow {
     pub id: String,
     pub name: String,
@@ -51,8 +51,10 @@ pub async fn insert_service(pool: &SqlitePool, svc: &ServiceRow) -> Result<()> {
 }
 
 pub async fn list_services(pool: &SqlitePool) -> Result<Vec<ServiceRow>> {
-    let rows = sqlx::query_as!(ServiceRow, r#"SELECT id, name, version as "version?", ws_url as "ws_url?", rest_url as "rest_url?", public_key_pem as "public_key_pem?" FROM services"#)
-        .fetch_all(pool)
-        .await?;
+    let rows = sqlx::query_as::<_, ServiceRow>(
+        r#"SELECT id, name, version, ws_url, rest_url, public_key_pem FROM services"#,
+    )
+    .fetch_all(pool)
+    .await?;
     Ok(rows)
 }

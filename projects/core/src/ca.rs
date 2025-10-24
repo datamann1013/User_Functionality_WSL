@@ -1,14 +1,13 @@
-use openssl::rsa::Rsa;
-use openssl::x509::{X509NameBuilder, X509};
-use openssl::pkey::PKey;
-use openssl::x509::X509Builder;
 use pbkdf2::pbkdf2_hmac;
 use hmac::Hmac;
 use sha2::Sha256;
-use aes_gcm::{Aes256Gcm, Key, Nonce};
-use aes_gcm::aead::{Aead, NewAead};
+use aes_gcm::{Aes256Gcm, Key, Nonce, KeyInit};
+use aes_gcm::aead::{Aead};
 use base64::{engine::general_purpose, Engine as _};
 use std::{path::Path, fs};
+use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType, IsCa, BasicConstraints};
+use pem::Pem;
+use x509_parser::prelude::*;
 
 pub fn init_ca(data_dir: &str, passphrase: &str) -> Result<(), Box<dyn std::error::Error>> {
     let key_path = Path::new(data_dir).join("ca_key.enc");
@@ -20,6 +19,16 @@ pub fn init_ca(data_dir: &str, passphrase: &str) -> Result<(), Box<dyn std::erro
     }
 
     println!("Generating CA keypair...");
+    let mut params = CertificateParams::new(vec![]);
+    let mut dn = DistinguishedName::new();
+    dn.push(DnType::CommonName, "RuneCore Root CA");
+    params.distinguished_name = dn;
+    params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    params.not_before = rcgen::date_time_ymd(2025, 1, 1);
+    params.not_after = rcgen::date_time_ymd(2035, 1, 1);
+    let cert = Certificate::from_params(params)?;
+
+    let key_pem = cert.serialize_private_key_pem();
     let rsa = Rsa::generate(2048)?;
     let pkey = PKey::from_rsa(rsa)?;
 
@@ -39,13 +48,6 @@ pub fn init_ca(data_dir: &str, passphrase: &str) -> Result<(), Box<dyn std::erro
 
     let key_pem = pkey.private_key_to_pem_pkcs8()?;
     let cert_pem = cert.to_pem()?;
-
-    // derive key from passphrase
-    let salt = b"runecore_ca_salt";
-    let mut derived = [0u8; 32];
-    pbkdf2_hmac::<Hmac<Sha256>>(passphrase.as_bytes(), salt, 100_000, &mut derived);
-
-    let aes_key = Key::from_slice(&derived);
     let cipher = Aes256Gcm::new(aes_key);
 
     // random nonce
@@ -62,4 +64,68 @@ pub fn init_ca(data_dir: &str, passphrase: &str) -> Result<(), Box<dyn std::erro
 
     println!("CA initialized and stored in {}", data_dir);
     Ok(())
+}
+
+fn derive_key(passphrase: &str) -> [u8; 32] {
+    let salt = b"runecore_ca_salt";
+    let mut derived = [0u8; 32];
+    pbkdf2_hmac::<Hmac<Sha256>>(passphrase.as_bytes(), salt, 100_000, &mut derived);
+    derived
+}
+
+fn load_encrypted_key(data_dir: &str, passphrase: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let key_path = Path::new(data_dir).join("ca_key.enc");
+    let content = fs::read_to_string(key_path)?;
+    let parts: Vec<&str> = content.split(':').collect();
+    if parts.len() != 2 {
+        return Err("Invalid key storage format".into());
+    }
+    let nonce = general_purpose::STANDARD.decode(parts[0])?;
+    let ciphertext = general_purpose::STANDARD.decode(parts[1])?;
+
+    let derived = derive_key(passphrase);
+    let aes_key = Key::from_slice(&derived);
+    let cipher = Aes256Gcm::new(aes_key);
+    let plaintext = cipher.decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())?;
+    Ok(plaintext)
+}
+
+pub fn sign_csr(data_dir: &str, passphrase: &str, csr_pem: &str, days_valid: u32) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    // load CA key and cert
+    let ca_cert_path = Path::new(data_dir).join("ca_cert.pem");
+    let ca_cert_pem = fs::read_to_string(&ca_cert_path)?;
+
+    let key_pem = load_encrypted_key(data_dir, passphrase)?;
+    let ca_key_pem = String::from_utf8_lossy(&key_pem).to_string();
+    let ca_cert = rcgen::Certificate::from_pem(&ca_cert_pem)?;
+
+    // parse CSR PEM
+    let (_label, csr_bytes) = {
+        let pem = pem::parse(csr_pem)?;
+        (pem.tag, pem.contents)
+    };
+
+    let (_, csr) = x509_parser::parse_x509_certification_request(&csr_bytes)?;
+    let subject = csr.request_info.subject.clone();
+
+    // build signed cert using rcgen
+    let mut params = CertificateParams::from_ca_cert_pem(&ca_cert_pem, ca_key_pem.as_str())?;
+    // set subject alt names and subject
+    params.distinguished_name = {
+        let mut dn = rcgen::DistinguishedName::new();
+        for rdn in subject.rdns.iter() {
+            for aty in rdn.set.iter() {
+                if let Some(attr) = aty.attr.get_value().as_str() {
+                    dn.push(rcgen::DnType::CommonName, attr);
+                }
+            }
+        }
+        dn
+    };
+    params.not_before = rcgen::date_time_ymd(2025, 1, 1);
+    params.not_after = rcgen::date_time_ymd(2025, 1, 1 + (days_valid as i32 / 365));
+
+    let cert = rcgen::Certificate::from_params(params)?;
+    let cert_pem = cert.serialize_pem_with_signer(&ca_cert)?;
+    Ok(cert_pem.into_bytes())
 }

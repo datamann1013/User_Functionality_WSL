@@ -8,6 +8,8 @@ mod db;
 #[derive(Clone)]
 struct AppState {
     db: sqlx::SqlitePool,
+    data_dir: String,
+    ca_passphrase: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -40,13 +42,14 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = db::init_db(&data_dir).await?;
 
-    let state = AppState { db: pool };
+    let state = AppState { db: pool, data_dir: data_dir.clone(), ca_passphrase: passphrase.clone() };
 
     let app = Router::new()
         .route("/", get(root))
         .route("/health", get(health))
         .route("/api/v1/services/register", post(register_service))
         .route("/api/v1/services", get(get_services))
+        .route("/api/v1/pki/sign", post(sign_csr))
         .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 11440));
@@ -84,6 +87,20 @@ async fn register_service(State(state): State<AppState>, Json(payload): Json<Ser
         return Json(serde_json::json!({"ok": false, "error": format!("db error: {}", e)}));
     }
     Json(serde_json::json!({"ok": true, "service_id": info.id}))
+}
+
+#[derive(Deserialize)]
+struct SignCsrRequest {
+    csr_pem: String,
+    days_valid: Option<u32>,
+}
+
+async fn sign_csr(State(state): State<AppState>, Json(payload): Json<SignCsrRequest>) -> Json<serde_json::Value> {
+    let days = payload.days_valid.unwrap_or(7);
+    match ca::sign_csr(&state.data_dir, &state.ca_passphrase, &payload.csr_pem, days) {
+        Ok(cert_pem) => Json(serde_json::json!({"ok": true, "cert_pem": String::from_utf8_lossy(&cert_pem)})),
+        Err(e) => Json(serde_json::json!({"ok": false, "error": format!("signing error: {}", e)})),
+    }
 }
 
 async fn get_services(State(state): State<AppState>) -> Json<serde_json::Value> {
