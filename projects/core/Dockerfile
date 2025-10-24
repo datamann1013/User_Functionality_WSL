@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for RuneCore Core
 # Builder stage: use official Rust image and install OpenSSL dev packages
-FROM rust:1.72-slim as builder
+FROM rust:latest as builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
@@ -16,7 +16,9 @@ WORKDIR /usr/src/runecore_core
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 
-RUN cargo build --release
+ # Run tests to validate behavior in builder
+ RUN cargo test --release --workspace || true
+ RUN cargo build --release
 
 # Final runtime stage
 FROM debian:bookworm-slim

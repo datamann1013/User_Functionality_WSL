@@ -1,4 +1,5 @@
 use axum::{extract::State, response::Json, routing::{get, post}, Router};
+use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc, env, fs};
 
@@ -25,7 +26,7 @@ struct ServiceInfo {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let cli = clap::Parser::parse::<cli::Cli>();
+    let cli = cli::Cli::parse();
     // If CLI subcommand provided, run and exit
     if std::env::args().len() > 1 {
         return cli::run_command(cli).map_err(|e| anyhow::anyhow!(e.to_string()));
@@ -58,9 +59,46 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/pki/sign", post(sign_csr))
         .with_state(state);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 11440));
-    println!("RuneCore core listening on {}", addr);
-    axum::Server::bind(&addr)
+    // Load server cert & key and start TLS server
+    let (cert_pem, key_pem) = ca::get_server_cert_and_key_pem(&data_dir, &passphrase).expect("Failed to load server cert/key");
+
+    // create rustls server config
+    use rustls::{Certificate as RustlsCert, PrivateKey};
+    use rustls_pemfile::{read_one, Item};
+
+    let mut cert_cursor = std::io::Cursor::new(cert_pem.clone());
+    let mut certs: Vec<RustlsCert> = vec![];
+    while let Ok(Some(item)) = read_one(&mut cert_cursor) {
+        if let Item::X509Certificate(buf) = item {
+            certs.push(RustlsCert(buf));
+        }
+    }
+
+    let mut key_cursor = std::io::Cursor::new(key_pem.clone());
+    let key = match read_one(&mut key_cursor).expect("read key") {
+        Some(Item::PKCS8Key(buf)) | Some(Item::RSAKey(buf)) => PrivateKey(buf),
+        _ => panic!("unsupported key format"),
+    };
+
+    // configure mTLS: require client certs signed by our CA
+    let ca_cert_pem = std::fs::read_to_string(std::path::Path::new(&data_dir).join("ca_cert.pem")).expect("read ca cert");
+    let mut root_store = rustls::RootCertStore::empty();
+    root_store.add_parsable_certificates(&[ca_cert_pem.into_bytes()]);
+
+    let client_auth = rustls::server::AllowAnyAuthenticatedClient::new(root_store);
+
+    let config = rustls::ServerConfig::builder()
+        .with_safe_defaults()
+        .with_client_cert_verifier(std::sync::Arc::new(client_auth))
+        .with_single_cert(certs, key)
+        .expect("bad certs/key");
+
+    let tls_cfg = std::sync::Arc::new(config);
+    // axum_server expects its RustlsConfig type
+    let rustls_cfg: axum_server::tls_rustls::RustlsConfig = axum_server::tls_rustls::RustlsConfig::from_config(tls_cfg);
+    let addr = SocketAddr::from(([0, 0, 0, 0], 11440));
+    println!("RuneCore core listening on https://{}", addr);
+    axum_server::bind_rustls(addr, rustls_cfg)
         .serve(app.into_make_service())
         .await
         .unwrap();

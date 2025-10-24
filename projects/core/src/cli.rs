@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::Path;
+use anyhow::Result;
 
 #[derive(Parser)]
 #[command(author, version, about = "RuneCore Core CLI helpers")]
@@ -26,12 +27,12 @@ pub enum Commands {
     },
 }
 
-pub fn run_command(cmd: Cli) -> anyhow::Result<()> {
+pub fn run_command(cmd: Cli) -> Result<()> {
     match cmd.command {
         Commands::InitPassphrase { data_dir } => {
             let dir = data_dir.unwrap_or_else(|| "./data".to_string());
             fs::create_dir_all(&dir)?;
-            let pass = base64::engine::general_purpose::STANDARD.encode(uuid::Uuid::new_v4().to_string());
+            let pass = uuid::Uuid::new_v4().to_string();
             let pass_path = Path::new(&dir).join("ca_passphrase.txt");
             fs::write(pass_path, pass)?;
             println!("Wrote passphrase to {}", dir);
@@ -46,7 +47,7 @@ pub fn run_command(cmd: Cli) -> anyhow::Result<()> {
                     if pass_path.exists() {
                         fs::read_to_string(pass_path)?
                     } else {
-                        let p = base64::engine::general_purpose::STANDARD.encode(uuid::Uuid::new_v4().to_string());
+                        let p = uuid::Uuid::new_v4().to_string();
                         fs::write(pass_path, &p)?;
                         p
                     }
