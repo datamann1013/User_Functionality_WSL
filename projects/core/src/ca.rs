@@ -129,3 +129,47 @@ pub fn sign_csr(data_dir: &str, passphrase: &str, csr_pem: &str, days_valid: u32
     let cert_pem = cert.serialize_pem_with_signer(&ca_cert)?;
     Ok(cert_pem.into_bytes())
 }
+
+pub fn ensure_server_cert(data_dir: &str, passphrase: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let server_cert_path = Path::new(data_dir).join("server_cert.pem");
+    let server_key_path = Path::new(data_dir).join("server_key.enc");
+    if server_cert_path.exists() && server_key_path.exists() {
+        println!("Server cert exists - skipping generation");
+        return Ok(());
+    }
+
+    // generate server rsa key
+    let rsa = Rsa::generate(2048)?;
+    let pkey = PKey::from_rsa(rsa)?;
+    let priv_pem = pkey.private_key_to_pem_pkcs8()?;
+
+    // create CSR
+    let mut name_builder = X509NameBuilder::new()?;
+    name_builder.append_entry_by_text("CN", "runecore.local")?;
+    let name = name_builder.build();
+
+    let mut req_builder = openssl::x509::X509ReqBuilder::new()?;
+    req_builder.set_subject_name(&name)?;
+    req_builder.set_pubkey(&pkey)?;
+    req_builder.sign(&pkey, openssl::hash::MessageDigest::sha256())?;
+    let csr = req_builder.build();
+    let csr_pem = csr.to_pem()?;
+
+    // sign csr using CA
+    let cert_pem = sign_csr(data_dir, passphrase, std::str::from_utf8(&csr_pem)?, 365)?;
+
+    // encrypt private key using same scheme
+    let derived = derive_key(passphrase);
+    let aes_key = Key::from_slice(&derived);
+    let cipher = Aes256Gcm::new(aes_key);
+    let mut nonce_bytes = [0u8; 12];
+    getrandom::getrandom(&mut nonce_bytes)?;
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = cipher.encrypt(nonce, priv_pem.as_ref())?;
+    let store = format!("{}:{}", general_purpose::STANDARD.encode(&nonce_bytes), general_purpose::STANDARD.encode(&ciphertext));
+
+    fs::write(server_key_path, store)?;
+    fs::write(server_cert_path, cert_pem)?;
+    println!("Server cert + key generated and stored in {}", data_dir);
+    Ok(())
+}

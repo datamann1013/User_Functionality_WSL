@@ -4,6 +4,7 @@ use std::{net::SocketAddr, sync::Arc, env, fs};
 
 mod ca;
 mod db;
+mod cli;
 
 #[derive(Clone)]
 struct AppState {
@@ -24,6 +25,11 @@ struct ServiceInfo {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let cli = clap::Parser::parse::<cli::Cli>();
+    // If CLI subcommand provided, run and exit
+    if std::env::args().len() > 1 {
+        return cli::run_command(cli).map_err(|e| anyhow::anyhow!(e.to_string()));
+    }
     // Load passphrase from file if exists, else env var
     let data_dir = env::var("RUNECORE_DATA_DIR").unwrap_or_else(|_| "./data".to_string());
     fs::create_dir_all(&data_dir).expect("Failed to create data dir");
