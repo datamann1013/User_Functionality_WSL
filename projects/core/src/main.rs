@@ -1,15 +1,13 @@
 use axum::{extract::State, response::Json, routing::{get, post}, Router};
-use parking_lot::RwLock;
-use rand::RngCore;
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
-use std::{collections::HashMap, net::SocketAddr, sync::Arc, env, fs};
+use std::{net::SocketAddr, sync::Arc, env, fs};
 
 mod ca;
+mod db;
 
 #[derive(Clone)]
 struct AppState {
-    registry: Arc<RwLock<HashMap<String, ServiceInfo>>>,
+    db: sqlx::SqlitePool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -23,21 +21,26 @@ struct ServiceInfo {
 }
 
 #[tokio::main]
-async fn main() {
-    // Initialize CA - require passphrase
-    let passphrase = env::var("RUNECORE_CA_PASSPHRASE").unwrap_or_else(|_| {
-        eprintln!("Environment variable RUNECORE_CA_PASSPHRASE not set - exiting");
-        std::process::exit(1);
-    });
-
+async fn main() -> anyhow::Result<()> {
+    // Load passphrase from file if exists, else env var
     let data_dir = env::var("RUNECORE_DATA_DIR").unwrap_or_else(|_| "./data".to_string());
     fs::create_dir_all(&data_dir).expect("Failed to create data dir");
 
+    let pass_file = std::path::Path::new(&data_dir).join("ca_passphrase.txt");
+    let passphrase = if pass_file.exists() {
+        fs::read_to_string(pass_file)?.trim().to_string()
+    } else {
+        env::var("RUNECORE_CA_PASSPHRASE").unwrap_or_else(|_| {
+            eprintln!("Environment variable RUNECORE_CA_PASSPHRASE not set and no passphrase file found - exiting");
+            std::process::exit(1);
+        })
+    };
+
     ca::init_ca(&data_dir, &passphrase).expect("Failed to initialize CA");
 
-    let state = AppState {
-        registry: Arc::new(RwLock::new(HashMap::new())),
-    };
+    let pool = db::init_db(&data_dir).await?;
+
+    let state = AppState { db: pool };
 
     let app = Router::new()
         .route("/", get(root))
@@ -52,6 +55,8 @@ async fn main() {
         .serve(app.into_make_service())
         .await
         .unwrap();
+
+    Ok(())
 }
 
 async fn root() -> &'static str {
@@ -59,24 +64,31 @@ async fn root() -> &'static str {
 }
 
 async fn health() -> Json<serde_json::Value> {
-    Json(json!({"status": "ok"}))
+    Json(serde_json::json!({"status": "ok"}))
 }
 
 async fn register_service(State(state): State<AppState>, Json(payload): Json<ServiceInfo>) -> Json<serde_json::Value> {
     let mut info = payload.clone();
     if info.id.is_empty() {
-        // generate random id
-        let mut rng = rand::thread_rng();
-        let mut b = [0u8; 8];
-        rng.fill_bytes(&mut b);
-        info.id = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&b);
+        info.id = uuid::Uuid::new_v4().to_string();
     }
-    state.registry.write().insert(info.id.clone(), info.clone());
-    Json(json!({"ok": true, "service_id": info.id}))
+    let row = db::ServiceRow {
+        id: info.id.clone(),
+        name: info.name.clone(),
+        version: info.version.clone(),
+        ws_url: info.ws_url.clone(),
+        rest_url: info.rest_url.clone(),
+        public_key_pem: info.public_key_pem.clone(),
+    };
+    if let Err(e) = db::insert_service(&state.db, &row).await {
+        return Json(serde_json::json!({"ok": false, "error": format!("db error: {}", e)}));
+    }
+    Json(serde_json::json!({"ok": true, "service_id": info.id}))
 }
 
 async fn get_services(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let map = state.registry.read();
-    let list: Vec<ServiceInfo> = map.values().cloned().collect();
-    Json(json!({"services": list}))
+    match db::list_services(&state.db).await {
+        Ok(list) => Json(serde_json::json!({"services": list})),
+        Err(e) => Json(serde_json::json!({"ok": false, "error": format!("db error: {}", e)})),
+    }
 }
