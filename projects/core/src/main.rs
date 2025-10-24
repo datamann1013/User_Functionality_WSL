@@ -26,9 +26,11 @@ struct ServiceInfo {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let cli = cli::Cli::parse();
-    // If CLI subcommand provided, run and exit
+    // Parse CLI; if a subcommand was provided, run it and exit. Otherwise start server.
+    let maybe = clap::Command::new("runecore_core").get_matches_from(std::env::args_os());
+    // If there's a subcommand (any arg), use the typed parser and run it
     if std::env::args().len() > 1 {
+        let cli = cli::Cli::parse();
         return cli::run_command(cli).map_err(|e| anyhow::anyhow!(e.to_string()));
     }
     // Load passphrase from file if exists, else env var
