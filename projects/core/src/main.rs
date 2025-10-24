@@ -3,6 +3,8 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc, env, fs};
 
+mod diag;
+
 mod ca;
 mod db;
 mod cli;
@@ -49,6 +51,26 @@ async fn main() -> anyhow::Result<()> {
 
     ca::init_ca(&data_dir, &passphrase).expect("Failed to initialize CA");
 
+    // Initialize tracing (configurable through RUST_LOG). Also install a panic hook to send
+    // fatal errors to the ErrorLogger service so we can diagnose crashes in containers.
+    tracing_subscriber::fmt::init();
+    std::panic::set_hook(Box::new(|panic_info| {
+        let payload = match panic_info.payload().downcast_ref::<&str>() {
+            Some(s) => s.to_string(),
+            None => match panic_info.payload().downcast_ref::<String>() {
+                Some(s) => s.clone(),
+                None => "unknown panic".to_string(),
+            },
+        };
+        let location = if let Some(loc) = panic_info.location() {
+            format!("{}:{}", loc.file(), loc.line())
+        } else {
+            "unknown".to_string()
+        };
+        let details = format!("panic at {}: {}", location, payload);
+        let _ = diag::report_error_sync("panic in runecore_core", Some(&details));
+    }));
+
     let pool = db::init_db(&data_dir).await?;
 
     let state = AppState { db: pool, data_dir: data_dir.clone(), ca_passphrase: passphrase.clone() };
@@ -87,13 +109,16 @@ async fn main() -> anyhow::Result<()> {
     let mut root_store = rustls::RootCertStore::empty();
     root_store.add_parsable_certificates(&[ca_cert_pem.into_bytes()]);
 
-    let client_auth = rustls::server::AllowAnyAuthenticatedClient::new(root_store);
+    let disable_mtls = std::env::var("RUNECORE_DISABLE_MTLS").unwrap_or_default();
+    let builder = rustls::ServerConfig::builder().with_safe_defaults();
 
-    let config = rustls::ServerConfig::builder()
-        .with_safe_defaults()
-        .with_client_cert_verifier(std::sync::Arc::new(client_auth))
-        .with_single_cert(certs, key)
-        .expect("bad certs/key");
+    let config = if disable_mtls == "1" || disable_mtls.to_lowercase() == "true" {
+        tracing::warn!("mTLS disabled via RUNECORE_DISABLE_MTLS env var (debug only)");
+        builder.with_no_client_auth().with_single_cert(certs, key).expect("bad certs/key")
+    } else {
+        let client_auth = rustls::server::AllowAnyAuthenticatedClient::new(root_store);
+        builder.with_client_cert_verifier(std::sync::Arc::new(client_auth)).with_single_cert(certs, key).expect("bad certs/key")
+    };
 
     let tls_cfg = std::sync::Arc::new(config);
     // axum_server expects its RustlsConfig type
@@ -113,10 +138,12 @@ async fn root() -> &'static str {
 }
 
 async fn health() -> Json<serde_json::Value> {
+    tracing::info!("health handler invoked");
     Json(serde_json::json!({"status": "ok"}))
 }
 
 async fn register_service(State(state): State<AppState>, Json(payload): Json<ServiceInfo>) -> Json<serde_json::Value> {
+    tracing::info!("register_service handler invoked: name={}", payload.name);
     let mut info = payload.clone();
     if info.id.is_empty() {
         info.id = uuid::Uuid::new_v4().to_string();
@@ -130,8 +157,11 @@ async fn register_service(State(state): State<AppState>, Json(payload): Json<Ser
         public_key_pem: info.public_key_pem.clone(),
     };
     if let Err(e) = db::insert_service(&state.db, &row).await {
+        // Report DB insert failure to ErrorLogger for diagnostics
+        let _ = diag::report_error_sync(&format!("db insert error: {}", e), None);
         return Json(serde_json::json!({"ok": false, "error": format!("db error: {}", e)}));
     }
+    tracing::info!("register_service succeeded: id={}", info.id);
     Json(serde_json::json!({"ok": true, "service_id": info.id}))
 }
 

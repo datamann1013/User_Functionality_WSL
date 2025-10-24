@@ -280,3 +280,11 @@ scratch/
 # Temporary folders
 tmp/
 temp/
+
+# Ignore runecore core data dir artifacts (certs, encrypted keys, passphrases, db)
+projects/core/data/
+projects/core/data/*
+projects/core/data/*.enc
+projects/core/data/*.pem
+projects/core/data/ca_passphrase.txt
+projects/core/data/runecore.db
