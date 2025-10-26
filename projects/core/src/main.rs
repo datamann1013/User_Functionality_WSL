@@ -1,4 +1,5 @@
-use axum::{extract::State, response::Json, routing::{get, post}, Router};
+use axum::{extract::State, response::Json, routing::{get, post}, Router, body::Bytes};
+use axum::http::HeaderMap;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, sync::Arc, env, fs};
@@ -18,7 +19,7 @@ struct AppState {
 
 #[derive(Serialize, Deserialize, Clone)]
 struct ServiceInfo {
-    id: String,
+    id: Option<String>,
     name: String,
     version: Option<String>,
     ws_url: Option<String>,
@@ -182,14 +183,27 @@ async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({"status": "ok"}))
 }
 
-async fn register_service(State(state): State<AppState>, Json(payload): Json<ServiceInfo>) -> Json<serde_json::Value> {
+async fn register_service(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Json<serde_json::Value> {
+    // parse JSON body manually so we can return clearer errors (avoid 415 from extractor)
+    tracing::debug!("register_service headers: {:?}", headers);
+        let content_type = headers.get("content-type").and_then(|v| v.to_str().ok()).unwrap_or(""); // Allow for missing Content-Type
+    tracing::debug!("register_service content-type: {}", content_type);
+    tracing::debug!("register_service raw body: {}", String::from_utf8_lossy(&body));
+        if !content_type.is_empty() && !content_type.contains("application/json") {
+            return Json(serde_json::json!({"ok": false, "error": "Expected request with `Content-Type: application/json` if provided"}));
+        }
+    let payload_res: Result<ServiceInfo, _> = serde_json::from_slice(&body);
+    let payload = match payload_res {
+        Ok(p) => p,
+        Err(e) => return Json(serde_json::json!({"ok": false, "error": format!("invalid json payload: {}", e)})),
+    };
     tracing::info!("register_service handler invoked: name={}", payload.name);
     let mut info = payload.clone();
-    if info.id.is_empty() {
-        info.id = uuid::Uuid::new_v4().to_string();
+    if info.id.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+        info.id = Some(uuid::Uuid::new_v4().to_string());
     }
     let row = db::ServiceRow {
-        id: info.id.clone(),
+        id: info.id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         name: info.name.clone(),
         version: info.version.clone(),
         ws_url: info.ws_url.clone(),
@@ -201,7 +215,7 @@ async fn register_service(State(state): State<AppState>, Json(payload): Json<Ser
         let _ = diag::report_error_sync(&format!("db insert error: {}", e), None);
         return Json(serde_json::json!({"ok": false, "error": format!("db error: {}", e)}));
     }
-    tracing::info!("register_service succeeded: id={}", info.id);
+    tracing::info!("register_service succeeded: id={}", info.id.clone().unwrap_or_default());
     Json(serde_json::json!({"ok": true, "service_id": info.id}))
 }
 

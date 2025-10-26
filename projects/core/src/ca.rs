@@ -92,6 +92,11 @@ fn load_encrypted_key(data_dir: &str, passphrase: &str) -> Result<Vec<u8>> {
 }
 
 pub fn sign_csr(data_dir: &str, passphrase: &str, csr_pem: &str, days_valid: u32) -> Result<Vec<u8>> {
+    // default to client role for backwards compatibility
+    sign_csr_with_role(data_dir, passphrase, csr_pem, days_valid, "client")
+}
+
+pub fn sign_csr_with_role(data_dir: &str, passphrase: &str, csr_pem: &str, days_valid: u32, role: &str) -> Result<Vec<u8>> {
     // load CA key and cert
     let ca_cert_path = Path::new(data_dir).join("ca_cert.pem");
     let ca_cert_pem = fs::read(&ca_cert_path)?;
@@ -125,10 +130,13 @@ pub fn sign_csr(data_dir: &str, passphrase: &str, csr_pem: &str, days_valid: u32
     let ku = KeyUsage::new().digital_signature().key_encipherment().build()?;
     builder.append_extension(ku)?;
 
-    // extendedKeyUsage: include both clientAuth and serverAuth to be permissive for both roles
+    // extendedKeyUsage: pick according to role
     let mut eku = ExtendedKeyUsage::new();
-    eku.client_auth();
-    eku.server_auth();
+    match role {
+        "server" => { eku.server_auth(); },
+        "client" => { eku.client_auth(); },
+        _ => { eku.client_auth(); eku.server_auth(); },
+    }
     let eku = eku.build()?;
     builder.append_extension(eku)?;
 
@@ -171,8 +179,8 @@ pub fn ensure_server_cert(data_dir: &str, passphrase: &str) -> Result<()> {
     let csr = req_builder.build();
     let csr_pem = csr.to_pem()?;
 
-    // sign csr using CA
-    let cert_pem = sign_csr(data_dir, passphrase, std::str::from_utf8(&csr_pem)?, 365)?;
+    // sign csr using CA (server role)
+    let cert_pem = sign_csr_with_role(data_dir, passphrase, std::str::from_utf8(&csr_pem)?, 365, "server")?;
 
     // encrypt private key using same scheme
     let derived = derive_key(passphrase);

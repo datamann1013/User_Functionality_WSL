@@ -36,6 +36,9 @@ pub enum Commands {
         /// output path for signed cert (defaults to data/client_cert.pem)
         #[arg(short, long)]
         out: Option<String>,
+        /// role for the certificate: client or server (defaults to client)
+        #[arg(short, long)]
+        role: Option<String>,
         /// validity days
         #[arg(short, long)]
         days: Option<u32>,
@@ -72,7 +75,7 @@ pub fn run_command(cmd: Cli) -> Result<()> {
             crate::ca::ensure_server_cert(&dir, &pass)?;
             println!("Core initialized in {}", dir);
         }
-        Commands::SignCsr { data_dir, csr_file, out, days } => {
+        Commands::SignCsr { data_dir, csr_file, out, role, days } => {
             let dir = data_dir.unwrap_or_else(|| "./data".to_string());
             fs::create_dir_all(&dir)?;
             let pass_path = Path::new(&dir).join("ca_passphrase.txt");
@@ -82,7 +85,8 @@ pub fn run_command(cmd: Cli) -> Result<()> {
             let pass = fs::read_to_string(pass_path)?;
             let csr_pem = fs::read_to_string(&csr_file)?;
             let days_valid = days.unwrap_or(365);
-            let cert_bytes = crate::ca::sign_csr(&dir, &pass, &csr_pem, days_valid)?;
+            let role_str = role.unwrap_or_else(|| "client".to_string());
+            let cert_bytes = crate::ca::sign_csr_with_role(&dir, &pass, &csr_pem, days_valid, &role_str)?;
             let out_path = match out {
                 Some(p) => p,
                 None => Path::new(&dir).join("client_cert.pem").to_string_lossy().to_string(),
