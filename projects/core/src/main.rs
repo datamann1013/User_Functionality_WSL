@@ -145,7 +145,14 @@ async fn main() -> anyhow::Result<()> {
                         }
                     }
                 }
-                <rustls::server::AllowAnyAuthenticatedClient as rustls::server::ClientCertVerifier>::verify_client_cert(&*self.inner, end_entity, intermediates, now)
+
+                // Call inner verifier and log result
+                let res = <rustls::server::AllowAnyAuthenticatedClient as rustls::server::ClientCertVerifier>::verify_client_cert(&*self.inner, end_entity, intermediates, now);
+                match &res {
+                    Ok(_) => tracing::debug!("client certificate verification: OK"),
+                    Err(e) => tracing::error!("client certificate verification failed: {:?}", e),
+                }
+                res
             }
         }
 

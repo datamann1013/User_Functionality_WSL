@@ -10,6 +10,7 @@ use openssl::rsa::Rsa;
 use openssl::x509::{X509NameBuilder, X509};
 use openssl::pkey::PKey;
 use openssl::x509::X509Builder;
+use openssl::x509::extension::{BasicConstraints, KeyUsage, ExtendedKeyUsage, SubjectKeyIdentifier, AuthorityKeyIdentifier};
 use getrandom;
 
 pub fn init_ca(data_dir: &str, passphrase: &str) -> Result<()> {
@@ -112,6 +113,33 @@ pub fn sign_csr(data_dir: &str, passphrase: &str, csr_pem: &str, days_valid: u32
     let na2 = openssl::asn1::Asn1Time::days_from_now(days_valid)?;
     builder.set_not_before(&nb2)?;
     builder.set_not_after(&na2)?;
+    // Ensure certificate version is v3 (2)
+    builder.set_version(2)?;
+
+    // Add commonly-required extensions: basicConstraints (CA:FALSE), keyUsage, extendedKeyUsage
+    // basicConstraints
+    let bc = BasicConstraints::new().critical().build()?;
+    builder.append_extension(bc)?;
+
+    // keyUsage: digitalSignature, keyEncipherment
+    let ku = KeyUsage::new().digital_signature().key_encipherment().build()?;
+    builder.append_extension(ku)?;
+
+    // extendedKeyUsage: include both clientAuth and serverAuth to be permissive for both roles
+    let mut eku = ExtendedKeyUsage::new();
+    eku.client_auth();
+    eku.server_auth();
+    let eku = eku.build()?;
+    builder.append_extension(eku)?;
+
+    // subject and authority key identifiers (helpful for some clients)
+    if let Ok(ski) = SubjectKeyIdentifier::new().build(&builder.x509v3_context(Some(&ca_cert), None)) {
+        let _ = builder.append_extension(ski);
+    }
+    if let Ok(aki) = AuthorityKeyIdentifier::new().keyid(true).build(&builder.x509v3_context(Some(&ca_cert), None)) {
+        let _ = builder.append_extension(aki);
+    }
+
     builder.sign(&ca_priv, openssl::hash::MessageDigest::sha256())?;
     let cert = builder.build();
     let cert_pem = cert.to_pem()?;
