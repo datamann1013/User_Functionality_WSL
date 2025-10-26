@@ -28,9 +28,7 @@ struct ServiceInfo {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Parse CLI; if a subcommand was provided, run it and exit. Otherwise start server.
-    let maybe = clap::Command::new("runecore_core").get_matches_from(std::env::args_os());
-    // If there's a subcommand (any arg), use the typed parser and run it
+    // If a subcommand was provided, run it and exit. Otherwise start server.
     if std::env::args().len() > 1 {
         let cli = cli::Cli::parse();
         return cli::run_command(cli).map_err(|e| anyhow::anyhow!(e.to_string()));
@@ -106,8 +104,12 @@ async fn main() -> anyhow::Result<()> {
 
     // configure mTLS: require client certs signed by our CA
     let ca_cert_pem = std::fs::read_to_string(std::path::Path::new(&data_dir).join("ca_cert.pem")).expect("read ca cert");
+    // Parse PEM into DER blobs and add to the root store for client verification
     let mut root_store = rustls::RootCertStore::empty();
-    root_store.add_parsable_certificates(&[ca_cert_pem.into_bytes()]);
+    let mut cursor = std::io::Cursor::new(ca_cert_pem.as_bytes());
+    let der_certs = rustls_pemfile::certs(&mut cursor).expect("failed to parse ca_cert.pem");
+    let added = root_store.add_parsable_certificates(&der_certs);
+    tracing::debug!("added {:?} CA certs to root store", added);
 
     let disable_mtls = std::env::var("RUNECORE_DISABLE_MTLS").unwrap_or_default();
     let builder = rustls::ServerConfig::builder().with_safe_defaults();
@@ -116,8 +118,39 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("mTLS disabled via RUNECORE_DISABLE_MTLS env var (debug only)");
         builder.with_no_client_auth().with_single_cert(certs, key).expect("bad certs/key")
     } else {
-        let client_auth = rustls::server::AllowAnyAuthenticatedClient::new(root_store);
-        builder.with_client_cert_verifier(std::sync::Arc::new(client_auth)).with_single_cert(certs, key).expect("bad certs/key")
+        // Wrap the default verifier so we can log client certificate details during verification
+        let inner_verifier = rustls::server::AllowAnyAuthenticatedClient::new(root_store);
+        struct LoggingVerifier {
+            inner: std::sync::Arc<rustls::server::AllowAnyAuthenticatedClient>,
+        }
+        impl rustls::server::ClientCertVerifier for LoggingVerifier {
+            fn offer_client_auth(&self) -> bool {
+                self.inner.offer_client_auth()
+            }
+            fn client_auth_mandatory(&self) -> bool {
+                self.inner.client_auth_mandatory()
+            }
+            fn client_auth_root_subjects(&self) -> &[rustls::DistinguishedName] {
+                self.inner.client_auth_root_subjects()
+            }
+            fn verify_client_cert(&self, end_entity: &rustls::Certificate, intermediates: &[rustls::Certificate], now: std::time::SystemTime) -> Result<rustls::server::ClientCertVerified, rustls::Error> {
+                tracing::debug!("verify_client_cert called; end_entity_present={}", !end_entity.0.is_empty());
+                // best-effort log of subject
+                if !end_entity.0.is_empty() {
+                    if let Ok(x) = openssl::x509::X509::from_der(&end_entity.0) {
+                        if let Some(entry) = x.subject_name().entries().next() {
+                            if let Ok(s) = entry.data().as_utf8() {
+                                tracing::debug!("client cert first subject entry = {}", s);
+                            }
+                        }
+                    }
+                }
+                <rustls::server::AllowAnyAuthenticatedClient as rustls::server::ClientCertVerifier>::verify_client_cert(&*self.inner, end_entity, intermediates, now)
+            }
+        }
+
+        let logging = LoggingVerifier { inner: std::sync::Arc::new(inner_verifier) };
+        builder.with_client_cert_verifier(std::sync::Arc::new(logging)).with_single_cert(certs, key).expect("bad certs/key")
     };
 
     let tls_cfg = std::sync::Arc::new(config);
