@@ -212,14 +212,14 @@ function App() {
     const isAgentThinking = thinkingAgents.has(selectedAgent);
     if (connecting || !inputText.trim() || isAgentThinking) return;
 
-  // If true, we will keep the agent in the thinking state (used for EABB5)
-  let keepThinkingVisible = false;
+    // If true, we will keep the agent in the thinking state (used for EABB5)
+    let keepThinkingVisible = false;
 
     const userMessage = inputText.trim();
     setInputText("");
-    
+
     // Mark this agent as thinking
-    setThinkingAgents(prev => new Set([...prev, selectedAgent]));
+    setThinkingAgents((prev) => new Set([...prev, selectedAgent]));
 
     // Generate unique IDs once
     const messageId = Date.now() + Math.random();
@@ -298,7 +298,11 @@ function App() {
           ]);
           // Keep the thinking indicator visible for this agent
           keepThinkingVisible = true;
-          logFrontendError("FRONTEND_CHAT_EABB5", "Received EABB5 from backend", data);
+          logFrontendError(
+            "FRONTEND_CHAT_EABB5",
+            "Received EABB5 from backend",
+            data
+          );
         } else {
           let errorMessage = "Sorry, I couldn't process your message. ";
 
@@ -351,7 +355,7 @@ function App() {
     // Remove this agent from thinking set unless we intentionally
     // want to keep the thinking indicator visible (EABB5 case)
     if (!keepThinkingVisible) {
-      setThinkingAgents(prev => {
+      setThinkingAgents((prev) => {
         const newSet = new Set(prev);
         newSet.delete(selectedAgent);
         return newSet;
@@ -518,7 +522,10 @@ function App() {
               </div>
             ) : (
               validAgents.map((agent) => {
-                const statusDisplay = getAgentStatusDisplay(agent, thinkingAgents.has(agent.id));
+                const statusDisplay = getAgentStatusDisplay(
+                  agent,
+                  thinkingAgents.has(agent.id)
+                );
                 const avatarColor = getAvatarColor(agent.name);
                 const downtime = calculateDowntime(agent.last_active);
 
@@ -743,7 +750,11 @@ function App() {
                 <button
                   className="send-btn"
                   onClick={handleSend}
-                  disabled={connecting || thinkingAgents.has(selectedAgent) || !inputText.trim()}
+                  disabled={
+                    connecting ||
+                    thinkingAgents.has(selectedAgent) ||
+                    !inputText.trim()
+                  }
                 >
                   {thinkingAgents.has(selectedAgent) ? "⏳" : "➤"}
                 </button>
