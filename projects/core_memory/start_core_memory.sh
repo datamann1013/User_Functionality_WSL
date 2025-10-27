@@ -25,5 +25,10 @@ if [ -f docker-compose.dev.yml ] && [ "$IN_CONTAINER" -eq 0 ]; then
   exit 0
 fi
 
+if [ "$IN_CONTAINER" -eq 1 ] && [ "${RUN_MIGRATIONS:-""}" = "true" ]; then
+  echo "RUN_MIGRATIONS=true detected; running alembic upgrade head via /app/manage_migrations.sh"
+  /app/manage_migrations.sh || echo "manage_migrations.sh failed; continuing to start server"
+fi
+
 echo "Starting uvicorn server (in-container or no docker-compose present)..."
 exec uvicorn core_memory.app:app --host 0.0.0.0 --port 5010
