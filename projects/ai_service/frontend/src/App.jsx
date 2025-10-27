@@ -59,27 +59,31 @@ const calculateDowntime = (lastActive) => {
   return "Just now";
 };
 
-const getAgentStatusDisplay = (agent) => {
-  // Parse metadata once
-  let metadata = {};
-  try {
-    metadata =
-      typeof agent.metadata === "string"
-        ? JSON.parse(agent.metadata)
-        : agent.metadata || {};
-  } catch (e) {
-    metadata = {};
+const getAgentStatusDisplay = (agent, isThinking = false) => {
+  // If agent is currently thinking, show as busy
+  if (isThinking) {
+    return { text: "busy", class: "busy" };
   }
 
-  if (metadata.model_downloading || agent.status === "offline") {
-    return { text: "offline", class: "offline" };
+  // Determine downtime
+  if (!agent || !agent.last_active) {
+    return { text: "online", class: "idle" };
+  }
+
+  const lastActiveTime = new Date(agent.last_active).getTime();
+  const now = Date.now();
+  const downtime = now - lastActiveTime;
+
+  // If more than 5 minutes inactive, show as online
+  if (downtime > 300000) {
+    return { text: "online", class: "idle" };
   }
 
   switch (agent.status) {
     case "idle":
-      return { text: "ready", class: "idle" };
+      return { text: "online", class: "idle" };
     case "busy":
-      return { text: "thinking", class: "busy" };
+      return { text: "busy", class: "busy" };
     default:
       return { text: agent.status, class: agent.status };
   }
@@ -96,7 +100,7 @@ function App() {
   const [toolsOpen, setToolsOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [connecting, setConnecting] = useState(true);
-  const [thinking, setThinking] = useState(false);
+  const [thinkingAgents, setThinkingAgents] = useState(new Set()); // Track which agents are thinking
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [agentToEdit, setAgentToEdit] = useState(null);
@@ -205,11 +209,17 @@ function App() {
   );
 
   const handleSend = useCallback(async () => {
-    if (connecting || !inputText.trim() || thinking) return;
+    const isAgentThinking = thinkingAgents.has(selectedAgent);
+    if (connecting || !inputText.trim() || isAgentThinking) return;
+
+    // If true, we will keep the agent in the thinking state (used for EABB5)
+    let keepThinkingVisible = false;
 
     const userMessage = inputText.trim();
     setInputText("");
-    setThinking(true);
+
+    // Mark this agent as thinking
+    setThinkingAgents((prev) => new Set([...prev, selectedAgent]));
 
     // Generate unique IDs once
     const messageId = Date.now() + Math.random();
@@ -268,29 +278,56 @@ function App() {
           "Chat message sent successfully"
         );
       } else {
-        let errorMessage = "Sorry, I couldn't process your message. ";
+        // If backend returned the specific EABB5 code, show server message
+        // but keep the thinking indicator visible so the UI indicates
+        // the request is still pending upstream.
+        if (data && data.error_code === "EABB5") {
+          const serverMsg = data.message || "Upstream AI service unavailable";
+          setMessages((prev) => [
+            // Keep thinking indicator (do not remove thinkingId)
+            ...prev,
+            {
+              id: Date.now() + Math.random(),
+              sender: "ai",
+              text: serverMsg,
+              timestamp: new Date().toISOString(),
+              agentId: selectedAgent,
+              error: true,
+              errorCode: "EABB5",
+            },
+          ]);
+          // Keep the thinking indicator visible for this agent
+          keepThinkingVisible = true;
+          logFrontendError(
+            "FRONTEND_CHAT_EABB5",
+            "Received EABB5 from backend",
+            data
+          );
+        } else {
+          let errorMessage = "Sorry, I couldn't process your message. ";
 
-        if (data.message) {
-          errorMessage = data.message;
-        } else if (data.error) {
-          switch (data.error) {
-            case "AI service unavailable":
-              errorMessage =
-                "The AI service is currently offline. Please wait a moment and try again.";
-              break;
-            case "AI processing failed":
-              errorMessage =
-                "I'm having trouble understanding your message. Could you try rephrasing it?";
-              break;
-            case "Empty message":
-              errorMessage = "Please type a message to send.";
-              break;
-            default:
-              errorMessage = data.error;
+          if (data.message) {
+            errorMessage = data.message;
+          } else if (data.error) {
+            switch (data.error) {
+              case "AI service unavailable":
+                errorMessage =
+                  "The AI service is currently offline. Please wait a moment and try again.";
+                break;
+              case "AI processing failed":
+                errorMessage =
+                  "I'm having trouble understanding your message. Could you try rephrasing it?";
+                break;
+              case "Empty message":
+                errorMessage = "Please type a message to send.";
+                break;
+              default:
+                errorMessage = data.error;
+            }
           }
-        }
 
-        throw new Error(errorMessage);
+          throw new Error(errorMessage);
+        }
       }
     } catch (error) {
       let userFriendlyMessage = "Sorry, something went wrong. ";
@@ -315,8 +352,16 @@ function App() {
       logFrontendError("FRONTEND_CHAT_ERROR", "Chat request failed", error);
     }
 
-    setThinking(false);
-  }, [connecting, inputText, thinking, selectedFiles, selectedAgent]);
+    // Remove this agent from thinking set unless we intentionally
+    // want to keep the thinking indicator visible (EABB5 case)
+    if (!keepThinkingVisible) {
+      setThinkingAgents((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(selectedAgent);
+        return newSet;
+      });
+    }
+  }, [connecting, inputText, thinkingAgents, selectedFiles, selectedAgent]);
 
   // Check backend connection and load agents on mount
   useEffect(() => {
@@ -477,7 +522,10 @@ function App() {
               </div>
             ) : (
               validAgents.map((agent) => {
-                const statusDisplay = getAgentStatusDisplay(agent);
+                const statusDisplay = getAgentStatusDisplay(
+                  agent,
+                  thinkingAgents.has(agent.id)
+                );
                 const avatarColor = getAvatarColor(agent.name);
                 const downtime = calculateDowntime(agent.last_active);
 
@@ -633,7 +681,7 @@ function App() {
                     ? "Connecting..."
                     : `Message ${currentAgent?.name || "AI"}...`
                 }
-                disabled={connecting || thinking}
+                disabled={connecting || thinkingAgents.has(selectedAgent)}
                 rows={1}
                 className="message-input"
               />
@@ -642,7 +690,7 @@ function App() {
                 <button
                   className="file-upload-btn"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={connecting || thinking}
+                  disabled={connecting || thinkingAgents.has(selectedAgent)}
                   title="Upload files"
                 >
                   📎
@@ -652,7 +700,7 @@ function App() {
                   <button
                     className={`tools-btn ${toolsOpen ? "open" : ""}`}
                     onClick={() => setToolsOpen(!toolsOpen)}
-                    disabled={connecting || thinking}
+                    disabled={connecting || thinkingAgents.has(selectedAgent)}
                     title="Agent Management"
                   >
                     ⚙️
@@ -702,9 +750,13 @@ function App() {
                 <button
                   className="send-btn"
                   onClick={handleSend}
-                  disabled={connecting || thinking || !inputText.trim()}
+                  disabled={
+                    connecting ||
+                    thinkingAgents.has(selectedAgent) ||
+                    !inputText.trim()
+                  }
                 >
-                  {thinking ? "⏳" : "➤"}
+                  {thinkingAgents.has(selectedAgent) ? "⏳" : "➤"}
                 </button>
               </div>
             </div>
