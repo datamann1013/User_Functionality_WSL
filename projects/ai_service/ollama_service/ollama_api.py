@@ -7,6 +7,7 @@ import os
 import requests
 from datetime import datetime
 from flask import Flask, request, jsonify
+
 try:
     from flask_cors import CORS
 except Exception:
@@ -14,6 +15,8 @@ except Exception:
     # We'll provide a no-op CORS placeholder so the app can start.
     def CORS(app, *args, **kwargs):
         return None
+
+
 import time
 
 app = Flask(__name__)
@@ -104,7 +107,9 @@ def chat():
         # Build prompt
         # Debug: log incoming fields to help trace missing user content
         try:
-            print(f"[OLLAMA_DEBUG] incoming message: '{message[:200]}' system_prompt: '{system_prompt[:200]}'")
+            print(
+                f"[OLLAMA_DEBUG] incoming message: '{message[:200]}' system_prompt: '{system_prompt[:200]}'"
+            )
         except Exception:
             pass
 
@@ -132,7 +137,9 @@ def chat():
         response = None
         for attempt in range(max_retries):
             try:
-                print(f"[OLLAMA_RETRY] attempt {attempt+1}/{max_retries} -> {OLLAMA_HOST}/api/generate")
+                print(
+                    f"[OLLAMA_RETRY] attempt {attempt+1}/{max_retries} -> {OLLAMA_HOST}/api/generate"
+                )
                 start_ts = datetime.now()
                 response = requests.post(
                     f"{OLLAMA_HOST}/api/generate",
@@ -141,7 +148,9 @@ def chat():
                 )
                 duration_ms = int((datetime.now() - start_ts).total_seconds() * 1000)
                 if response is not None:
-                    print(f"[OLLAMA_RETRY] response status={response.status_code} duration_ms={duration_ms}")
+                    print(
+                        f"[OLLAMA_RETRY] response status={response.status_code} duration_ms={duration_ms}"
+                    )
 
                 # Break on successful HTTP response code
                 if response and response.status_code == 200:
@@ -150,8 +159,12 @@ def chat():
                     # non-200 - wait and retry
                     try:
                         # attempt to show snippet of response body for diagnostics
-                        body_snippet = response.text[:300] if response is not None else "<no-body>"
-                        print(f"[OLLAMA_RETRY] non-200 response body_snippet={body_snippet}")
+                        body_snippet = (
+                            response.text[:300] if response is not None else "<no-body>"
+                        )
+                        print(
+                            f"[OLLAMA_RETRY] non-200 response body_snippet={body_snippet}"
+                        )
                     except Exception:
                         pass
                     time.sleep(backoff)
@@ -165,7 +178,9 @@ def chat():
             except Exception as ex:
                 # Log unexpected exceptions to help diagnose connection issues
                 try:
-                    print(f"[OLLAMA_RETRY] exception on attempt {attempt+1}: {repr(ex)}")
+                    print(
+                        f"[OLLAMA_RETRY] exception on attempt {attempt+1}: {repr(ex)}"
+                    )
                 except Exception:
                     pass
                 response = None

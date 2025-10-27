@@ -32,6 +32,7 @@ except (ModuleNotFoundError, ImportError):
     try:
         from conversation_cache import conversation_cache as _cache
         from async_agent_manager import async_agent_manager as _async_manager
+
         conversation_cache = _cache
         async_agent_manager = _async_manager
     except (ModuleNotFoundError, ImportError):
@@ -44,8 +45,10 @@ except (ModuleNotFoundError, ImportError):
                     "message_limit": 10,
                     "context_size": 5,
                 }
+
             def format_context_for_ai(self, agent_id):
                 return []
+
             def format_chat_history_to_string(self, history):
                 """
                 Minimal string formatter for mock cache so debug payloads include
@@ -66,23 +69,34 @@ except (ModuleNotFoundError, ImportError):
                         formatted_lines.append(f"Assistant: {content}")
 
                 return "\n\n".join(formatted_lines)
+
             def get_full_conversation(self, agent_id):
                 return []
+
             def add_conversation(self, agent_id, user_msg, ai_msg):
                 pass
+
             def get_conversation_context(self, agent_id):
                 return []
+
         class MockAsyncAgentManager:
-            async def submit_request(self, agent_id, user_id, message, priority=0, timeout=None):
+            async def submit_request(
+                self, agent_id, user_id, message, priority=0, timeout=None
+            ):
                 return "mock_request_id"
+
             async def get_response(self, request_id):
                 return None
+
             async def get_request_status(self, request_id):
                 return "completed"
+
             async def start_workers(self):
                 pass
+
             def get_stats(self):
                 return {"mock": True}
+
         conversation_cache = MockConversationCache()
         async_agent_manager = MockAsyncAgentManager()
 
@@ -282,12 +296,34 @@ def chat():
             )
 
             # Lookup agent config from AGENTS_DATA
-            agent_config = next((a for a in AGENTS_DATA["agents"] if a["id"] == agent_id), None)
-            model_name = agent_config["model_name"] if agent_config and "model_name" in agent_config else "llama3.2:1b"
-            temperature = agent_config["temperature"] if agent_config and "temperature" in agent_config else 0.7
-            top_p = agent_config["top_p"] if agent_config and "top_p" in agent_config else 0.9
-            max_tokens = agent_config["max_tokens"] if agent_config and "max_tokens" in agent_config else 2048
-            system_prompt = agent_config["system_prompt"] if agent_config and "system_prompt" in agent_config else ""
+            agent_config = next(
+                (a for a in AGENTS_DATA["agents"] if a["id"] == agent_id), None
+            )
+            model_name = (
+                agent_config["model_name"]
+                if agent_config and "model_name" in agent_config
+                else "llama3.2:1b"
+            )
+            temperature = (
+                agent_config["temperature"]
+                if agent_config and "temperature" in agent_config
+                else 0.7
+            )
+            top_p = (
+                agent_config["top_p"]
+                if agent_config and "top_p" in agent_config
+                else 0.9
+            )
+            max_tokens = (
+                agent_config["max_tokens"]
+                if agent_config and "max_tokens" in agent_config
+                else 2048
+            )
+            system_prompt = (
+                agent_config["system_prompt"]
+                if agent_config and "system_prompt" in agent_config
+                else ""
+            )
 
             payload = {
                 "message": enhanced_message,
@@ -302,7 +338,9 @@ def chat():
 
             # Debug: log what we're sending to Ollama (truncated for safety)
             try:
-                print(f"[AI_DEBUG] Sending to Ollama for agent {agent_id}: message_preview='{enhanced_message[:200]}' system_prompt='{system_prompt[:200]}'")
+                print(
+                    f"[AI_DEBUG] Sending to Ollama for agent {agent_id}: message_preview='{enhanced_message[:200]}' system_prompt='{system_prompt[:200]}'"
+                )
             except Exception:
                 pass
 
@@ -320,7 +358,9 @@ def chat():
                         result["response"] = jr.get("response", "No response from AI")
                     else:
                         # capture body for diagnostics (trimmed)
-                        result["error"] = f"Ollama returned {resp.status_code}: {resp.text[:500]}"
+                        result["error"] = (
+                            f"Ollama returned {resp.status_code}: {resp.text[:500]}"
+                        )
                 except Exception as e:
                     result["error"] = f"RequestException: {str(e)}"
 
@@ -421,7 +461,9 @@ def debug_payload():
 
         # Diagnostic: show which cache implementation we're using
         try:
-            print(f"[DEBUG_PAYLOAD] conversation_cache type: {conversation_cache.__class__.__name__}")
+            print(
+                f"[DEBUG_PAYLOAD] conversation_cache type: {conversation_cache.__class__.__name__}"
+            )
         except Exception:
             pass
 
@@ -430,25 +472,36 @@ def debug_payload():
         chat_history.append({"role": "user", "content": message})
         print(f"[DEBUG_PAYLOAD] chat_history after append: {chat_history}")
         try:
-            enhanced_message = conversation_cache.format_chat_history_to_string(chat_history)
+            enhanced_message = conversation_cache.format_chat_history_to_string(
+                chat_history
+            )
         except Exception as e:
             print(f"[DEBUG_PAYLOAD] format_chat_history_to_string error: {e}")
             enhanced_message = ""
 
-        agent_config = next((a for a in AGENTS_DATA["agents"] if a["id"] == agent_id), None)
-        system_prompt = agent_config["system_prompt"] if agent_config and "system_prompt" in agent_config else ""
+        agent_config = next(
+            (a for a in AGENTS_DATA["agents"] if a["id"] == agent_id), None
+        )
+        system_prompt = (
+            agent_config["system_prompt"]
+            if agent_config and "system_prompt" in agent_config
+            else ""
+        )
 
-        return jsonify({
-            "agent_id": agent_id,
-            "message_preview": enhanced_message[:200],
-            "system_prompt": system_prompt,
-            "full_message": enhanced_message,
-        })
+        return jsonify(
+            {
+                "agent_id": agent_id,
+                "message_preview": enhanced_message[:200],
+                "system_prompt": system_prompt,
+                "full_message": enhanced_message,
+            }
+        )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
 # === ASYNC MULTI-AGENT ENDPOINTS ===
+
 
 @app.route("/api/chat/async", methods=["POST"])
 def submit_async_chat():
@@ -470,33 +523,35 @@ def submit_async_chat():
         # Submit async request
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
+
         try:
             # Start workers if not already running
             loop.run_until_complete(async_agent_manager.start_workers())
-            
+
             # Submit the request
             request_id = loop.run_until_complete(
                 async_agent_manager.submit_request(
                     agent_id=agent_id,
-                    user_id=user_id, 
+                    user_id=user_id,
                     message=message,
                     priority=priority,
-                    timeout=timeout
+                    timeout=timeout,
                 )
             )
-            
-            return jsonify({
-                "request_id": request_id,
-                "status": "submitted",
-                "agent_id": agent_id,
-                "user_id": user_id,
-                "message": message,
-                "timestamp": datetime.now().isoformat(),
-                "estimated_time": "30-60 seconds",
-                "poll_url": f"/api/chat/async/{request_id}"
-            })
-            
+
+            return jsonify(
+                {
+                    "request_id": request_id,
+                    "status": "submitted",
+                    "agent_id": agent_id,
+                    "user_id": user_id,
+                    "message": message,
+                    "timestamp": datetime.now().isoformat(),
+                    "estimated_time": "30-60 seconds",
+                    "poll_url": f"/api/chat/async/{request_id}",
+                }
+            )
+
         finally:
             loop.close()
 
@@ -514,50 +569,59 @@ def get_async_response(request_id):
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
+
         try:
             # Get response
             response = loop.run_until_complete(
                 async_agent_manager.get_response(request_id)
             )
-            
+
             if response:
                 # Response is ready
-                return jsonify({
-                    "request_id": request_id,
-                    "status": response.status.value,
-                    "response": response.response,
-                    "agent_id": response.agent_id,
-                    "user_id": response.user_id,
-                    "timestamp": response.timestamp,
-                    "processing_time": response.processing_time,
-                    "model_used": response.model_used,
-                    "tokens_used": response.tokens_used,
-                    "error_message": response.error_message,
-                    "ready": True
-                })
+                return jsonify(
+                    {
+                        "request_id": request_id,
+                        "status": response.status.value,
+                        "response": response.response,
+                        "agent_id": response.agent_id,
+                        "user_id": response.user_id,
+                        "timestamp": response.timestamp,
+                        "processing_time": response.processing_time,
+                        "model_used": response.model_used,
+                        "tokens_used": response.tokens_used,
+                        "error_message": response.error_message,
+                        "ready": True,
+                    }
+                )
             else:
                 # Still processing or not found
                 status = loop.run_until_complete(
                     async_agent_manager.get_request_status(request_id)
                 )
-                
+
                 if status:
-                    return jsonify({
-                        "request_id": request_id,
-                        "status": status.value,
-                        "ready": False,
-                        "message": "Request is still being processed",
-                        "poll_again_in": "5-10 seconds"
-                    })
+                    return jsonify(
+                        {
+                            "request_id": request_id,
+                            "status": status.value,
+                            "ready": False,
+                            "message": "Request is still being processed",
+                            "poll_again_in": "5-10 seconds",
+                        }
+                    )
                 else:
-                    return jsonify({
-                        "request_id": request_id,
-                        "status": "not_found",
-                        "ready": False,
-                        "error": "Request not found"
-                    }), 404
-                    
+                    return (
+                        jsonify(
+                            {
+                                "request_id": request_id,
+                                "status": "not_found",
+                                "ready": False,
+                                "error": "Request not found",
+                            }
+                        ),
+                        404,
+                    )
+
         finally:
             loop.close()
 
@@ -575,48 +639,56 @@ def submit_batch_requests():
     try:
         data = request.json
         requests_data = data.get("requests", [])
-        
+
         if not requests_data:
             return jsonify({"error": "Requests array is required"}), 400
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
+
         try:
             # Start workers if not already running
             loop.run_until_complete(async_agent_manager.start_workers())
-            
+
             # Submit all requests
             request_ids = []
             for req_data in requests_data:
                 message = req_data.get("message", "")
-                agent_id = req_data.get("agent_id", "71dc06c0-7b49-4a7d-9afb-a2d7fdcde53b")
+                agent_id = req_data.get(
+                    "agent_id", "71dc06c0-7b49-4a7d-9afb-a2d7fdcde53b"
+                )
                 user_id = req_data.get("user_id", "anonymous")
                 priority = req_data.get("priority", 0)
-                
+
                 if message:
                     request_id = loop.run_until_complete(
                         async_agent_manager.submit_request(
                             agent_id=agent_id,
                             user_id=user_id,
                             message=message,
-                            priority=priority
+                            priority=priority,
                         )
                     )
-                    request_ids.append({
-                        "request_id": request_id,
-                        "agent_id": agent_id,
-                        "message": message[:50] + "..." if len(message) > 50 else message
-                    })
-            
-            return jsonify({
-                "batch_id": str(datetime.now().timestamp()),
-                "request_ids": request_ids,
-                "total_submitted": len(request_ids),
-                "timestamp": datetime.now().isoformat(),
-                "poll_url": "/api/chat/async/batch/status"
-            })
-            
+                    request_ids.append(
+                        {
+                            "request_id": request_id,
+                            "agent_id": agent_id,
+                            "message": (
+                                message[:50] + "..." if len(message) > 50 else message
+                            ),
+                        }
+                    )
+
+            return jsonify(
+                {
+                    "batch_id": str(datetime.now().timestamp()),
+                    "request_ids": request_ids,
+                    "total_submitted": len(request_ids),
+                    "timestamp": datetime.now().isoformat(),
+                    "poll_url": "/api/chat/async/batch/status",
+                }
+            )
+
         finally:
             loop.close()
 
@@ -634,13 +706,13 @@ def get_batch_status():
     try:
         data = request.json
         request_ids = data.get("request_ids", [])
-        
+
         if not request_ids:
             return jsonify({"error": "request_ids array is required"}), 400
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
+
         try:
             results = []
             for request_id in request_ids:
@@ -648,45 +720,53 @@ def get_batch_status():
                 response = loop.run_until_complete(
                     async_agent_manager.get_response(request_id)
                 )
-                
+
                 if response:
-                    results.append({
-                        "request_id": request_id,
-                        "status": response.status.value,
-                        "ready": True,
-                        "response": response.response,
-                        "processing_time": response.processing_time,
-                        "agent_id": response.agent_id
-                    })
+                    results.append(
+                        {
+                            "request_id": request_id,
+                            "status": response.status.value,
+                            "ready": True,
+                            "response": response.response,
+                            "processing_time": response.processing_time,
+                            "agent_id": response.agent_id,
+                        }
+                    )
                 else:
                     # Check if still processing
                     status = loop.run_until_complete(
                         async_agent_manager.get_request_status(request_id)
                     )
-                    results.append({
-                        "request_id": request_id,
-                        "status": status.value if status else "not_found",
-                        "ready": False,
-                        "processing": True if status else False
-                    })
-            
+                    results.append(
+                        {
+                            "request_id": request_id,
+                            "status": status.value if status else "not_found",
+                            "ready": False,
+                            "processing": True if status else False,
+                        }
+                    )
+
             # Calculate summary stats
             completed = sum(1 for r in results if r.get("ready", False))
             processing = sum(1 for r in results if r.get("processing", False))
             failed = sum(1 for r in results if r.get("status") in ["failed", "timeout"])
-            
-            return jsonify({
-                "results": results,
-                "summary": {
-                    "total": len(results),
-                    "completed": completed,
-                    "processing": processing,
-                    "failed": failed,
-                    "completion_rate": f"{(completed/len(results)*100):.1f}%" if results else "0%"
-                },
-                "timestamp": datetime.now().isoformat()
-            })
-            
+
+            return jsonify(
+                {
+                    "results": results,
+                    "summary": {
+                        "total": len(results),
+                        "completed": completed,
+                        "processing": processing,
+                        "failed": failed,
+                        "completion_rate": (
+                            f"{(completed/len(results)*100):.1f}%" if results else "0%"
+                        ),
+                    },
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+
         finally:
             loop.close()
 
@@ -702,19 +782,23 @@ def get_async_stats():
     """
     try:
         stats = async_agent_manager.get_stats()
-        return jsonify({
-            "async_system": stats,
-            "cache_system": conversation_cache.get_cache_stats(),
-            "timestamp": datetime.now().isoformat()
-        })
-        
+        return jsonify(
+            {
+                "async_system": stats,
+                "cache_system": conversation_cache.get_cache_stats(),
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+
     except Exception as e:
         log_error("ASYNC_STATS_ERROR", str(e))
         return jsonify({"error": "Failed to get stats"}), 500
 
 
 if __name__ == "__main__":
-    print("🤖 AI Service Backend Starting with Redis Conversation Cache & Async Multi-Agent System")
+    print(
+        "🤖 AI Service Backend Starting with Redis Conversation Cache & Async Multi-Agent System"
+    )
 
     # Print cache configuration
     cache_status = conversation_cache.get_cache_stats()
@@ -723,18 +807,20 @@ if __name__ == "__main__":
     )
     print(f"📝 Message Limit: {cache_status['message_limit']} per agent")
     print(f"🧠 Context Size: {cache_status['context_size']} messages for AI")
-    
+
     # Print async system info
     async_stats = async_agent_manager.get_stats()
-    print(f"⚡ Async System: {'Available' if not async_stats.get('mock') else 'Mock Mode'}")
-    
+    print(
+        f"⚡ Async System: {'Available' if not async_stats.get('mock') else 'Mock Mode'}"
+    )
+
     port = int(os.environ.get("PORT", 5000))
     print(f"🌐 Starting server on port {port}")
     print("📡 Async Endpoints Available:")
     print("   POST /api/chat/async - Submit async request (returns request_id)")
-    print("   GET  /api/chat/async/<request_id> - Poll for response") 
+    print("   GET  /api/chat/async/<request_id> - Poll for response")
     print("   POST /api/chat/async/batch - Submit multiple requests")
     print("   POST /api/chat/async/batch/status - Check batch status")
     print("   GET  /api/chat/async/stats - System statistics")
-    
+
     app.run(host="0.0.0.0", port=port, debug=False)  # nosec B104
