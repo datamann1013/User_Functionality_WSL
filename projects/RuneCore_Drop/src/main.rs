@@ -1,5 +1,5 @@
 use actix_multipart::Multipart;
-use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder, Result};
+use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder, Result, HttpRequest};
 use chrono::{Duration, Utc};
 use qrcode::QrCode;
 use qrcode::render::svg;
@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use bytes::BytesMut;
+use futures_util::StreamExt;
 use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -85,16 +86,21 @@ async fn upload(mut payload: Multipart, data: web::Data<std::sync::Mutex<AppStat
 
         let file_id = Uuid::new_v4().to_string();
         let filepath = format!("{}/{}", STORAGE_DIR, file_id);
-        let mut f = web::block(|| std::fs::File::create(&filepath)).await.map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
+        // Accumulate chunks into memory then write once (simple MVP approach)
+        let mut buf = BytesMut::new();
         while let Some(chunk) = field.next().await {
             let data = chunk.map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
-            f = web::block(move || {
-                let mut file = f;
-                file.write_all(&data)?;
-                Ok::<_, std::io::Error>(file)
-            }).await.map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+            buf.extend_from_slice(&data);
         }
+
+        // write to disk in a blocking task (clone path for move into closure)
+        let write_path = filepath.clone();
+        web::block(move || {
+            let mut f = std::fs::File::create(&write_path)?;
+            f.write_all(&buf)?;
+            Ok::<(), std::io::Error>(())
+        }).await.map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
         // create token and expire
         let token = Uuid::new_v4().to_string();
@@ -132,7 +138,7 @@ async fn upload(mut payload: Multipart, data: web::Data<std::sync::Mutex<AppStat
 }
 
 #[get("/download/{file_id}")]
-async fn download(path: web::Path<String>, query: web::Query<HashMap<String, String>>, data: web::Data<std::sync::Mutex<AppStateData>>) -> Result<impl Responder> {
+async fn download(req: HttpRequest, path: web::Path<String>, query: web::Query<HashMap<String, String>>, data: web::Data<std::sync::Mutex<AppStateData>>) -> Result<actix_files::NamedFile> {
     let file_id = path.into_inner();
     let token_q = query.get("token");
 
@@ -144,19 +150,20 @@ async fn download(path: web::Path<String>, query: web::Query<HashMap<String, Str
                     let file_path = meta.path.clone();
                     let fname = meta.filename.clone();
                     let named_file = actix_files::NamedFile::open_async(file_path).await.map_err(|_| actix_web::error::ErrorNotFound("file not found"))?;
-                    return Ok(named_file.set_content_disposition(actix_web::http::header::ContentDisposition{
+                    let cd = actix_web::http::header::ContentDisposition{
                         disposition: actix_web::http::header::DispositionType::Attachment,
                         parameters: vec![actix_web::http::header::DispositionParam::Filename(fname)],
-                    }));
+                    };
+                    return Ok(named_file.set_content_disposition(cd));
                 }
-                return Ok(HttpResponse::Forbidden().body("token expired"));
+                return Err(actix_web::error::ErrorForbidden("token expired"));
             }
-            return Ok(HttpResponse::Forbidden().body("invalid token"));
+            return Err(actix_web::error::ErrorForbidden("invalid token"));
         }
-        return Ok(HttpResponse::BadRequest().body("missing token"));
+        return Err(actix_web::error::ErrorBadRequest("missing token"));
     }
 
-    Ok(HttpResponse::NotFound().body("file not found"))
+    Err(actix_web::error::ErrorNotFound("file not found"))
 }
 
 #[get("/health")]
@@ -193,8 +200,12 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(data.clone())
+            // serve the frontend static files at /frontend
+            .service(actix_files::Files::new("/frontend", "./frontend").index_file("index.html"))
             .service(upload)
             .service(download)
+            .service(post_signal)
+            .service(get_signal)
             .service(health)
     })
     .bind(bind)?
