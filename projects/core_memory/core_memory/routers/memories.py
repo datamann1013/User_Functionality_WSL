@@ -4,8 +4,7 @@ from typing import Optional, Dict, List
 import uuid
 from datetime import datetime
 from ..utils import log_error_remote, log_exception
-from ..db import SessionLocal, Memory, init_db
-from ..db import Embedding
+from ..db import SessionLocal, Memory, init_db, Embedding
 import hashlib
 import numpy as np
 
@@ -35,7 +34,6 @@ if REDIS_URL:
         _redis = redis.from_url(REDIS_URL)
     except Exception:
         _redis = None
-from ..utils import log_exception
 
 router = APIRouter()
 
@@ -61,10 +59,10 @@ class MemoryOut(BaseModel):
 
 @router.post("/memories", response_model=MemoryOut)
 def create_memory(payload: MemoryCreate):
-    try:
-        # Persist to Postgres when available
-        if SessionLocal:
-            db = SessionLocal()
+    # Persist to Postgres when available
+    if SessionLocal:
+        db = SessionLocal()
+        try:
             mem = Memory(
                 namespace=payload.namespace,
                 agent_id=payload.agent_id,
@@ -75,10 +73,14 @@ def create_memory(payload: MemoryCreate):
             db.commit()
             db.refresh(mem)
             # compute deterministic embedding (fallback) and store
-            vec = _text_to_vector(payload.text)
-            emb = Embedding(memory_id=mem.id, vector=list(vec))
-            db.add(emb)
-            db.commit()
+            try:
+                vec = _text_to_vector(payload.text)
+                emb = Embedding(memory_id=mem.id, vector=list(vec))
+                db.add(emb)
+                db.commit()
+            except Exception:
+                # embedding failure shouldn't prevent creation
+                db.rollback()
             result = {
                 "id": str(mem.id),
                 "namespace": mem.namespace,
@@ -87,14 +89,24 @@ def create_memory(payload: MemoryCreate):
                 "metadata": mem.metadata,
                 "created_at": mem.created_at,
             }
-            # cache in redis
+            # cache in redis (best-effort)
             try:
                 if _redis:
                     _redis.set(f"memory:{result['id']}", result['text'])
             except Exception:
                 pass
             return result
-        else:
+        except Exception as e:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            log_exception("ECM1", e, extra={"payload": payload.dict()})
+            raise HTTPException(status_code=500, detail="Failed to create memory")
+        finally:
+            db.close()
+    else:
+        try:
             mid = str(uuid.uuid4())
             now = datetime.utcnow()
             record = {
@@ -107,33 +119,32 @@ def create_memory(payload: MemoryCreate):
             }
             _STORE[mid] = record
             return record
-    except Exception as e:
-        # Log unexpected to ErrorLogger service
-        log_exception("ECM1", e, extra={"payload": payload.dict()})
-        raise HTTPException(status_code=500, detail="Failed to create memory")
+        except Exception as e:
+            log_exception("ECM1", e, extra={"payload": payload.dict()})
+            raise HTTPException(status_code=500, detail="Failed to create memory")
 
 
 @router.get("/memories/{memory_id}", response_model=MemoryOut)
 def get_memory(memory_id: str):
+    # Try Redis cache first
     try:
-        # Try Redis cache first
-        try:
-            if _redis:
-                cached = _redis.get(f"memory:{memory_id}")
-                if cached:
-                    return {
-                        "id": memory_id,
-                        "namespace": "global",
-                        "agent_id": None,
-                        "text": cached.decode("utf-8"),
-                        "metadata": {},
-                        "created_at": datetime.utcnow(),
-                    }
-        except Exception:
-            pass
+        if _redis:
+            cached = _redis.get(f"memory:{memory_id}")
+            if cached:
+                return {
+                    "id": memory_id,
+                    "namespace": "global",
+                    "agent_id": None,
+                    "text": cached.decode("utf-8"),
+                    "metadata": {},
+                    "created_at": datetime.utcnow(),
+                }
+    except Exception:
+        pass
 
-        if SessionLocal:
-            db = SessionLocal()
+    if SessionLocal:
+        db = SessionLocal()
+        try:
             mem = db.query(Memory).filter(Memory.id == memory_id).first()
             if not mem:
                 log_error_remote("ECM2", f"Memory not found: {memory_id}", extra={"memory_id": memory_id}, severity="warning")
@@ -146,12 +157,19 @@ def get_memory(memory_id: str):
                 "metadata": mem.metadata,
                 "created_at": mem.created_at,
             }
-        else:
-            rec = _STORE.get(memory_id)
-            if not rec:
-                log_error_remote("ECM2", f"Memory not found: {memory_id}", extra={"memory_id": memory_id}, severity="warning")
-                raise HTTPException(status_code=404, detail="Memory not found")
-            return rec
+        except HTTPException:
+            raise
+        except Exception as e:
+            log_exception("ECM2", e, extra={"memory_id": memory_id})
+            raise HTTPException(status_code=500, detail="Failed to retrieve memory")
+        finally:
+            db.close()
+    else:
+        rec = _STORE.get(memory_id)
+        if not rec:
+            log_error_remote("ECM2", f"Memory not found: {memory_id}", extra={"memory_id": memory_id}, severity="warning")
+            raise HTTPException(status_code=404, detail="Memory not found")
+        return rec
 
 
 class QueryRequest(BaseModel):
@@ -199,8 +217,3 @@ def query_memories(req: QueryRequest):
     except Exception as e:
         log_exception("ECM5", e, extra={"request": req.dict()})
         raise HTTPException(status_code=500, detail="Query failed")
-    except HTTPException:
-        raise
-    except Exception as e:
-        log_exception("ECM2", e, extra={"memory_id": memory_id})
-        raise HTTPException(status_code=500, detail="Failed to retrieve memory")
