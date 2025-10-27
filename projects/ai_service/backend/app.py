@@ -351,7 +351,12 @@ def chat():
 
             def call_ollama():
                 try:
-                    resp = requests.post(f"{OLLAMA_SERVICE_URL}/api/chat", json=payload)
+                    # Include a timeout to avoid blocking forever and satisfy security scanners
+                    resp = requests.post(
+                        f"{OLLAMA_SERVICE_URL}/api/chat",
+                        json=payload,
+                        timeout=complex_timeout,
+                    )
                     result["status_code"] = resp.status_code
                     if resp.status_code == 200:
                         jr = resp.json()
