@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+requests
+pydantic
+sqlalchemy
+psycopg2-binary
+redis
+numpy
+alembic
