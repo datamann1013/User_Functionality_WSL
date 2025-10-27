@@ -9,6 +9,12 @@ Features implemented in this prototype:
 - GET /download/{file_id}?token=... — download the uploaded file (attachment)
 - GET /health — basic health check
 - Best-effort auto-registration with RuneCore core at startup (environment variable `RUNECORE_CORE_URL`)
+ - Signaling endpoints for P2P (polling-based):
+	 - POST /signal/{file_id} — append a JSON string message (offer/answer/ice)
+	 - GET /signal/{file_id}?from=N — get messages from index N onward
+
+Frontend
+- A minimal React-based single-file frontend is included at `frontend/index.html` (no build step): it supports both HTTP relay flow and P2P via WebRTC datachannel using the signaling endpoints. Upload returns an SVG QR which the frontend displays.
 
 Configuration
 - PORT — service port (default 5010)

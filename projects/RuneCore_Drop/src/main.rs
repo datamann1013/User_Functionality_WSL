@@ -23,6 +23,8 @@ struct FileMeta {
 struct AppStateData {
     // persisted map file_id -> FileMeta
     files: HashMap<String, FileMeta>,
+    // in-memory signaling messages: file_id -> Vec<(seq, msg)>
+    signals: HashMap<String, Vec<String>>,
 }
 
 const STORAGE_DIR: &str = "./storage/uploads";
@@ -45,6 +47,27 @@ fn save_meta(state: &AppStateData) {
         let _ = fs::create_dir_all("./storage");
         let _ = fs::write(META_FILE, s);
     }
+}
+
+#[post("/signal/{file_id}")]
+async fn post_signal(path: web::Path<String>, body: String, data: web::Data<std::sync::Mutex<AppStateData>>) -> Result<impl Responder> {
+    let file_id = path.into_inner();
+    let mut state = data.lock().unwrap();
+    let entry = state.signals.entry(file_id).or_insert_with(Vec::new);
+    entry.push(body);
+    Ok(HttpResponse::Ok().json(serde_json::json!({"status":"ok","count": entry.len()})))
+}
+
+#[get("/signal/{file_id}")]
+async fn get_signal(path: web::Path<String>, query: web::Query<HashMap<String, String>>, data: web::Data<std::sync::Mutex<AppStateData>>) -> Result<impl Responder> {
+    let file_id = path.into_inner();
+    let start_idx: usize = query.get("from").and_then(|s| s.parse().ok()).unwrap_or(0);
+    let state = data.lock().unwrap();
+    if let Some(vec) = state.signals.get(&file_id) {
+        let slice = if start_idx < vec.len() { vec[start_idx..].to_vec() } else { vec![] };
+        return Ok(HttpResponse::Ok().json(serde_json::json!({"from": start_idx, "messages": slice}))); 
+    }
+    Ok(HttpResponse::Ok().json(serde_json::json!({"from": start_idx, "messages": []})))
 }
 
 #[post("/upload")]

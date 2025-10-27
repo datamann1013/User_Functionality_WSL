@@ -15,3 +15,4 @@ image = "0.24"
 base64 = "0.21"
 chrono = { version = "0.4", features = ["serde"] }
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+actix-files = "0.6"
