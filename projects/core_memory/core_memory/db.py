@@ -21,7 +21,9 @@ class Memory(Base):
     namespace = Column(String, nullable=False, default="global")
     agent_id = Column(String, nullable=True)
     text = Column(Text, nullable=False)
-    metadata = Column(JSON, default={})
+    # 'metadata' is a reserved attribute name on the declarative Base; store in DB column
+    # named 'metadata' but expose as 'metadata_json' on the model to avoid conflicts.
+    metadata_json = Column('metadata', JSON, default={})
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     size_bytes = Column(Integer, nullable=True)

@@ -86,7 +86,7 @@ def create_memory(payload: MemoryCreate):
                 "namespace": mem.namespace,
                 "agent_id": mem.agent_id,
                 "text": mem.text,
-                "metadata": mem.metadata,
+                "metadata": getattr(mem, "metadata_json", {}) or {},
                 "created_at": mem.created_at,
             }
             # cache in redis (best-effort)
@@ -154,7 +154,7 @@ def get_memory(memory_id: str):
                 "namespace": mem.namespace,
                 "agent_id": mem.agent_id,
                 "text": mem.text,
-                "metadata": mem.metadata,
+                "metadata": getattr(mem, "metadata_json", {}) or {},
                 "created_at": mem.created_at,
             }
         except HTTPException:
@@ -199,7 +199,12 @@ def query_memories(req: QueryRequest):
             scored.sort(key=lambda x: x[1], reverse=True)
             for mid, sc in scored[: req.top_k]:
                 m = db.query(Memory).filter(Memory.id == mid).first()
-                results.append({"id": str(m.id), "score": sc, "snippet": m.text[:200], "metadata": m.metadata})
+                results.append({
+                    "id": str(m.id),
+                    "score": sc,
+                    "snippet": m.text[:200],
+                    "metadata": getattr(m, "metadata_json", {}) or {},
+                })
         else:
             if SessionLocal:
                 db = SessionLocal()
@@ -208,7 +213,12 @@ def query_memories(req: QueryRequest):
                      .limit(req.top_k)
                      .all())
                 for r in q:
-                    results.append({"id": str(r.id), "score": 0.0, "snippet": r.text[:200], "metadata": r.metadata})
+                    results.append({
+                        "id": str(r.id),
+                        "score": 0.0,
+                        "snippet": r.text[:200],
+                        "metadata": getattr(r, "metadata_json", {}) or {},
+                    })
             else:
                 for _, r in _STORE.items():
                     if r["namespace"] == req.namespace:
