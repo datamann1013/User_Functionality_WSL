@@ -300,3 +300,12 @@ docker-compose.*.local.yml
 *.local.env
 .env.local
 .env.*.local
+
+# Common dump / RDP files that may contain sensitive data and should not be committed
+*.rdp
+*.rdp.dump
+dump.*
+*.dump
+
+# Alembic templates and compiled artifacts
+projects/core_memory/alembic/versions/*.pyc
