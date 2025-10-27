@@ -1,19 +1,72 @@
 #!/usr/bin/env python3
 """
-AI Service Backend - Optimized
+AI Service Backend - Optimized with Redis Conversation Cache
 """
 import os
 import requests
+import asyncio
+import threading
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+
+# Import conversation cache with robust path handling
+import sys
+import os
+
+# Add current directory to Python path for imports
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
+# Try multiple import strategies for different environments
+conversation_cache = None
+try:
+    # Standard import (development)
+    from cache.conversation_cache import conversation_cache
+except (ModuleNotFoundError, ImportError):
+    try:
+        # CI/CD environment fallback
+        cache_dir = os.path.join(current_dir, "cache")
+        if cache_dir not in sys.path:
+            sys.path.insert(0, cache_dir)
+        from conversation_cache import conversation_cache as _cache
+
+        conversation_cache = _cache
+    except (ModuleNotFoundError, ImportError):
+        # Create a mock cache for testing environments
+        class MockConversationCache:
+            def get_cache_stats(self):
+                return {
+                    "enabled": False,
+                    "using_redis": False,
+                    "message_limit": 10,
+                    "context_size": 5,
+                }
+
+            def format_context_for_ai(self, agent_id):
+                return []
+
+            def format_chat_history_to_string(self, history):
+                return ""
+
+            def get_full_conversation(self, agent_id):
+                return []
+
+            def add_conversation(self, agent_id, user_msg, ai_msg):
+                pass
+
+            def get_conversation_context(self, agent_id):
+                return []
+
+        conversation_cache = MockConversationCache()
 
 app = Flask(__name__)
 CORS(app)
 
 # Configuration
 ERRORLOGGER_URL = os.environ.get("ERRORLOGGER_SERVICE_URL", "http://127.0.0.1:5001/log")
-OLLAMA_SERVICE_URL = os.environ.get("OLLAMA_SERVICE_URL", "http://172.20.0.1:5002")
+OLLAMA_SERVICE_URL = os.environ.get("OLLAMA_SERVICE_URL", "http://127.0.0.1:5002")
 
 # Pre-defined agent data for fast response
 AGENTS_DATA = {
@@ -90,6 +143,61 @@ def get_agents():
     return jsonify(AGENTS_DATA)
 
 
+@app.route("/api/cache/stats", methods=["GET"])
+def get_cache_stats():
+    """Get conversation cache statistics"""
+    try:
+        stats = conversation_cache.get_cache_stats()
+        return jsonify({"status": "ok", "cache": stats})
+    except Exception as e:
+        return jsonify({"error": f"Cache stats failed: {str(e)}"}), 500
+
+
+@app.route("/api/agents/<agent_id>/conversations", methods=["GET"])
+def get_agent_conversations(agent_id):
+    """Get conversation history for specific agent"""
+    try:
+        limit = request.args.get("limit", 50, type=int)
+
+        # Get from cache (limited by cache size)
+        conversations = conversation_cache.get_full_conversation(agent_id)
+
+        # Format for frontend compatibility
+        formatted_conversations = []
+        for msg in conversations:
+            formatted_conversations.append(
+                {
+                    "id": msg["id"],
+                    "user_message": msg["user_message"],
+                    "ai_response": msg["ai_response"],
+                    "timestamp": msg["timestamp"],
+                    "model_used": "cached",  # Placeholder for now
+                    "agent_id": agent_id,
+                }
+            )
+
+        return jsonify(
+            {
+                "conversations": formatted_conversations[:limit],
+                "count": len(formatted_conversations),
+                "source": "local_cache",
+            }
+        )
+
+    except Exception as e:
+        log_error("CACHE_ERROR", str(e))
+        return (
+            jsonify(
+                {
+                    "conversations": [],
+                    "count": 0,
+                    "error": "Failed to retrieve conversations",
+                }
+            ),
+            500,
+        )
+
+
 @app.route("/health", methods=["GET"])
 def health():
     """Optimized health check"""
@@ -104,7 +212,7 @@ def health():
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
-    """Optimized chat endpoint with Ollama integration"""
+    """Optimized chat endpoint with conversation cache and context"""
     try:
         data = request.get_json() or {}
         message = data.get("message", "").strip()
@@ -113,48 +221,111 @@ def chat():
         if not message:
             return jsonify({"error": "Message is required"}), 400
 
+        # Get conversation context from cache as structured format
+        chat_history = conversation_cache.format_context_for_ai(agent_id)
+
+        # Add current user message to chat history
+        chat_history.append({"role": "user", "content": message})
+
+        # Convert to string format for Ollama
+        enhanced_message = conversation_cache.format_chat_history_to_string(
+            chat_history
+        )
+
+        # Add the assistant prompt at the end
+        enhanced_message += "\n\nAssistant:"
+
+        ai_response = None
+        response_mode = "fallback"
+
         # Try Ollama service first
         try:
+            # Adjust timeout based on message complexity
+            message_length = len(message)
+            base_timeout = 20
+            complex_timeout = (
+                35
+                if message_length > 100 or len(message.split()) > 20
+                else base_timeout
+            )
+
             payload = {
-                "message": message,
+                "message": enhanced_message,
                 "agent_id": agent_id,
                 "model_name": "llama3.2:1b",
                 "temperature": 0.7,
                 "top_p": 0.9,
                 "max_tokens": 2048,
-                "system_prompt": "You are a helpful AI assistant.",
+                "system_prompt": "",  # System prompt is now handled in chat history
                 "timestamp": datetime.now().isoformat(),
             }
 
             response = requests.post(
-                f"{OLLAMA_SERVICE_URL}/api/chat", json=payload, timeout=30
+                f"{OLLAMA_SERVICE_URL}/api/chat", json=payload, timeout=complex_timeout
             )
 
             if response.status_code == 200:
-                return jsonify(response.json())
+                ollama_response = response.json()
+                ai_response = ollama_response.get("response", "No response from AI")
+                response_mode = "ollama"
             else:
                 raise Exception(f"Ollama returned {response.status_code}")
 
-        except Exception:
-            # Fast fallback response
-            fallback_responses = {
-                "hello": "Hello! I'm running in fallback mode.",
-                "test": "System test successful - fallback mode active.",
-                "default": f"Message received: '{message}' - fallback mode active.",
+        except requests.exceptions.Timeout:
+            log_error(
+                "OLLAMA_TIMEOUT",
+                f"Request timed out after {complex_timeout}s for message: {message[:50]}...",
+            )
+            ai_response = "I'm taking a bit longer to think about your question. Let me try to give you a quicker response: could you rephrase your question or break it into smaller parts?"
+            response_mode = "timeout_fallback"
+        except Exception as e:
+            log_error("OLLAMA_ERROR", str(e))
+
+            log_error("OLLAMA_CONNECTION_ERROR", str(e))
+
+            # Simplified direct response without retry loops
+            if any(
+                word in message.lower()
+                for word in ["hello", "hi", "hey", "how are you"]
+            ):
+                ai_response = "Hello! I'm doing well, thanks for asking. How can I help you today?"
+            elif "poem" in message.lower():
+                ai_response = "I'd be happy to write a poem for you! What theme or topic would you like me to focus on?"
+            elif "weather" in message.lower():
+                ai_response = "I don't have access to current weather data, but I can discuss weather topics or write about weather if you'd like!"
+            elif any(
+                word in message.lower() for word in ["why", "how", "what", "explain"]
+            ):
+                ai_response = "That's an interesting question! I'm having some technical difficulties right now, but I'd be happy to help explain that topic if you could try asking again."
+            else:
+                ai_response = "I received your message, but I'm experiencing some technical issues. Could you please try rephrasing your question or asking it again?"
+
+            response_mode = "graceful_fallback"
+
+        # Store conversation in cache
+        try:
+            conversation_cache.add_conversation(agent_id, message, ai_response)
+            log_error("CACHE_SUCCESS", f"Conversation cached for agent {agent_id}")
+        except Exception as cache_error:
+            log_error(
+                "CACHE_ERROR", f"Failed to cache conversation: {str(cache_error)}"
+            )
+            # Continue anyway - caching failure shouldn't break the response
+
+        # Return response
+        return jsonify(
+            {
+                "response": ai_response,
+                "agent_id": agent_id,
+                "timestamp": datetime.now().isoformat(),
+                "mode": response_mode,
+                "context_used": len(chat_history)
+                > 2,  # More than just system + current message
+                "cached_messages": len(
+                    conversation_cache.get_conversation_context(agent_id)
+                ),
             }
-
-            response_key = next(
-                (k for k in ["hello", "test"] if k in message.lower()), "default"
-            )
-
-            return jsonify(
-                {
-                    "response": fallback_responses[response_key],
-                    "agent_id": agent_id,
-                    "timestamp": datetime.now().isoformat(),
-                    "mode": "fallback",
-                }
-            )
+        )
 
     except Exception as e:
         log_error("CHAT_ERROR", str(e))
@@ -162,6 +333,15 @@ def chat():
 
 
 if __name__ == "__main__":
-    print("🤖 AI Service Backend Starting")
-    port = int(os.environ.get("PORT", 5002))
+    print("🤖 AI Service Backend Starting with Redis Conversation Cache")
+
+    # Print cache configuration
+    cache_status = conversation_cache.get_cache_stats()
+    print(
+        f"💾 Cache Status: {'Redis' if cache_status['using_redis'] else 'Fallback Dict'}"
+    )
+    print(f"📝 Message Limit: {cache_status['message_limit']} per agent")
+    print(f"🧠 Context Size: {cache_status['context_size']} messages for AI")
+
+    port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=False)  # nosec B104

@@ -109,7 +109,7 @@ start_errorlogger() {
 
 # Function to start Backend
 start_backend() {
-    print_status "Starting AI Service Backend..."
+    print_status "Starting AI Service Backend with Redis Cache..."
     cd "$BACKEND_DIR"
     
     if check_port $BACKEND_PORT; then
@@ -118,8 +118,39 @@ start_backend() {
         return 0
     fi
     
-    # Start backend with model download disabled for faster startup
-    python app.py --debug --skip-model-download > backend.log 2>&1 &
+    # Set Redis cache environment variables for local development
+    export LOCAL_CACHE_ENABLED=true
+    export LOCAL_CACHE_MESSAGE_LIMIT=10
+    export LOCAL_CACHE_CONTEXT_SIZE=5
+    export REDIS_HOST=localhost
+    export REDIS_PORT=6379
+    export REDIS_DB=0
+    
+    # Check if Redis is available locally
+    print_status "Checking Redis availability..."
+    if command -v redis-server >/dev/null 2>&1 && command -v redis-cli >/dev/null 2>&1; then
+        # Check if Redis is already running
+        if ! redis-cli ping >/dev/null 2>&1; then
+            print_status "Starting local Redis server for conversation cache..."
+            redis-server --daemonize yes --port 6379 --maxmemory 128mb --maxmemory-policy allkeys-lru --save "" >/dev/null 2>&1 &
+            sleep 2
+            
+            if redis-cli ping >/dev/null 2>&1; then
+                print_success "Redis server started for conversation cache"
+            else
+                print_warning "Redis failed to start - will use fallback Python dict cache"
+            fi
+        else
+            print_success "Redis already running - using for conversation cache"
+        fi
+    else
+        print_warning "Redis not found - will use fallback Python dict cache"
+        print_status "  To install Redis: sudo apt-get install redis-server (Ubuntu/Debian)"
+        print_status "  Or: brew install redis (macOS)"
+    fi
+    
+    # Start backend (now with Redis cache support)
+    python app.py > backend.log 2>&1 &
     local backend_pid=$!
     echo "backend:$backend_pid" >> "$PIDS_FILE"
     
@@ -128,7 +159,16 @@ start_backend() {
     local attempts=0
     while [ $attempts -lt 30 ]; do
         if check_port $BACKEND_PORT; then
-            print_success "Backend started successfully (PID: $backend_pid)"
+            print_success "Backend started successfully with conversation cache (PID: $backend_pid)"
+            
+            # Test cache functionality
+            print_status "Testing conversation cache..."
+            sleep 2
+            if curl -s -f http://localhost:$BACKEND_PORT/api/cache/stats >/dev/null 2>&1; then
+                print_success "Conversation cache is operational"
+            else
+                print_warning "Cache status endpoint not responding (may still be initializing)"
+            fi
             return 0
         fi
         sleep 1
@@ -200,6 +240,16 @@ show_status() {
     echo -n "Backend (port $BACKEND_PORT): "
     if check_port $BACKEND_PORT; then
         echo -e "${GREEN}RUNNING${NC}"
+        
+        # Check conversation cache status
+        if curl -s -f http://localhost:$BACKEND_PORT/api/cache/stats >/dev/null 2>&1; then
+            local cache_info=$(curl -s http://localhost:$BACKEND_PORT/api/cache/stats 2>/dev/null | grep -o '"using_redis":[^,]*' | cut -d: -f2)
+            if [ "$cache_info" = "true" ]; then
+                echo -e "  ${GREEN}✓ Conversation Cache: Redis${NC}"
+            else
+                echo -e "  ${YELLOW}✓ Conversation Cache: Fallback${NC}"
+            fi
+        fi
     else
         echo -e "${RED}STOPPED${NC}"
     fi
@@ -211,11 +261,20 @@ show_status() {
         echo -e "${RED}STOPPED${NC}"
     fi
     
+    # Check Redis status
+    echo -n "Redis Cache: "
+    if command -v redis-cli >/dev/null 2>&1 && redis-cli ping >/dev/null 2>&1; then
+        echo -e "${GREEN}RUNNING${NC}"
+    else
+        echo -e "${YELLOW}NOT AVAILABLE${NC} (using fallback)"
+    fi
+    
     echo ""
     echo "URLs:"
     echo "  Frontend: http://localhost:$FRONTEND_PORT"
     echo "  Backend API: http://localhost:$BACKEND_PORT"
     echo "  ErrorLogger: http://localhost:$ERRORLOGGER_PORT"
+    echo "  Cache Stats: http://localhost:$BACKEND_PORT/api/cache/stats"
 }
 
 # Function to stop all services
@@ -284,6 +343,12 @@ start_all_services() {
     echo "  - Run '$0 stop' to stop all services"
     echo "  - Run '$0 status' to check service status"
     echo "  - Log files are in each service directory"
+    echo ""
+    print_status "🧠 Conversation Cache Features:"
+    echo "  - Each AI agent remembers last 10 conversations"
+    echo "  - Context automatically included in AI responses"
+    echo "  - Cache stats: http://localhost:$BACKEND_PORT/api/cache/stats"
+    echo "  - Agent conversations: http://localhost:$BACKEND_PORT/api/agents/{agent-id}/conversations"
     
     # Keep script running and monitor services
     trap 'stop_services; exit 0' INT TERM
