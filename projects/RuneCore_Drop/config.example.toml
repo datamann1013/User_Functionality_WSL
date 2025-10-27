@@ -1,0 +1,5 @@
+# RuneDrop example configuration
+port = 5010
+storage_path = "./storage/uploads"
+token_expiry_hours = 48
+core_register_url = "http://localhost:5000/api/modules/register"
