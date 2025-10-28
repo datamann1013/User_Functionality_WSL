@@ -9,200 +9,198 @@
       .qr { border: 1px solid #ddd; padding: 8px; display:inline-block }
       .log { white-space: pre-wrap; background:#f7f7f7; padding:8px; border:1px solid #eee; height:200px; overflow:auto }
     </style>
-    <!-- React via CDN for minimal frontend (no build step) -->
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-    <script src="https://unpkg.com/babel-standalone@6.26.0/babel.min.js"></script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="app">
+      <h2>RuneDrop — Minimal Frontend</h2>
+      <div>
+        <label>Mode: <select id="modeSelect">
+          <option value="http">HTTP relay</option>
+          <option value="p2p">P2P (WebRTC)</option>
+        </select></label>
+      </div>
 
-    <script type="text/babel">
-const {useState, useRef, useEffect} = React;
+      <div style="margin-top:10px">
+        <label>External base: <select id="externalSelect"><option value="">(auto)</option></select></label>
+        <input id="externalManual" placeholder="or paste custom base (http://10.0.1.9:5010)" style="width:320px;margin-left:8px" />
+      </div>
 
-function App(){
-  const [mode, setMode] = useState('http');
-  const [file, setFile] = useState(null);
-  const [result, setResult] = useState(null);
-  const [log, setLog] = useState('');
-  const [fileId, setFileId] = useState(null);
-  const [signalIndex, setSignalIndex] = useState(0);
-  const pcRef = useRef(null);
-  const dcRef = useRef(null);
+      <div style="margin-top:10px">
+        <input id="fileInput" type="file" />
+      </div>
 
-  function appendLog(s){ setLog(l => l + '\n' + s); }
+      <div style="margin-top:10px">
+        <button id="uploadBtn">Upload (HTTP)</button>
+        <button id="p2pSendBtn">Start P2P as Sender</button>
+        <button id="p2pRecvBtn">Start P2P as Receiver</button>
+      </div>
 
-  async function upload(){
-    if(!file) return alert('choose file');
-    appendLog('Uploading file (HTTP relay)...');
-    const fd = new FormData();
-    fd.append('file', file, file.name);
-    const resp = await fetch('/upload', {method:'POST', body: fd});
-    const j = await resp.json();
-    setResult(j);
-    setFileId(j.file_id);
-    appendLog('Upload finished. File ID: ' + j.file_id);
-  }
+      <div id="resultArea" style="margin-top:10px"></div>
 
-  async function startP2PAsSender(){
-    if(!file) return alert('choose file');
-    appendLog('Creating file entry (upload placeholder)');
-    // create a file entry on server without uploading the blob; we will send via WebRTC
-    // reuse /upload to create file id by uploading minimal metadata: send an empty small blob
-    const fd = new FormData();
-    fd.append('file', new Blob(['placeholder']), 'placeholder.txt');
-    const resp = await fetch('/upload', {method:'POST', body: fd});
-    const j = await resp.json();
-    setResult(j);
-    setFileId(j.file_id);
-    appendLog('Created file id ' + j.file_id + '. Starting WebRTC offer...');
+      <h4>Log</h4>
+      <div id="log" class="log">Ready.</div>
+    </div>
 
-    const pc = new RTCPeerConnection();
-    pcRef.current = pc;
-    const dc = pc.createDataChannel('file');
-    dcRef.current = dc;
+    <script>
+    (function(){
+      const modeSelect = document.getElementById('modeSelect');
+      const fileInput = document.getElementById('fileInput');
+      const uploadBtn = document.getElementById('uploadBtn');
+      const p2pSendBtn = document.getElementById('p2pSendBtn');
+      const p2pRecvBtn = document.getElementById('p2pRecvBtn');
+      const resultArea = document.getElementById('resultArea');
+      const logEl = document.getElementById('log');
 
-    dc.onopen = ()=>{ appendLog('DataChannel open — sending file in chunks'); sendFileChunks(); };
-    dc.onclose = ()=> appendLog('DataChannel closed');
-    dc.onmessage = (ev)=> appendLog('Message from receiver: ' + ev.data);
+      let pc = null;
+      let dc = null;
+      let currentFile = null;
+      let fileId = null;
+      let signalIndex = 0;
 
-    pc.onicecandidate = (e)=>{
-      if(e.candidate) return; // we will rely on trickle-free for simplicity
-    };
+      function log(s){ logEl.textContent += '\n' + s; logEl.scrollTop = logEl.scrollHeight; }
 
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    // post offer to signaling endpoint
-    await fetch('/signal/' + j.file_id, {method:'POST', body: JSON.stringify({type:'offer', sdp: offer.sdp}), headers: {'Content-Type':'application/json'}});
-    appendLog('Offer posted. Polling for answer...');
-    pollSignals(j.file_id);
-  }
-
-  async function pollSignals(fid){
-    const res = await fetch('/signal/' + fid + '?from=' + signalIndex);
-    const j = await res.json();
-    if(j.messages && j.messages.length){
-      for(const m of j.messages){
+      uploadBtn.addEventListener('click', async ()=>{
+        const f = fileInput.files[0];
+        if(!f) return alert('Choose a file first');
+        log('Uploading file (HTTP relay)...');
+        const fd = new FormData(); fd.append('file', f, f.name);
+        const extManual = document.getElementById('externalManual').value.trim();
+        const extSelect = document.getElementById('externalSelect').value;
+        const chosen = extManual || extSelect || null;
+        let url = '/upload'; if(chosen) url += '?external_base=' + encodeURIComponent(chosen);
         try{
-          const parsed = JSON.parse(m);
-          if(parsed.type === 'answer'){
-            appendLog('Got answer — setting remote description');
-            const pc = pcRef.current;
-            if(pc){
-              pc.setRemoteDescription({type:'answer', sdp: parsed.sdp});
+          const resp = await fetch(url, {method:'POST', body: fd});
+          if(!resp.ok) throw new Error('upload failed: ' + resp.status);
+          const j = await resp.json();
+          fileId = j.file_id;
+          resultArea.innerHTML = `<div><div>File ID: ${escapeHtml(j.file_id)}</div><div>Download URL: <a href="${escapeHtml(j.download_url)}">${escapeHtml(j.download_url)}</a></div><div class='qr'>${j.qr_svg}</div></div>`;
+          log('Upload complete. File ID: ' + j.file_id);
+        }catch(e){ log('Upload error: ' + e); }
+      });
+
+      p2pSendBtn.addEventListener('click', async ()=>{
+        const f = fileInput.files[0];
+        if(!f) return alert('Choose a file first');
+        currentFile = f;
+        log('Creating file entry (placeholder upload)');
+        const fd = new FormData(); fd.append('file', new Blob(['placeholder']), 'placeholder.txt');
+        const extManual = document.getElementById('externalManual').value.trim();
+        const extSelect = document.getElementById('externalSelect').value;
+        const chosen = extManual || extSelect || null;
+        let url = '/upload'; if(chosen) url += '?external_base=' + encodeURIComponent(chosen);
+        try{
+          const resp = await fetch(url, {method:'POST', body: fd});
+          const j = await resp.json();
+          fileId = j.file_id;
+          resultArea.innerHTML = `<div><div>File ID: ${escapeHtml(j.file_id)}</div><div class='qr'>${j.qr_svg}</div></div>`;
+          log('Created file id ' + j.file_id + '. Starting WebRTC');
+
+          pc = new RTCPeerConnection();
+          dc = pc.createDataChannel('file');
+          dc.onopen = ()=>{ log('Data channel open — sending file'); sendFileChunks(); };
+          dc.onclose = ()=> log('Data channel closed');
+
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          await fetch('/signal/' + fileId, {method:'POST', body: JSON.stringify({type:'offer', sdp: offer.sdp}), headers: {'Content-Type':'application/json'}});
+          log('Offer posted. Polling for answer...');
+          pollSignals();
+        }catch(e){ log('P2P sender error: ' + e); }
+      });
+
+      p2pRecvBtn.addEventListener('click', async ()=>{
+        const fid = prompt('Enter file id (or paste from QR link)');
+        if(!fid) return; fileId = fid; log('Receiver connecting to file ' + fid);
+        try{
+          // poll for offer
+          let offer = null;
+          while(!offer){
+            const res = await fetch('/signal/' + fid + '?from=0');
+            const j = await res.json();
+            if(j.messages && j.messages.length){
+              for(const m of j.messages){
+                const parsed = JSON.parse(m);
+                if(parsed.type === 'offer') offer = parsed;
+              }
+            }
+            if(!offer) await new Promise(r=>setTimeout(r, 800));
+          }
+          log('Offer received — creating answer');
+          pc = new RTCPeerConnection();
+          pc.ondatachannel = (ev)=>{
+            const ch = ev.channel; log('Data channel received');
+            let received = [];
+            ch.onmessage = (ev2)=>{
+              if(typeof ev2.data === 'string' && ev2.data === '__END__'){
+                const blob = new Blob(received);
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url; a.download = 'received.bin'; a.textContent = 'Download received file'; resultArea.appendChild(a);
+                log('File received — download link created');
+                received = [];
+              } else {
+                received.push(ev2.data);
+              }
+            };
+          };
+          await pc.setRemoteDescription({type:'offer', sdp: offer.sdp});
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await fetch('/signal/' + fid, {method:'POST', body: JSON.stringify({type:'answer', sdp: answer.sdp}), headers: {'Content-Type':'application/json'}});
+          log('Answer posted');
+        }catch(e){ log('P2P receiver error: ' + e); }
+      });
+
+      async function pollSignals(){
+        if(!fileId) return;
+        try{
+          const res = await fetch('/signal/' + fileId + '?from=' + signalIndex);
+          const j = await res.json();
+          if(j.messages && j.messages.length){
+            for(const m of j.messages){
+              const parsed = JSON.parse(m);
+              if(parsed.type === 'answer'){
+                log('Got answer — setting remote description');
+                if(pc) pc.setRemoteDescription({type:'answer', sdp: parsed.sdp});
+              }
+            }
+            signalIndex += j.messages.length;
+          }
+        }catch(e){ log('poll error: ' + e); }
+        setTimeout(pollSignals, 1500);
+      }
+
+      function sendFileChunks(){
+        if(!dc || !currentFile) return;
+        const chunkSize = 64*1024;
+        const reader = new FileReader();
+        let offset = 0;
+        reader.onload = (e)=>{
+          dc.send(e.target.result);
+          offset += e.target.result.byteLength;
+          log('Sent ' + offset + ' bytes');
+          if(offset < currentFile.size) readSlice(offset); else { dc.send('__END__'); log('Send complete'); }
+        };
+        function readSlice(o){ const slice = currentFile.slice(o, o + chunkSize); reader.readAsArrayBuffer(slice); }
+        readSlice(0);
+      }
+
+      function escapeHtml(s){ return String(s).replace(/[&<>\"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+
+      // load interface candidates
+      (async function(){
+        try{
+          const r = await fetch('/interfaces');
+          if(!r.ok) return;
+          const j = await r.json();
+          if(j.candidates && j.candidates.length){
+            const sel = document.getElementById('externalSelect');
+            for(const c of j.candidates){
+              const opt = document.createElement('option'); opt.value = c; opt.textContent = c; sel.appendChild(opt);
             }
           }
-        }catch(e){ appendLog('signal parse error ' + e); }
-      }
-      setSignalIndex(signalIndex + j.messages.length);
-    }
-    // continue polling
-    setTimeout(()=> pollSignals(fid), 1500);
-  }
-
-  async function startP2PAsReceiver(){
-    const fid = prompt('Enter file id (or paste from QR link)');
-    if(!fid) return;
-    setFileId(fid);
-    appendLog('Receiver connecting to file ' + fid);
-
-    // poll for offer until found
-    let offer = null;
-    while(!offer){
-      const res = await fetch('/signal/' + fid + '?from=0');
-      const j = await res.json();
-      if(j.messages && j.messages.length){
-        for(const m of j.messages){
-          const parsed = JSON.parse(m);
-          if(parsed.type === 'offer') offer = parsed;
-        }
-      }
-      if(!offer) await new Promise(r=>setTimeout(r, 1000));
-    }
-    appendLog('Offer received — creating answer');
-    const pc = new RTCPeerConnection();
-    pcRef.current = pc;
-    pc.ondatachannel = (ev)=>{
-      const ch = ev.channel; appendLog('DataChannel received');
-      let receivedBuffers = [];
-      ch.onmessage = (ev)=>{
-        if(typeof ev.data === 'string' && ev.data === '__END__'){
-          // assemble
-          const blob = new Blob(receivedBuffers);
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a'); a.href = url; a.download = 'received.bin'; a.textContent = 'Download received file'; document.getElementById('root').appendChild(a);
-          appendLog('File received — created download link');
-          receivedBuffers = [];
-        } else {
-          receivedBuffers.push(ev.data);
-        }
-      };
-    };
-
-    await pc.setRemoteDescription({type:'offer', sdp: offer.sdp});
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-
-    await fetch('/signal/' + fid, {method:'POST', body: JSON.stringify({type:'answer', sdp: answer.sdp}), headers: {'Content-Type':'application/json'}});
-    appendLog('Answer posted');
-  }
-
-  function sendFileChunks(){
-    const dc = dcRef.current;
-    if(!dc || !file) return;
-    const chunkSize = 64*1024;
-    const reader = new FileReader();
-    let offset = 0;
-    reader.onload = (e)=>{
-      dc.send(e.target.result);
-      offset += e.target.result.byteLength;
-      appendLog('Sent ' + offset + ' bytes');
-      if(offset < file.size){
-        readSlice(offset);
-      } else {
-        dc.send('__END__'); appendLog('Send complete');
-      }
-    };
-    function readSlice(o){
-      const slice = file.slice(o, o + chunkSize);
-      reader.readAsArrayBuffer(slice);
-    }
-    readSlice(0);
-  }
-
-  return (<div>
-    <h2>RuneDrop — Minimal Frontend</h2>
-    <div>
-      <label>Mode: <select value={mode} onChange={e=>setMode(e.target.value)}>
-        <option value='http'>HTTP relay</option>
-        <option value='p2p'>P2P (WebRTC)</option>
-      </select></label>
-    </div>
-    <div style={{marginTop:10}}>
-      <input type='file' onChange={e=>setFile(e.target.files[0])} />
-    </div>
-    <div style={{marginTop:10}}>
-      {mode === 'http' && <button onClick={upload}>Upload (HTTP)</button>}
-      {mode === 'p2p' && <><button onClick={startP2PAsSender}>Start P2P as Sender</button>
-      <button onClick={startP2PAsReceiver}>Start P2P as Receiver</button></>}
-    </div>
-
-    <div style={{marginTop:10}}>
-      {result && <div>
-        <h4>Result</h4>
-        <div>File ID: {result.file_id}</div>
-        <div>Download URL: <a href={result.download_url}>{result.download_url}</a></div>
-        <div className='qr' dangerouslySetInnerHTML={{__html: result.qr_svg}} />
-      </div>}
-    </div>
-
-    <h4>Log</h4>
-    <div className='log'>{log}</div>
-  </div>);
-}
-
-ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+        }catch(e){ log('interfaces load error: ' + e); }
+      })();
+    })();
     </script>
   </body>
 </html>

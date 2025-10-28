@@ -5,6 +5,7 @@ use qrcode::QrCode;
 use qrcode::render::svg;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use if_addrs::get_if_addrs;
 use std::fs;
 use std::io::Write;
 use bytes::BytesMut;
@@ -50,6 +51,64 @@ fn save_meta(state: &AppStateData) {
     }
 }
 
+fn base_url_from_req(req: &HttpRequest) -> String {
+    if let Ok(ext) = std::env::var("RUNECORE_EXTERNAL_URL") {
+        let trimmed = ext.trim_end_matches('/').to_string();
+        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            return trimmed;
+        } else {
+            return format!("http://{}", trimmed);
+        }
+    }
+    let info = req.connection_info();
+    let scheme = info.scheme();
+    let host = info.host();
+    format!("{}://{}", scheme, host)
+}
+
+#[get("/interfaces")]
+async fn get_interfaces(req: HttpRequest) -> Result<impl Responder> {
+    let mut candidates: Vec<String> = Vec::new();
+
+    // 1) environment override
+    if let Ok(ext) = std::env::var("RUNECORE_EXTERNAL_URL") {
+        let trimmed = ext.trim_end_matches('/').to_string();
+        if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+            candidates.push(trimmed);
+        } else {
+            candidates.push(format!("http://{}", trimmed));
+        }
+    }
+
+    // 2) host from request (may be localhost:port)
+    let info = req.connection_info();
+    let scheme = info.scheme();
+    let host = info.host();
+    candidates.push(format!("{}://{}", scheme, host));
+
+    // 3) local non-loopback IPv4 addresses
+    if let Ok(addrs) = get_if_addrs() {
+        for ifa in addrs {
+            if ifa.is_loopback() { continue; }
+            match ifa.ip() {
+                std::net::IpAddr::V4(ipv4) => {
+                    candidates.push(format!("http://{}", ipv4));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // dedupe while preserving order
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for c in candidates {
+        if seen.insert(c.clone()) { out.push(c); }
+    }
+
+    Ok(HttpResponse::Ok().json(serde_json::json!({"candidates": out})))
+}
+
 #[post("/signal/{file_id}")]
 async fn post_signal(path: web::Path<String>, body: String, data: web::Data<std::sync::Mutex<AppStateData>>) -> Result<impl Responder> {
     let file_id = path.into_inner();
@@ -72,7 +131,7 @@ async fn get_signal(path: web::Path<String>, query: web::Query<HashMap<String, S
 }
 
 #[post("/upload")]
-async fn upload(mut payload: Multipart, data: web::Data<std::sync::Mutex<AppStateData>>) -> Result<impl Responder> {
+async fn upload(req: HttpRequest, mut payload: Multipart, data: web::Data<std::sync::Mutex<AppStateData>>) -> Result<impl Responder> {
     ensure_dirs().map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
     // Handle only first file field for MVP
@@ -120,7 +179,28 @@ async fn upload(mut payload: Multipart, data: web::Data<std::sync::Mutex<AppStat
             save_meta(&state);
         }
 
-        let download_url = format!("/download/{}?token={}", file_id, token);
+        // allow client override via query param external_base or header X-EXTERNAL-BASE
+        let mut base = None;
+        if let Some(q) = req.query_string().split('&').find_map(|kv| {
+            let mut parts = kv.splitn(2, '=');
+            let k = parts.next()?; let v = parts.next()?; if k == "external_base" { Some(v) } else { None }
+        }) {
+            base = Some(q.to_string());
+        }
+        if base.is_none() {
+            if let Some(h) = req.headers().get("X-EXTERNAL-BASE") {
+                if let Ok(s) = h.to_str() { base = Some(s.to_string()); }
+            }
+        }
+        let base = match base {
+            Some(b) => {
+                let t = b.trim_end_matches('/').to_string();
+                if t.starts_with("http://") || t.starts_with("https://") { t } else { format!("http://{}", t) }
+            }
+            None => base_url_from_req(&req)
+        };
+
+        let download_url = format!("{}/download/{}?token={}", base.trim_end_matches('/'), file_id, token);
         let qr_svg = QrCode::new(&format!("{}", download_url)).unwrap().render::<svg::Color>().build();
 
         let resp = serde_json::json!({
