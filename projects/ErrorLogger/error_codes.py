@@ -47,5 +47,15 @@ ERROR_CODE_DEFINITIONS = {
     "EAFX1": "Frontend error occurred",
     # ===== Health/Info =====
     "IAXX1": "Health check called",
+    # ===== CoreMemory (ICM/ECM) =====
+    "ICM1": "CoreMemory service started",
+    "ICM2": "Memory created",
+    "ICM3": "Memory retrieved",
+    "ICM4": "Memory deleted",
+    "ECM1": "Failed to create memory",
+    "ECM2": "Failed to retrieve memory",
+    "ECM3": "Failed to delete memory",
+    "ECM4": "CoreMemory database connection failed",
+    "ECM5": "CoreMemory cache operation failed",
     # ===== Add new codes below =====
 }

@@ -1,0 +1,49 @@
+name: CoreMemory Integration
+
+on:
+  push:
+    branches: [ main, AI_service_memory ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    services: {}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose-plugin docker-compose
+
+      - name: Start dev stack
+        working-directory: projects/core_memory
+        run: |
+          docker-compose -f docker-compose.dev.yml up --build -d
+
+      - name: Wait for service
+        run: |
+          # Wait for core service to become healthy
+          timeout=60
+          until curl -sSf http://localhost:5010/v1/health || [ $timeout -le 0 ]; do
+            sleep 1
+            timeout=$((timeout-1))
+          done
+
+      - name: Run migrations (scaffold)
+        working-directory: projects/core_memory
+        run: |
+          docker-compose -f docker-compose.dev.yml exec -T core_memory python /app/migrate.py || true
+
+      - name: Run tests
+        working-directory: projects/core_memory
+        run: |
+          pip install pytest requests
+          pytest tests/test_integration.py -q
+
+      - name: Tear down
+        working-directory: projects/core_memory
+        run: |
+          docker-compose -f docker-compose.dev.yml down -v

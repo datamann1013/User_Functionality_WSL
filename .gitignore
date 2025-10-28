@@ -288,3 +288,31 @@ projects/core/data/*.enc
 projects/core/data/*.pem
 projects/core/data/ca_passphrase.txt
 projects/core/data/runecore.db
+# CoreMemory local / dev ignores
+# Local DB or postgres data directories sometimes used during development
+projects/core_memory/core_pgdata/
+projects/core_memory/*.log
+projects/core_memory/*.db
+projects/core_memory/*.sqlite3
+projects/core_memory/.venv/
+projects/core_memory/venv/
+projects/core_memory/__pycache__/
+projects/core_memory/.pytest_cache/
+projects/core_memory/.mypy_cache/
+projects/core_memory/*.pyc
+
+# Docker compose local overrides and env files
+docker-compose.override.yml
+docker-compose.*.local.yml
+*.local.env
+.env.local
+.env.*.local
+
+# Common dump / RDP files that may contain sensitive data and should not be committed
+*.rdp
+*.rdp.dump
+dump.*
+*.dump
+
+# Alembic templates and compiled artifacts
+projects/core_memory/alembic/versions/*.pyc
