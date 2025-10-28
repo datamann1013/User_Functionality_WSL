@@ -1,0 +1,21 @@
+[package]
+name = "runedrop"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actix-web = "4"
+actix-multipart = "0.4"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+uuid = { version = "1", features = ["v4"] }
+qrcode = "0.12"
+image = "0.24"
+base64 = "0.21"
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+actix-files = "0.6"
+bytes = "1"
+futures-util = "0.3"
+if-addrs = "0.6"
