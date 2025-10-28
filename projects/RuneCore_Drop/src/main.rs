@@ -251,6 +251,43 @@ async fn health() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"status": "healthy"}))
 }
 
+#[post("/register_with_core")]
+async fn register_with_core(req_body: String) -> impl Responder {
+    // Expect a JSON body like {"insecure": true}
+    let parsed: serde_json::Value = match serde_json::from_str(&req_body) {
+        Ok(v) => v,
+        Err(_) => return HttpResponse::BadRequest().json(serde_json::json!({"error":"invalid json"})),
+    };
+
+    let insecure = parsed.get("insecure").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    // Server-side guard: only allow insecure registration if env var explicitly set.
+    let allow_insecure = std::env::var("RUNECORE_ALLOW_INSECURE_REGISTRATION").unwrap_or_else(|_| "false".into()) == "true";
+    if insecure && !allow_insecure {
+        return HttpResponse::Forbidden().json(serde_json::json!({"error":"insecure registration not allowed by server configuration"}));
+    }
+
+    let core_url = std::env::var("RUNECORE_CORE_URL").unwrap_or_else(|_| "http://localhost:5000/api/modules/register".into());
+    let register_name = "RuneDrop";
+    let register_body = serde_json::json!({"name": register_name, "version": "0.1.0", "port": std::env::var("PORT").unwrap_or_else(|_| "5010".into()), "capabilities": ["file_sharing"]});
+
+    let builder = reqwest::Client::builder();
+    let builder = if insecure { builder.danger_accept_invalid_certs(true) } else { builder };
+    match builder.build() {
+        Ok(client) => {
+            match client.post(&core_url).json(&register_body).send().await {
+                Ok(resp) => {
+                    let status = resp.status().as_u16();
+                    let text = resp.text().await.unwrap_or_else(|_| "".into());
+                    return HttpResponse::Ok().json(serde_json::json!({"status": "sent", "http_status": status, "body": text}));
+                }
+                Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": format!("request failed: {}", e.to_string())})),
+            }
+        }
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": format!("client build failed: {}", e.to_string())})),
+    }
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     println!("Starting RuneDrop service (RuneCore_Drop) ...");
@@ -267,12 +304,24 @@ async fn main() -> std::io::Result<()> {
     // fire-and-forget registration
     let core_url_clone = core_url.clone();
     let register_body_clone = register_body.clone();
+    // Respect the environment toggle for allowing insecure registration.
+    // Default behaviour is strict TLS. To allow insecure (dev-only), set
+    // RUNECORE_ALLOW_INSECURE_REGISTRATION=true in the container environment.
+    let allow_insecure = std::env::var("RUNECORE_ALLOW_INSECURE_REGISTRATION").unwrap_or_else(|_| "false".into()) == "true";
+    let core_url_spawn = core_url_clone.clone();
+    let body_spawn = register_body_clone.clone();
     actix_web::rt::spawn(async move {
-        let client = reqwest::Client::builder().danger_accept_invalid_certs(true).build();
+        let builder = reqwest::Client::builder();
+        let builder = if allow_insecure { builder.danger_accept_invalid_certs(true) } else { builder };
+        let client = builder.build();
         if let Ok(c) = client {
-            let _ = c.post(&core_url_clone).json(&register_body_clone).send().await;
+            let _ = c.post(&core_url_spawn).json(&body_spawn).send().await;
         }
     });
+
+    // new endpoint to allow a runtime, user-triggered registration attempt
+    // (useful for the frontend opt-in flow). This endpoint will only permit
+    // insecure registration if RUNECORE_ALLOW_INSECURE_REGISTRATION is true.
 
     let bind = format!("0.0.0.0:{}", std::env::var("PORT").unwrap_or_else(|_| "5010".into()));
     println!("Listening on {}", bind);
@@ -286,7 +335,8 @@ async fn main() -> std::io::Result<()> {
             .service(download)
             .service(post_signal)
             .service(get_signal)
-            .service(health)
+        .service(health)
+        .service(register_with_core)
     })
     .bind(bind)?
     .run()
