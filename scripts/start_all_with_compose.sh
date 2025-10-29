@@ -14,6 +14,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${SCRIPT_DIR}/.."
 cd "${ROOT_DIR}"
 
+# Preload saved dev base images if present
+ARTIFACT_DIR="$ROOT_DIR/artifacts/dev-bases"
+if [ -d "$ARTIFACT_DIR" ]; then
+  for t in "$ARTIFACT_DIR"/*.tar; do
+    [ -f "$t" ] || continue
+    echo "Loading prebuilt base image from $t"
+    docker load -i "$t" || true
+  done
+fi
+
 # Known compose files (relative to repo root). Add more if you have per-project compose files.
 # Auto-discover compose files. Prefer dev files first for developer workflows.
 COMPOSE_FILES=()
