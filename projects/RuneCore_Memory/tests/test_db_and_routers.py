@@ -24,7 +24,11 @@ if 'fastapi' not in sys.modules:
                 return f
             return _dec
 
-    fake_fastapi = types.SimpleNamespace(APIRouter=lambda *a, **k: _FakeRouter(), HTTPException=Exception)
+    class _HTTPException(Exception):
+        def __init__(self, status_code=None, detail=None):
+            super().__init__(detail)
+
+    fake_fastapi = types.SimpleNamespace(APIRouter=lambda *a, **k: _FakeRouter(), HTTPException=_HTTPException)
     sys.modules['fastapi'] = fake_fastapi
 
 # shim pydantic
@@ -84,6 +88,8 @@ if 'sqlalchemy' not in sys.modules:
     sys.modules['sqlalchemy.orm'] = types.SimpleNamespace(sessionmaker=lambda **k: None)
 
 from core_memory.routers import memories
+import uuid
+from types import SimpleNamespace
 
 
 def test__text_to_vector_length_and_determinism():
@@ -143,3 +149,166 @@ def test_query_memories_in_memory_store(monkeypatch):
     assert isinstance(out, dict)
     assert "results" in out
     assert any(r["id"] == r1["id"] for r in out["results"])
+
+
+class FakeQuery:
+    def __init__(self, store, model=None):
+        self._store = store
+        self._model = model
+
+    def filter(self, *a, **k):
+        # ignore filter expression; return self
+        return self
+
+    def limit(self, n):
+        return self
+
+    def all(self):
+        return list(self._store.values())
+
+    def first(self):
+        vals = list(self._store.values())
+        return vals[0] if vals else None
+
+
+class FakeSession:
+    def __init__(self, store):
+        self._store = store
+        self._added = []
+
+    def add(self, obj):
+        self._added.append(obj)
+
+    def commit(self):
+        # emulate setting id and created_at
+        for obj in self._added:
+            if not getattr(obj, 'id', None):
+                obj.id = uuid.uuid4()
+            if not getattr(obj, 'created_at', None):
+                obj.created_at = datetime.utcnow()
+            # store by string id
+            self._store[str(obj.id)] = obj
+        self._added = []
+
+    def refresh(self, obj):
+        return
+
+    def rollback(self):
+        self._added = []
+
+    def close(self):
+        return
+
+    def query(self, model):
+        return FakeQuery(self._store, model)
+
+
+def test_create_memory_db_backed(monkeypatch):
+    store = {}
+    monkeypatch.setattr(memories, 'SessionLocal', lambda: FakeSession(store))
+
+    class Payload:
+        namespace = "global"
+        agent_id = "agent-db"
+        text = "db backed memory"
+        metadata = {"k": "v"}
+        def dict(self):
+            return {"namespace": self.namespace, "agent_id": self.agent_id, "text": self.text, "metadata": self.metadata}
+
+    # provide simple Memory and Embedding model implementations for tests
+    class SimpleModel:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k if k != 'metadata' else 'metadata_json', v)
+            self.id = None
+            self.created_at = None
+    # class attributes to satisfy attribute access in filter expressions
+    id = None
+    namespace = None
+
+    monkeypatch.setattr(memories, 'Memory', SimpleModel)
+    monkeypatch.setattr(memories, 'Embedding', SimpleModel)
+
+    res = memories.create_memory(Payload())
+    assert res["text"] == "db backed memory"
+    assert "id" in res
+    assert res["id"] in store
+
+
+def test_get_memory_db_backed_found(monkeypatch):
+    store = {}
+    # pre-insert a fake memory-like object
+    mid = str(uuid.uuid4())
+    obj = SimpleNamespace(id=mid, namespace="global", agent_id=None, text="preinsert", metadata_json={}, created_at=datetime.utcnow())
+    store[mid] = obj
+    monkeypatch.setattr(memories, 'SessionLocal', lambda: FakeSession(store))
+
+    # ensure Memory is a compatible class for db paths
+    class SimpleModel:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k if k != 'metadata' else 'metadata_json', v)
+            self.id = None
+            self.created_at = None
+    id = None
+    namespace = None
+    id = None
+    namespace = None
+    id = None
+    namespace = None
+
+    monkeypatch.setattr(memories, 'Memory', SimpleModel)
+    monkeypatch.setattr(memories, 'Embedding', SimpleModel)
+
+    # Replace Memory with a dummy object whose attributes support equality
+    class DummyAttr:
+        def __eq__(self, other):
+            return True
+
+    monkeypatch.setattr(memories, 'Memory', types.SimpleNamespace(id=DummyAttr(), namespace=DummyAttr()))
+
+    got = memories.get_memory(mid)
+    assert got["id"] == mid
+    assert got["text"] == "preinsert"
+
+
+def test_query_memories_db_backed(monkeypatch):
+    store = {}
+    # insert two objects
+    a = SimpleNamespace(id=str(uuid.uuid4()), namespace="global", agent_id=None, text="m1", metadata_json={})
+    b = SimpleNamespace(id=str(uuid.uuid4()), namespace="global", agent_id=None, text="m2", metadata_json={})
+    store[a.id] = a
+    store[b.id] = b
+    monkeypatch.setattr(memories, 'SessionLocal', lambda: FakeSession(store))
+
+    # shim models
+    class SimpleModel:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k if k != 'metadata' else 'metadata_json', v)
+            self.id = None
+            self.created_at = None
+    id = None
+    namespace = None
+
+    monkeypatch.setattr(memories, 'Memory', SimpleModel)
+    monkeypatch.setattr(memories, 'Embedding', SimpleModel)
+
+    class Q:
+        q = None
+        embedding = None
+        namespace = "global"
+        top_k = 5
+        def dict(self):
+            return {"q": self.q, "embedding": self.embedding, "namespace": self.namespace, "top_k": self.top_k}
+
+    # Use dummy Memory descriptor to avoid SQLAlchemy expression requirements
+    class DummyAttr:
+        def __eq__(self, other):
+            return True
+
+    monkeypatch.setattr(memories, 'Memory', types.SimpleNamespace(id=DummyAttr(), namespace=DummyAttr()))
+
+    out = memories.query_memories(Q())
+    assert isinstance(out, dict)
+    assert len(out["results"]) >= 2
