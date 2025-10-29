@@ -25,6 +25,10 @@ def wait_for_health(url, timeout=30):
     raise RuntimeError('Service did not become healthy')
 
 
+import pytest
+
+
+@pytest.mark.skip(reason="Integration test requiring docker-compose; run manually")
 def test_create_get_query_flow():
     # Start compose stack
     run(f'docker-compose -f {COMPOSE_FILE} up --build -d', cwd=BASE_DIR)
