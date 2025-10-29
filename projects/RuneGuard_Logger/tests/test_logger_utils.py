@@ -1,4 +1,58 @@
 import importlib
+import os
+import sys
+import types
+
+
+def test_safe_json_and_log_write_and_remote_fallback(tmp_path, monkeypatch):
+    mod_name = "projects.RuneGuard_Logger.logger"
+    if mod_name in sys.modules:
+        del sys.modules[mod_name]
+    logger = importlib.import_module(mod_name)
+    importlib.reload(logger)
+
+    # Redirect log directory to tmp
+    monkeypatch.setenv("LOG_DIRECTORY", str(tmp_path))
+
+    # safe_json_dumps handles Decimal and datetime
+    import decimal
+    from datetime import datetime, timedelta
+
+    s = logger.safe_json_dumps({"d": decimal.Decimal("1.23"), "t": datetime.utcnow(), "dt": timedelta(seconds=5)})
+    assert isinstance(s, str)
+
+    # init_log_file creates a file
+    logger.LOG_FILE_PATH = None
+    logger.init_log_file()
+    assert os.path.exists(logger.LOG_FILE_PATH)
+
+    # log_error writes to file
+    logger.log_error("TST1", message="ok", exception=None, extra={"a":1})
+    assert os.path.getsize(logger.LOG_FILE_PATH) > 0
+
+    # Simulate remote failure by making requests.post raise
+    class BadResp:
+        def post(self, *a, **k):
+            class R:
+                status_code = 500
+
+                def json(self):
+                    return {}
+
+            return R()
+
+    logger.requests = BadResp()
+    # Should fallback to local logging and not raise
+    logger.log_error_remote("E100", message="remote fail test")
+
+    # generate_error_code
+    code = logger.generate_error_code("L", "O", "C", None, 3)
+    assert isinstance(code, str) and code.startswith("LOC")
+
+    # rotation status returns a dict
+    status = logger.get_log_rotation_status()
+    assert "current_log_file" in status
+import importlib
 import sys
 import os
 import types
