@@ -1,6 +1,7 @@
+version: '3.8'
 services:
   postgres:
-  image: "${POSTGRES_IMAGE:-postgres:15}"
+    image: "${POSTGRES_IMAGE:-postgres:15}"
     environment:
       POSTGRES_USER: core
       POSTGRES_PASSWORD: core

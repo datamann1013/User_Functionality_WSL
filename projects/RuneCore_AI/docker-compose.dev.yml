@@ -1,0 +1,29 @@
+version: '3.8'
+services:
+  backend:
+    build:
+      context: ../../
+      dockerfile: projects/RuneCore_AI/docker/Dockerfile.backend
+    ports:
+      - '5000:5000'
+    environment:
+      - ERRORLOGGER_URL=http://runeguard:5001
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    ports:
+      - '3000:3000'
+    environment:
+      - REACT_APP_API_URL=http://localhost:5000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/" ]
+      interval: 15s
+      timeout: 5s
+      retries: 3

@@ -8,14 +8,14 @@ WORKDIR /app
 RUN apk add --no-cache curl postgresql-client gcc python3-dev musl-dev linux-headers redis supervisor
 
 # Copy requirements and install Python dependencies
-COPY projects/ai_service/backend/requirements.txt /app/requirements.txt
+COPY projects/RuneCore_AI/backend/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --disable-pip-version-check -r requirements.txt \
     && pip install --no-cache-dir psycopg2-binary gunicorn
 
 # Copy application code (optimized layering)
-COPY projects/ai_service/backend/ /app/backend/
+COPY projects/RuneCore_AI/backend/ /app/backend/
 COPY projects/shared_utils/ /app/shared_utils/
-COPY projects/ErrorLogger/ /app/ErrorLogger/
+COPY projects/RuneGuard_Logger/ /app/ErrorLogger/
 
 # Create necessary directories and Redis configuration
 RUN mkdir -p /app/uploads /app/logs /var/log/redis /var/lib/redis /etc/supervisor/conf.d && \

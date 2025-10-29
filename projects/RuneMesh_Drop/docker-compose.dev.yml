@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  mesh_drop:
+    build: .
+    ports:
+      - '5100:5100'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5100/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
