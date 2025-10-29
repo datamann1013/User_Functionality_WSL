@@ -251,6 +251,23 @@ async fn health() -> impl Responder {
     HttpResponse::Ok().json(serde_json::json!({"status": "healthy"}))
 }
 
+// Build a reqwest client that optionally trusts a provided CA file and/or allows insecure TLS.
+fn build_reqwest_client(allow_insecure: bool) -> Result<reqwest::Client, reqwest::Error> {
+    let mut builder = reqwest::Client::builder();
+    if allow_insecure {
+        builder = builder.danger_accept_invalid_certs(true);
+    }
+    // If the environment provides a CA path, try to add it as a root certificate.
+    if let Ok(ca_path) = std::env::var("RUNECORE_CORE_CA_PATH") {
+        if let Ok(pem) = std::fs::read(&ca_path) {
+            if let Ok(cert) = reqwest::Certificate::from_pem(&pem) {
+                builder = builder.add_root_certificate(cert);
+            }
+        }
+    }
+    builder.build()
+}
+
 #[post("/register_with_core")]
 async fn register_with_core(req_body: String) -> impl Responder {
     // Expect a JSON body like {"insecure": true}
@@ -271,9 +288,7 @@ async fn register_with_core(req_body: String) -> impl Responder {
     let register_name = "RuneDrop";
     let register_body = serde_json::json!({"name": register_name, "version": "0.1.0", "port": std::env::var("PORT").unwrap_or_else(|_| "5010".into()), "capabilities": ["file_sharing"]});
 
-    let builder = reqwest::Client::builder();
-    let builder = if insecure { builder.danger_accept_invalid_certs(true) } else { builder };
-    match builder.build() {
+    match build_reqwest_client(insecure) {
         Ok(client) => {
             match client.post(&core_url).json(&register_body).send().await {
                 Ok(resp) => {
@@ -311,11 +326,8 @@ async fn main() -> std::io::Result<()> {
     let core_url_spawn = core_url_clone.clone();
     let body_spawn = register_body_clone.clone();
     actix_web::rt::spawn(async move {
-        let builder = reqwest::Client::builder();
-        let builder = if allow_insecure { builder.danger_accept_invalid_certs(true) } else { builder };
-        let client = builder.build();
-        if let Ok(c) = client {
-            let _ = c.post(&core_url_spawn).json(&body_spawn).send().await;
+        if let Ok(client) = build_reqwest_client(allow_insecure) {
+            let _ = client.post(&core_url_spawn).json(&body_spawn).send().await;
         }
     });
 

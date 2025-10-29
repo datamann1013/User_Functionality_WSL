@@ -1,14 +1,21 @@
 # Multi-stage Dockerfile for RuneCore Core
 # Builder stage: use official Rust image and install OpenSSL dev packages
-FROM rust:latest as builder
+FROM rust:1.82-slim-bullseye as builder
 
+# Install system deps and rustup so we can use a newer toolchain (nightly)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     pkg-config \
     libssl-dev \
     ca-certificates \
+    curl \
     git \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain nightly \
+ && . /usr/local/cargo/env && rustup default nightly
+
+# Ensure cargo/bin from the system-wide install is on PATH
+ENV PATH="/usr/local/cargo/bin:${PATH}"
 
 WORKDIR /usr/src/runecore_core
 
@@ -21,8 +28,9 @@ COPY src ./src
  RUN cargo build --release
 
 # Final runtime stage
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+FROM debian:bullseye-slim
+# Ensure runtime has the OpenSSL 1.1 compatibility library used by the built binary
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl1.1 && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY --from=builder /usr/src/runecore_core/target/release/runecore_core ./runecore_core
