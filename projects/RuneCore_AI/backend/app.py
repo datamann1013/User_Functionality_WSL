@@ -9,6 +9,11 @@ import threading
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+# optional integration with core
+try:
+    from shared_utils.core_client import CoreClient
+except Exception:
+    CoreClient = None
 
 # Import conversation cache with robust path handling
 import sys
@@ -120,6 +125,22 @@ def log_error(error_code, message=None, extra=None):
     except Exception:
         # Catch any other unexpected errors
         pass  # nosec B110
+
+
+def maybe_register_with_core():
+    """Attempt registration with RuneCore core when RUNECORE_REGISTER_WITH_CORE is set."""
+    if not os.environ.get("RUNECORE_REGISTER_WITH_CORE"):
+        return
+    if CoreClient is None:
+        print("CoreClient not available; skipping AI registration")
+        return
+    try:
+        cc = CoreClient(core_url=os.environ.get("RUNECORE_CORE_URL"), disable_mtls=os.environ.get("RUNECORE_DISABLE_MTLS") in ("1","true","True"))
+        info = {"name": "AIService", "version": "0.1.0", "rest_url": os.environ.get("AI_SERVICE_URL", "http://127.0.0.1:5000/api/chat")}
+        res = cc.register_service(info)
+        print(f"Registered AI with core: {res}")
+    except Exception as e:
+        print(f"Failed to register AI with core: {e}")
 
 
 @app.route("/api/log-frontend-error", methods=["POST"])

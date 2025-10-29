@@ -9,6 +9,11 @@ import json
 import argparse
 from datetime import datetime
 from flask import Flask, request, jsonify
+# optional integration with core
+try:
+    from shared_utils.core_client import CoreClient
+except Exception:
+    CoreClient = None
 
 app = Flask(__name__)
 
@@ -154,6 +159,23 @@ def get_services():
 
     except Exception as e:
         return jsonify({"error": "Could not retrieve services", "message": str(e)}), 500
+
+
+def maybe_register_with_core():
+    """If RUNECORE_REGISTER_WITH_CORE is set, attempt to register this service with Core using CoreClient.
+    This is best-effort and will not raise on failure."""
+    if not os.environ.get("RUNECORE_REGISTER_WITH_CORE"):
+        return
+    if CoreClient is None:
+        print("CoreClient not available; skipping registration")
+        return
+    try:
+        cc = CoreClient(core_url=os.environ.get("RUNECORE_CORE_URL"), disable_mtls=os.environ.get("RUNECORE_DISABLE_MTLS") in ("1","true","True"))
+        info = {"name": "ErrorLogger", "version": "1.0.0", "rest_url": os.environ.get("ERRORLOGGER_SERVICE_URL", "http://127.0.0.1:5001/log")}
+        res = cc.register_service(info)
+        print(f"Registered with core: {res}")
+    except Exception as e:
+        print(f"Failed to register with core: {e}")
 
 
 if __name__ == "__main__":
