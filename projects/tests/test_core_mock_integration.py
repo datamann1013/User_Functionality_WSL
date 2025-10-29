@@ -35,11 +35,22 @@ def test_core_client_against_mock(monkeypatch):
     time.sleep(0.5)
 
     # Ensure shared_utils package is importable from workspace
-    import sys, os
+    import sys, os, importlib
     # tests/ is inside projects/, so the parent directory is the projects/ package root
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+    # Remove any injected/shared module so we import a fresh implementation
+    if "shared_utils.core_client" in sys.modules:
+        del sys.modules["shared_utils.core_client"]
     # Configure core client to point to mock
     from shared_utils.core_client import CoreClient
+    # Ensure the core_client module uses the real requests implementation
+    import requests as _real_requests, importlib
+    try:
+        importlib.reload(_real_requests)
+    except Exception:
+        pass
+    import shared_utils.core_client as _cc_mod
+    _cc_mod.requests = _real_requests
 
     cc = CoreClient(core_url=f"http://127.0.0.1:{port}", disable_mtls=True)
     res = cc.register_service({'name': 'test-svc'})

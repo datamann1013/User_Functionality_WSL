@@ -129,7 +129,7 @@ def test_cache_add_failure_does_not_break_response(monkeypatch):
     ai_mod = _reload_app_with_cache_module(cache_mod)
 
     # Make Ollama succeed
-    def good_post(url, json=None, timeout=None):
+    def good_post(url, json=None, timeout=None, **kwargs):
         class R:
             status_code = 200
 
