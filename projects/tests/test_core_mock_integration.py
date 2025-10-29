@@ -24,14 +24,43 @@ def run_mock_core(port=5009):
             return jsonify({'ok': False, 'error': 'missing csr'}), 400
         return jsonify({'ok': True, 'cert_pem': 'CERTDATA'})
 
-    app.run(port=port, debug=False, use_reloader=False)
+    # Use a WSGI server that can be shut down cleanly from tests
+    from werkzeug.serving import make_server
+
+    server = make_server('127.0.0.1', port, app)
+    # Start the server in a daemon thread so this helper never blocks the caller.
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    # Give the server a short moment to start
+    time.sleep(0.1)
+    return server, server_thread
 
 
 def test_core_client_against_mock(monkeypatch):
-    # Start mock core server in background thread
+    # Start mock core server in background thread using make_server so we can shut it down
     port = 5009
-    t = threading.Thread(target=run_mock_core, kwargs={'port': port}, daemon=True)
-    t.start()
+    from werkzeug.serving import make_server
+
+    app = Flask("mock_core")
+
+    @app.route('/api/v1/services/register', methods=['POST'])
+    def register_local():
+        data = request.get_json(force=True)
+        if not data.get('name'):
+            return jsonify({'ok': False, 'error': 'missing name'}), 400
+        return jsonify({'ok': True, 'service_id': 'mock-svc-1'})
+
+    @app.route('/api/v1/pki/sign', methods=['POST'])
+    def sign_local():
+        data = request.get_json(force=True)
+        csr = data.get('csr_pem')
+        if not csr:
+            return jsonify({'ok': False, 'error': 'missing csr'}), 400
+        return jsonify({'ok': True, 'cert_pem': 'CERTDATA'})
+
+    server = make_server('127.0.0.1', port, app)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
     time.sleep(0.5)
 
     # Ensure shared_utils package is importable from workspace
@@ -58,3 +87,6 @@ def test_core_client_against_mock(monkeypatch):
 
     cert = cc.sign_csr('CSRDATA')
     assert cert == 'CERTDATA'
+    # Shutdown server
+    server.shutdown()
+    server_thread.join(timeout=1)
