@@ -50,12 +50,28 @@ Current alpha status
 - Skeleton: minimal Rust prototype scaffold added under `projects/RuneCore_Sentinel/`.
 - What it contains: Cargo manifest and a small Rust binary that samples CPU/memory, serializes telemetry into CBOR, and writes it to a local IPC endpoint (Unix domain socket on *nix, named pipe on Windows). It also contains a best-effort Core registration call.
 
+What was added (closer to beta)
+
+- Disk spool: failed payloads are persisted on-disk in a per-machine data directory so telemetry is not lost during short outages.
+- HTTP fallback: when IPC delivery fails, the agent can forward CBOR payloads to CoreMemory's HTTP API (decoded to JSON when possible) after discovering CoreMemory via the Core service registry.
+- Spool flusher: a background thread periodically retries spooled items and forwards them when possible.
+- Service discovery: Sentinel queries Core's `/api/v1/services` to find CoreMemory's `rest_url` for HTTP forwarding.
+- Error handling: simple best-effort registration and warnings; spool ensures durability.
+
 Notes
-- This scaffold favors clear platform-separated code paths. It purposely uses CBOR for compact binary messages and Unix socket / named pipe for local IPC as requested. It's a starting point — features like spool, backoff, and robust reconnect logic are left for the next iteration.
+
+- This scaffold uses CBOR for compact binary messages and Unix domain sockets / named pipes for local IPC as you requested. The HTTP fallback sends decoded JSON when possible (or base64-encoded CBOR in metadata) so CoreMemory doesn't need to immediately change.
+- Security: registration currently uses a blocking request and accepts invalid TLS certs for simpler local testing; for beta we should enable mTLS / proper CA verification and use signed auth for IPC.
+- Production hardening left for next iterations: robust exponential backoff, rate limiting, partial-write handling, permissions/documentation for service accounts, and integration tests.
 
 Next development steps
-- Implement a small receiver/adapter (for development) that accepts the length-prefixed CBOR frames on a Unix socket or named pipe and forwards decoded payloads to CoreMemory's HTTP API (/v1/memories). Alternatively, extend Core to accept CBOR over a local socket.
-- Add configuration and packaging (systemd unit, Windows service wrapper), tests, and a small integration test that exercises the full path.
+
+1. Add a small local receiver/adapter (dev helper) that reads length-prefixed CBOR frames from the IPC endpoint and forwards decoded JSON to CoreMemory for local testing (recommended so CoreMemory doesn't need immediate change).
+2. Add systemd unit template and Windows service instructions (packaging). I can add these next.
+3. Wire mTLS for Core registration and secure the IPC channel with HMAC tokens.
+4. Add integration tests and a small benchmark measuring CPU overhead.
+
+If you want I can implement the dev receiver/adapter and the systemd + Windows service artifacts next. Tell me which you'd prefer to prioritize.
 
 Next steps (suggested)
 

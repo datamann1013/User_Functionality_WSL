@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::env;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Config {
     pub sampling_interval: u32,
     pub unix_socket_path: String,
@@ -62,4 +62,27 @@ pub fn register_with_core(cfg: &Config) -> Result<(), String> {
     } else {
         Err(format!("register returned status {}", resp.status()))
     }
+}
+
+/// Query core for the CoreMemory service rest_url.
+pub fn get_core_memory_url(cfg: &Config) -> Result<String, String> {
+    let url = format!("{}/api/v1/services", cfg.core_url.trim_end_matches('/'));
+    let client = reqwest::blocking::Client::builder().danger_accept_invalid_certs(true).build().map_err(|e| e.to_string())?;
+    let resp = client.get(&url).send().map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("core services list returned {}", resp.status()));
+    }
+    let body: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+    if let Some(arr) = body.get("services").and_then(|v| v.as_array()) {
+        for s in arr {
+            if let Some(name) = s.get("name").and_then(|n| n.as_str()) {
+                if name.to_lowercase().contains("memory") {
+                    if let Some(rest) = s.get("rest_url").and_then(|r| r.as_str()) {
+                        return Ok(rest.to_string());
+                    }
+                }
+            }
+        }
+    }
+    Err("CoreMemory service not found in core registry".to_string())
 }

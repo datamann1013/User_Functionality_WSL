@@ -31,3 +31,25 @@ pub fn sample_system_metrics() -> SystemMetrics {
         used_memory: used_mem,
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serialize_roundtrip_cbor() {
+        let m = SystemMetrics {
+            ts: 1,
+            host: "test-host".to_string(),
+            cpu_usage: 12.34,
+            total_memory: 1024,
+            used_memory: 512,
+        };
+        let bytes = serde_cbor::to_vec(&m).expect("cbor serialize");
+        let decoded: SystemMetrics = serde_cbor::from_slice(&bytes).expect("cbor deserialize");
+        assert_eq!(decoded.host, "test-host");
+        assert_eq!(decoded.total_memory, 1024);
+    }
+}
+
