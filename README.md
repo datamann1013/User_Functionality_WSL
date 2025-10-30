@@ -122,6 +122,13 @@ graph TB
 - **Health Presets**: Gaming, Development, Minimal configurations
 - **Status Indicators**: Green/Yellow/Red system health display
 
+#### RuneCore Sentinel (projects/RuneCore_Sentinel)
+- **Native Host Probe**: Lightweight, low-overhead agent that runs natively on the host (not containerized) and collects system telemetry.
+- **Purpose**: Observe system state (CPU, memory, disk, network, processes, sensors) and forward structured telemetry to the RuneCore Memory core for storage and analysis.
+- **Design goals**: Minimal CPU/memory footprint, memory-safe implementation, secure local-only IPC, robust buffering for temporary core unavailability.
+- **Language recommendation**: Rust is recommended for its combination of performance and memory-safety; C++ is an alternative if platform constraints require it.
+- **Status**: Alpha (design and README added). A minimal prototype is planned: CPU/memory sampling + local IPC sender.
+
 #### RuneMind AI Subsystem (ai_service → RuneMind)
 - **Natural Language Interface**: Chat-based system interaction
 - **Multiple AI Models**: Ollama integration with model management
