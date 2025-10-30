@@ -50,14 +50,6 @@ Current alpha status
 - Skeleton: minimal Rust prototype scaffold added under `projects/RuneCore_Sentinel/`.
 - What it contains: Cargo manifest and a small Rust binary that samples CPU/memory, serializes telemetry into CBOR, and writes it to a local IPC endpoint (Unix domain socket on *nix, named pipe on Windows). It also contains a best-effort Core registration call.
 
-What was added (closer to beta)
-
-- Disk spool: failed payloads are persisted on-disk in a per-machine data directory so telemetry is not lost during short outages.
-- HTTP fallback: when IPC delivery fails, the agent can forward CBOR payloads to CoreMemory's HTTP API (decoded to JSON when possible) after discovering CoreMemory via the Core service registry.
-- Spool flusher: a background thread periodically retries spooled items and forwards them when possible.
-- Service discovery: Sentinel queries Core's `/api/v1/services` to find CoreMemory's `rest_url` for HTTP forwarding.
-- Error handling: simple best-effort registration and warnings; spool ensures durability.
-
 Notes
 
 - This scaffold uses CBOR for compact binary messages and Unix domain sockets / named pipes for local IPC as you requested. The HTTP fallback sends decoded JSON when possible (or base64-encoded CBOR in metadata) so CoreMemory doesn't need to immediately change.
