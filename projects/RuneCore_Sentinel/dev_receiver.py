@@ -131,6 +131,7 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('--unix-socket', help='Path to unix domain socket to listen on (Linux/macOS)')
     p.add_argument('--tcp', help='Bind address for TCP in form host:port (Windows dev fallback)')
+    p.add_argument('--pipe', help='Windows named pipe name (e.g. \\\\.\\\\pipe\\runecore-sentinel)')
     p.add_argument('--core', default='http://127.0.0.1:5010', help='CoreMemory base URL (default http://127.0.0.1:5010)')
     args = p.parse_args()
 
@@ -138,6 +139,71 @@ def main():
         run_unix_socket(args.unix_socket, args.core)
     elif args.tcp:
         run_tcp(args.tcp, args.core)
+    elif args.pipe:
+        # Windows named pipe server using pywin32
+        try:
+            import win32pipe
+            import win32file
+            import pywintypes
+        except Exception:
+            print('pywin32 is required for named pipe support. Install with: pip install pywin32')
+            sys.exit(1)
+
+        def run_named_pipe(pipe_name, core_url):
+            # Normalize pipe name
+            if not pipe_name.startswith('\\\\.\\pipe\\'):
+                full_name = r'\\.\\pipe\\' + pipe_name
+            else:
+                full_name = pipe_name
+            print(f'Listening on named pipe {full_name}')
+            while True:
+                try:
+                    handle = win32pipe.CreateNamedPipe(
+                        full_name,
+                        win32pipe.PIPE_ACCESS_DUPLEX,
+                        win32pipe.PIPE_TYPE_BYTE | win32pipe.PIPE_READMODE_BYTE | win32pipe.PIPE_WAIT,
+                        1, 65536, 65536, 0, None)
+                    try:
+                        win32pipe.ConnectNamedPipe(handle, None)
+                    except pywintypes.error:
+                        # if client connected between CreateNamedPipe and ConnectNamedPipe
+                        pass
+
+                    # read loop
+                    while True:
+                        # read 4-byte length
+                        try:
+                            hr, data = win32file.ReadFile(handle, 4)
+                        except pywintypes.error:
+                            break
+                        if len(data) < 4:
+                            break
+                        length = struct.unpack('>I', data)[0]
+                        payload = b''
+                        remaining = length
+                        while remaining > 0:
+                            try:
+                                hr, chunk = win32file.ReadFile(handle, min(4096, remaining))
+                            except pywintypes.error:
+                                break
+                            if not chunk:
+                                break
+                            payload += chunk
+                            remaining -= len(chunk)
+                        try:
+                            obj = cbor2.loads(payload)
+                        except Exception as e:
+                            print(f'Failed to decode CBOR payload: {e}')
+                            obj = {'_cbor_base64': payload.hex()}
+                        print(f'Received payload from pipe: {obj}')
+                        forward_to_core(core_url, obj)
+                finally:
+                    try:
+                        win32file.CloseHandle(handle)
+                    except Exception:
+                        pass
+
+        run_named_pipe(args.pipe, args.core)
     else:
         print('Specify --unix-socket or --tcp')
         sys.exit(2)
