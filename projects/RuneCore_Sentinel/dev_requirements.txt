@@ -1,0 +1,4 @@
+requests
+cbor2
+# optional: pywin32 for Windows named pipe support
+pywin32
