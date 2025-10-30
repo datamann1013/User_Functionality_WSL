@@ -316,3 +316,4 @@ dump.*
 
 # Alembic templates and compiled artifacts
 projects/core_memory/alembic/versions/*.pyc
+artifacts/dev-bases/*
