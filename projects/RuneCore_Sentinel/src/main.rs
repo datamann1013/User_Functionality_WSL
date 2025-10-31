@@ -1,4 +1,6 @@
 use std::time::Duration;
+use std::env;
+use serde_json;
 
 mod config;
 mod ipc;
@@ -15,6 +17,10 @@ use log::{info, warn, error};
 fn main() {
     env_logger::init();
     info!("RuneCore Sentinel starting (beta-ready skeleton)");
+    // Basic CLI flags: --debug to print sampled data, --once to run a single sample
+    let args: Vec<String> = env::args().collect();
+    let debug = args.iter().any(|a| a == "--debug");
+    let once = args.iter().any(|a| a == "--once");
 
     let cfg = Config::from_env();
     info!("configuration: sampling_interval={}s", cfg.sampling_interval);
@@ -38,6 +44,13 @@ fn main() {
     let interval = Duration::from_secs(cfg.sampling_interval as u64);
     loop {
         let metric = sample_system_metrics();
+        if debug {
+            // print a human-readable JSON preview of the metric for easy inspection
+            match serde_json::to_string_pretty(&metric) {
+                Ok(s) => println!("[DEBUG] sampled metric:\n{}", s),
+                Err(e) => println!("[DEBUG] failed to serialize metric to JSON: {}", e),
+            }
+        }
         match serde_cbor::to_vec(&metric) {
             Ok(payload) => {
                 if let Err(e) = send_cbor_to_ipc(&cfg, &payload) {
@@ -51,6 +64,8 @@ fn main() {
             }
             Err(e) => warn!("failed to serialize metric to CBOR: {}", e),
         }
+
+        if once { break; }
 
         std::thread::sleep(interval);
     }
