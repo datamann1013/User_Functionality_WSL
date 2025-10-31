@@ -171,6 +171,17 @@ try {
                 $snippet = @'
 function Import-RepoVcvarsIfNeeded {
     try {
+        # Ensure rustup/cargo shims are first in PATH so rustup-managed toolchains are used
+        $cargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
+        if (Test-Path $cargoBin) {
+            $parts = $env:Path -split ';' | Where-Object { $_ -ne '' }
+            if ($parts[0] -ne $cargoBin) {
+                # Remove any existing entries equal to cargoBin then prepend
+                $parts = $parts | Where-Object { $_ -ne $cargoBin }
+                $env:Path = ($cargoBin + ';' + ($parts -join ';'))
+            }
+        }
+
         if ($env:RUNECORE_AUTO_VCVARS -ne '1' -and -not ($PWD.Path -like '*gitproj\RuneCore_Ecosystem*')) { return }
         $vc = Get-ChildItem 'C:\Program Files (x86)\Microsoft Visual Studio' -Recurse -Filter 'vcvars64.bat' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
         if ($vc) {
