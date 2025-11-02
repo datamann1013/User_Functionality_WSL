@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y pkg-config libssl-dev build-essential c
 RUN cargo build --release
 
 FROM debian:bullseye-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=builder /app/target/release/runedrop ./runedrop
 # copy frontend static files into final image so server can serve them

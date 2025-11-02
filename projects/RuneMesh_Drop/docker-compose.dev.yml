@@ -3,9 +3,10 @@ services:
   mesh_drop:
     build: .
     ports:
-      - '5100:5100'
+      - '5100:5010'
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5100/health"]
+      # container exposes 5010; map host 5100 -> container 5010 and check container-local port
+      test: ["CMD", "curl", "-f", "http://localhost:5010/health"]
       interval: 15s
       timeout: 3s
       retries: 3
