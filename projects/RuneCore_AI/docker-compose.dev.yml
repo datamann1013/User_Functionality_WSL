@@ -6,6 +6,10 @@ services:
       dockerfile: projects/RuneCore_AI/docker/Dockerfile.backend.dev
     ports:
       - '5000:5000'
+    networks:
+      runecore_dev:
+        aliases:
+          - ai_backend
     environment:
       - ERRORLOGGER_URL=http://runeguard:5001
     healthcheck:
@@ -20,6 +24,10 @@ services:
       dockerfile: docker/Dockerfile.frontend
     ports:
       - '3000:3000'
+    networks:
+      runecore_dev:
+        aliases:
+          - ai_frontend
     environment:
       - REACT_APP_API_URL=http://localhost:5000
     healthcheck:
@@ -27,3 +35,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+
+networks:
+  runecore_dev:
+    external: true

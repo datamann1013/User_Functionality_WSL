@@ -16,4 +16,11 @@ services:
     build:
       context: ./docker/router
       dockerfile: Dockerfile
-    network_mode: host
+    ports:
+      - '80:80'
+    networks:
+      - runecore_dev
+
+networks:
+  runecore_dev:
+    external: true

@@ -4,9 +4,17 @@ services:
     build: .
     ports:
       - '5100:5010'
+    networks:
+      runecore_dev:
+        aliases:
+          - mesh_drop
     healthcheck:
       # container exposes 5010; map host 5100 -> container 5010 and check container-local port
       test: ["CMD", "curl", "-f", "http://localhost:5010/health"]
       interval: 15s
       timeout: 3s
       retries: 3
+
+networks:
+  runecore_dev:
+    external: true
