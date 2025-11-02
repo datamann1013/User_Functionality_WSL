@@ -3,22 +3,23 @@ FROM python:3.11-alpine
 
 WORKDIR /app
 
-# Install minimal dependencies
+# Install minimal runtime dependencies
 RUN apk add --no-cache curl
 
-# Copy requirements and install dependencies
-COPY projects/ErrorLogger/requirements.txt .
+# Install Python dependencies (copy requirements first to leverage Docker layer caching)
+# The build context is the project root (this directory), so use relative paths
+COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --disable-pip-version-check -r requirements.txt
 
-# Copy ErrorLogger code
-COPY projects/ErrorLogger/ /app/
+# Copy service source files
+COPY . /app/
 
-# Create logs directory
+# Create logs directory with permissive permissions for containerized dev use
 RUN mkdir -p /app/logs && chmod 777 /app/logs
 
-# Create non-root user
-RUN addgroup -g 1001 -S appuser && adduser -S -u 1001 -G appuser appuser
-RUN chown -R appuser:appuser /app
+# Create non-root user and set ownership
+RUN addgroup -g 1001 -S appuser && adduser -S -u 1001 -G appuser appuser \
+    && chown -R appuser:appuser /app
 USER appuser
 
 # Health check
