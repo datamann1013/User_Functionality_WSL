@@ -97,7 +97,6 @@ jobs:
 
     - name: License Compliance Check
       continue-on-error: true
-      if: secrets.FOSSA_API_KEY != ''
       uses: fossa-contrib/fossa-action@v2
       with:
         api-key: ${{ secrets.FOSSA_API_KEY }}
