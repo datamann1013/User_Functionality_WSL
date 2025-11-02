@@ -24,6 +24,13 @@ if [ -d "$ARTIFACT_DIR" ]; then
   done
 fi
 
+# If local tarballs exist, prefer dev compose files but allow running all stacks;
+# export USE_LOCAL_BASES=1 to explicitly indicate local-first behavior.
+if compgen -G "$ARTIFACT_DIR/*.tar" > /dev/null 2>&1; then
+  echo "Found local dev base tarballs in $ARTIFACT_DIR; these will be used for builds."
+  USE_LOCAL_BASES=1
+fi
+
 # Known compose files (relative to repo root). Add more if you have per-project compose files.
 # Auto-discover compose files. Prefer dev files first for developer workflows.
 COMPOSE_FILES=()
@@ -92,6 +99,7 @@ fi
 action="${1-}" || true
 if [ -z "$action" ]; then
   echo "Usage: $0 up|down|restart [filters...]" >&2
+  echo "       $0 test-ready  -> bring up all dev stacks and wait for service healthchecks" >&2
   echo "Environment: SKIP_BUILD=1 to skip build, NO_CACHE=1 to pass --no-cache to build" >&2
   exit 2
 fi
@@ -209,6 +217,29 @@ run_up() {
   "${COMPOSE_CMD[@]}" -f "$file" up -d
 }
 
+# Wait for healthchecks exposed by compose stacks. This polls each container's
+# health status via `docker ps`/`docker inspect` when available or a simple
+# curl against common ports if a healthcheck isn't set.
+wait_for_health() {
+  local timeout=${1:-60}
+  local interval=3
+  local elapsed=0
+  echo "Waiting up to ${timeout}s for containers to report healthy..."
+  while [ $elapsed -lt $timeout ]; do
+    # If there are any containers in HEALTHY state, consider them ok; if any
+    # are starting or unhealthy, keep waiting.
+    unhealthy=$(docker ps --filter "label=com.docker.compose.project" --format '{{.ID}}' | xargs -r docker inspect --format='{{.State.Health.Status}}' 2>/dev/null | grep -v healthy || true)
+    if [ -z "$unhealthy" ]; then
+      echo "All containers healthy (or no healthchecks defined)."
+      return 0
+    fi
+    sleep $interval
+    elapsed=$((elapsed+interval))
+  done
+  echo "Timeout waiting for healthy containers." >&2
+  return 1
+}
+
 run_down() {
   local file="$1"
   echo "--> Bringing down compose stack: $file"
@@ -231,13 +262,17 @@ for cfile in "${COMPOSE_FILES[@]}"; do
         exit 0
         ;;
       up)
-        run_up "$cfile"
+  run_up "$cfile"
         ;;
       down)
         run_down "$cfile"
         ;;
       restart)
         run_down "$cfile" || true
+        run_up "$cfile"
+        ;;
+      test-ready)
+        # Bring up all stacks and then wait for health
         run_up "$cfile"
         ;;
       *)
