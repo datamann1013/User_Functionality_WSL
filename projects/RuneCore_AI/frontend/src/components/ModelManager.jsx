@@ -8,8 +8,7 @@ const ModelManager = ({ isOpen, onClose }) => {
   const [newModelName, setNewModelName] = useState("");
 
   // API base URL
-  const API_BASE =
-    process.env.NODE_ENV === "production" ? "" : "http://localhost:5000";
+  const API_BASE = process.env.REACT_APP_API_URL || (process.env.NODE_ENV === "production" ? "" : "");
 
   // Popular Ollama models
   const popularModels = [

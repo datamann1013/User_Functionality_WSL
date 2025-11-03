@@ -12,8 +12,7 @@ import EditAgentModal from "./components/EditAgentModal";
 import ModelManager from "./components/ModelManager";
 
 // API base URL
-const API_BASE =
-  process.env.NODE_ENV === "production" ? "" : "http://localhost:5000";
+const API_BASE = process.env.REACT_APP_API_URL || (process.env.NODE_ENV === "production" ? "" : "");
 
 // Pre-computed avatar colors for better performance
 const AVATAR_COLORS = [
@@ -494,7 +493,7 @@ function App() {
                       {agent.avatar_image ? (
                         agent.avatar_image.startsWith("/api/avatars/") ? (
                           <img
-                            src={`http://localhost:5000${agent.avatar_image}`}
+                            src={`${API_BASE}${agent.avatar_image}`}
                             alt={agent.name}
                             className="agent-avatar-image"
                           />
