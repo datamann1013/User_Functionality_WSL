@@ -3,7 +3,9 @@
  * Sends errors to backend which forwards to ErrorLogger service
  */
 
-const API_BASE = process.env.REACT_APP_API_URL || (process.env.NODE_ENV === "production" ? "" : "");
+// Use REACT_APP_API_URL when provided by the environment (works for dev and prod).
+// Fallback to empty string so requests become relative and go through the router.
+const API_BASE = process.env.REACT_APP_API_URL || "";
 
 export const logFrontendError = async (
   errorCode,
