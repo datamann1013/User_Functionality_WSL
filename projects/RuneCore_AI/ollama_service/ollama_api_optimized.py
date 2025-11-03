@@ -4,6 +4,7 @@ Ollama API Service - Optimized
 High-performance AI chat service
 """
 import os
+import logging
 import requests
 from datetime import datetime
 from flask import Flask, request, jsonify
@@ -11,6 +12,10 @@ from flask_cors import CORS
 
 app = Flask(__name__)
 CORS(app)
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("ollama_service")
 
 # Configuration
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434")
@@ -34,12 +39,14 @@ def get_ollama_status():
                     "last_check": datetime.now().isoformat(),
                 }
             else:
+                logger.warning("Ollama /api/tags returned %s", response.status_code)
                 _ollama_cache["status"] = {
                     "running": False,
                     "models_available": [],
                     "last_check": datetime.now().isoformat(),
                 }
-        except:
+        except Exception as e:
+            logger.exception("Failed to contact Ollama: %s", e)
             _ollama_cache["status"] = {
                 "running": False,
                 "models_available": [],
@@ -139,7 +146,12 @@ def chat():
                 }
             )
         else:
-            return jsonify({"error": f"Ollama error: {response.status_code}"}), 502
+            # Log details for debugging
+            try:
+                logger.error("Ollama /api/generate returned %s: %s", response.status_code, response.text)
+            except Exception:
+                logger.exception("Ollama /api/generate returned %s and response body could not be read", response.status_code)
+            return jsonify({"error": f"Ollama error: {response.status_code}", "body": response.text}), 502
 
     except requests.exceptions.Timeout:
         return jsonify({"error": "Request timeout"}), 504
