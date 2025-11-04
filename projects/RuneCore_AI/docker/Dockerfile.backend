@@ -66,10 +66,6 @@ RUN echo "[supervisord]" > /etc/supervisor/conf.d/supervisord.conf && \
 RUN addgroup -g 1001 -S appuser && adduser -S -u 1001 -G appuser appuser
 RUN chown -R appuser:appuser /app
 
-# Optimized health check
-HEALTHCHECK --interval=60s --timeout=5s --start-period=30s --retries=2 \
-    CMD curl -f http://localhost:5000/health || exit 1
-
 EXPOSE 5000
 
 # Start supervisor to manage Redis and Flask

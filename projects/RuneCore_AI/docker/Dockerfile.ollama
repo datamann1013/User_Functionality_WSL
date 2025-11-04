@@ -24,10 +24,6 @@ RUN addgroup -g 1001 -S appuser && adduser -S -u 1001 -G appuser appuser
 RUN chown -R appuser:appuser /app
 USER appuser
 
-# Optimized health check
-HEALTHCHECK --interval=60s --timeout=3s --start-period=20s --retries=2 \
-    CMD curl -f http://localhost:5002/health || exit 1
-
 EXPOSE 5002
 
 # Use lighter server configuration
