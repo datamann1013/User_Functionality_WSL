@@ -97,11 +97,10 @@ if [ -z "${COMPOSE_CMD}" ]; then
 fi
 
 action="${1-}" || true
+# Default to bringing up stacks and waiting for health when no action provided.
 if [ -z "$action" ]; then
-  echo "Usage: $0 up|down|restart [filters...]" >&2
-  echo "       $0 test-ready  -> bring up all dev stacks and wait for service healthchecks" >&2
-  echo "Environment: SKIP_BUILD=1 to skip build, NO_CACHE=1 to pass --no-cache to build" >&2
-  exit 2
+  action="test-ready"
+  echo "No action provided; defaulting to: $action"
 fi
 shift || true
 filters=("$@")
@@ -286,3 +285,14 @@ for cfile in "${COMPOSE_FILES[@]}"; do
 done
 
 echo "All requested compose actions finished."
+
+# If action is test-ready, wait for containers to report healthy
+if [ "$action" = "test-ready" ]; then
+  # Allow caller to override timeout via WAIT_TIMEOUT env var (seconds)
+  WAIT_TIMEOUT=${WAIT_TIMEOUT:-120}
+  if ! wait_for_health "$WAIT_TIMEOUT"; then
+    echo "One or more containers failed to report healthy within ${WAIT_TIMEOUT}s." >&2
+    exit 3
+  fi
+  echo "Stacks are up and healthy."
+fi
