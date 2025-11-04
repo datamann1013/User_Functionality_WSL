@@ -19,8 +19,9 @@ pub struct SystemMetrics {
     pub total_memory: u64,
     pub used_memory: u64,
     // Best-effort GPU/NPU detection (may be None on unsupported platforms)
-    pub gpu: Option<GpuInfo>,
-    pub npu: Option<NpuInfo>,
+    // Collections used so the sentinel can report multiple devices
+    pub gpu: Option<Vec<GpuInfo>>,
+    pub npu: Option<Vec<NpuInfo>>,
 }
 
 pub fn sample_system_metrics() -> SystemMetrics {
@@ -63,12 +64,18 @@ pub fn sample_system_metrics() -> SystemMetrics {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GpuInfo {
     pub name: Option<String>,
+    /// vendor or short vendor string when available (eg. "NVIDIA", "Intel", "AMD")
+    pub vendor: Option<String>,
     /// total memory in kilobytes if available
     pub total_memory_kb: Option<u64>,
     /// used memory in kilobytes if available
     pub used_memory_kb: Option<u64>,
     /// utilization in percent if available
     pub utilization_percent: Option<f32>,
+    /// Optional device identifier (PNP/DeviceID on Windows or lspci id on Linux)
+    pub device_id: Option<String>,
+    /// Optional driver version string when available
+    pub driver_version: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -77,24 +84,28 @@ pub struct NpuInfo {
     pub utilization_percent: Option<f32>,
     /// Optional device identifier (InstanceId or DeviceID on Windows)
     pub device_id: Option<String>,
+    /// Optional vendor/class hint
+    pub class: Option<String>,
 }
-
-fn detect_gpu() -> Option<GpuInfo> {
+fn detect_gpu() -> Option<Vec<GpuInfo>> {
     // Platform-specific probing. Best-effort: try vendor tools first (nvidia-smi), then fall back
     // to common system probes (lspci, wmic, system_profiler). Return None if nothing found.
 
     // Try NVIDIA `nvidia-smi` (Linux/Windows if driver installed)
-    if let Ok(out) = Command::new("nvidia-smi").args(&["--query-gpu=name,memory.total,memory.used,utilization.gpu","--format=csv,noheader,nounits"]).output() {
+    if let Ok(out) = Command::new("nvidia-smi").args(&["--query-gpu=name,memory.total,memory.used,utilization.gpu,driver_version","--format=csv,noheader,nounits"]).output() {
         if out.status.success() {
             if let Ok(s) = str::from_utf8(&out.stdout) {
-                if let Some(line) = s.lines().next() {
+                let mut res = Vec::new();
+                for line in s.lines() {
                     let parts: Vec<&str> = line.split(',').map(|p| p.trim()).collect();
                     let name = parts.get(0).map(|s| s.to_string());
                     let total_kb = parts.get(1).and_then(|v| v.parse::<u64>().ok()).map(|m| m * 1024);
                     let used_kb = parts.get(2).and_then(|v| v.parse::<u64>().ok()).map(|m| m * 1024);
                     let util = parts.get(3).and_then(|v| v.parse::<f32>().ok());
-                    return Some(GpuInfo { name, total_memory_kb: total_kb, used_memory_kb: used_kb, utilization_percent: util });
+                    let driver = parts.get(4).map(|s| s.to_string());
+                    res.push(GpuInfo { name, vendor: Some("NVIDIA".to_string()), total_memory_kb: total_kb, used_memory_kb: used_kb, utilization_percent: util, device_id: None, driver_version: driver });
                 }
+                if !res.is_empty() { return Some(res); }
             }
         }
     }
@@ -104,13 +115,16 @@ fn detect_gpu() -> Option<GpuInfo> {
         if let Ok(out) = Command::new("lspci").arg("-nn").output() {
             if out.status.success() {
                 if let Ok(s) = str::from_utf8(&out.stdout) {
+                    let mut res = Vec::new();
                     for line in s.lines() {
                         let low = line.to_lowercase();
                         if low.contains("vga") || low.contains("3d") || low.contains("display") {
-                            // Use the full line as the name
-                            return Some(GpuInfo { name: Some(line.to_string()), total_memory_kb: None, used_memory_kb: None, utilization_percent: None });
+                            // Try to extract vendor token if present
+                            let vendor = if low.contains("nvidia") { Some("NVIDIA".to_string()) } else if low.contains("intel") { Some("Intel".to_string()) } else if low.contains("amd") { Some("AMD".to_string()) } else { None };
+                            res.push(GpuInfo { name: Some(line.to_string()), vendor, total_memory_kb: None, used_memory_kb: None, utilization_percent: None, device_id: None, driver_version: None });
                         }
                     }
+                    if !res.is_empty() { return Some(res); }
                 }
             }
         }
@@ -121,9 +135,8 @@ fn detect_gpu() -> Option<GpuInfo> {
         if let Ok(out) = Command::new("system_profiler").args(&["SPDisplaysDataType","-json"]).output() {
             if out.status.success() {
                 if let Ok(s) = str::from_utf8(&out.stdout) {
-                    // crude parsing: look for 'chipset' or 'model' fields
-                    if s.contains("chipset") || s.contains("intel") || s.contains("Apple") || s.contains("AMD") {
-                        return Some(GpuInfo { name: Some("macOS GPU".to_string()), total_memory_kb: None, used_memory_kb: None, utilization_percent: None });
+                    if s.to_lowercase().contains("apple") || s.to_lowercase().contains("intel") || s.to_lowercase().contains("amd") {
+                        return Some(vec![GpuInfo { name: Some("macOS GPU".to_string()), vendor: None, total_memory_kb: None, used_memory_kb: None, utilization_percent: None, device_id: None, driver_version: None }]);
                     }
                 }
             }
@@ -132,23 +145,43 @@ fn detect_gpu() -> Option<GpuInfo> {
 
     // Windows: use PowerShell CIM query (more reliable than legacy wmic) and parse JSON
     if cfg!(target_os = "windows") {
-        let ps = r#"Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM | ConvertTo-Json"#;
+        let ps = r#"Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM,PNPDeviceID,DriverVersion | ConvertTo-Json"#;
         if let Ok(out) = Command::new("powershell").args(&["-NoProfile","-Command", ps]).output() {
             if out.status.success() {
                 if let Ok(s) = str::from_utf8(&out.stdout) {
                     if let Ok(json) = serde_json::from_str::<JsonValue>(s) {
-                        // Could be an array or object
+                        let mut res = Vec::new();
                         if json.is_array() {
-                            if let Some(first) = json.as_array().and_then(|a| a.get(0)) {
-                                let name = first.get("Name").and_then(|v| v.as_str()).map(|s| s.to_string());
-                                let total_kb = first.get("AdapterRAM").and_then(|v| v.as_u64()).map(|b| b / 1024);
-                                return Some(GpuInfo { name, total_memory_kb: total_kb, used_memory_kb: None, utilization_percent: None });
+                            for item in json.as_array().unwrap_or(&vec![]) {
+                                let name = item.get("Name").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                let total_kb = item.get("AdapterRAM").and_then(|v| v.as_u64()).map(|b| b / 1024);
+                                let pnp = item.get("PNPDeviceID").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                let drv = item.get("DriverVersion").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                // vendor hint from name
+                                let vendor = name.as_ref().and_then(|n| {
+                                    let ln = n.to_lowercase();
+                                    if ln.contains("nvidia") { Some("NVIDIA".to_string()) }
+                                    else if ln.contains("intel") { Some("Intel".to_string()) }
+                                    else if ln.contains("amd") { Some("AMD".to_string()) }
+                                    else { None }
+                                });
+                                res.push(GpuInfo { name, vendor, total_memory_kb: total_kb, used_memory_kb: None, utilization_percent: None, device_id: pnp, driver_version: drv });
                             }
                         } else if json.is_object() {
                             let name = json.get("Name").and_then(|v| v.as_str()).map(|s| s.to_string());
                             let total_kb = json.get("AdapterRAM").and_then(|v| v.as_u64()).map(|b| b / 1024);
-                            return Some(GpuInfo { name, total_memory_kb: total_kb, used_memory_kb: None, utilization_percent: None });
+                            let pnp = json.get("PNPDeviceID").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            let drv = json.get("DriverVersion").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            let vendor = name.as_ref().and_then(|n| {
+                                let ln = n.to_lowercase();
+                                if ln.contains("nvidia") { Some("NVIDIA".to_string()) }
+                                else if ln.contains("intel") { Some("Intel".to_string()) }
+                                else if ln.contains("amd") { Some("AMD".to_string()) }
+                                else { None }
+                            });
+                            res.push(GpuInfo { name, vendor, total_memory_kb: total_kb, used_memory_kb: None, utilization_percent: None, device_id: pnp, driver_version: drv });
                         }
+                        if !res.is_empty() { return Some(res); }
                     }
                 }
             }
@@ -158,7 +191,7 @@ fn detect_gpu() -> Option<GpuInfo> {
     None
 }
 
-fn detect_npu() -> Option<NpuInfo> {
+fn detect_npu() -> Option<Vec<NpuInfo>> {
     // Very best-effort detection: search system device lists for NPU keywords
     // Linux: check lspci for known NPU keywords
     if cfg!(target_os = "linux") {
@@ -166,11 +199,13 @@ fn detect_npu() -> Option<NpuInfo> {
             if out.status.success() {
                 if let Ok(s) = str::from_utf8(&out.stdout) {
                     let low = s.to_lowercase();
+                    let mut res = Vec::new();
                     for kw in &["npu", "neural", "movidius", "ethos", "ascend", "vision"] {
                         if low.contains(kw) {
-                            return Some(NpuInfo { name: Some(kw.to_string()), utilization_percent: None });
+                            res.push(NpuInfo { name: Some(kw.to_string()), utilization_percent: None, device_id: None, class: Some("lspci".to_string()) });
                         }
                     }
+                    if !res.is_empty() { return Some(res); }
                 }
             }
         }
@@ -180,12 +215,12 @@ fn detect_npu() -> Option<NpuInfo> {
     if cfg!(target_os = "windows") {
         // First try enumerating PnP devices (Name, FriendlyName, Class)
     // Include InstanceId so we can return a useful device identifier
-    let ps_pnp = r#"Get-PnpDevice | Select-Object Name,FriendlyName,Class,InstanceId | ConvertTo-Json"#;
+    let ps_pnp = r#"Get-PnpDevice -ErrorAction SilentlyContinue | Select-Object Name,FriendlyName,Class,InstanceId | ConvertTo-Json -Compress"#;
         if let Ok(out) = Command::new("powershell").args(&["-NoProfile","-Command", ps_pnp]).output() {
             if out.status.success() {
                 if let Ok(s) = str::from_utf8(&out.stdout) {
                     if let Ok(json) = serde_json::from_str::<JsonValue>(s) {
-                        // Search per-item so we can return the actual device name/friendly name when matched
+                        let mut res = Vec::new();
                         if json.is_array() {
                             for item in json.as_array().unwrap_or(&vec![]) {
                                 let name_field = item.get("Name").and_then(|v| v.as_str()).map(|s| s.to_string());
@@ -197,7 +232,7 @@ fn detect_npu() -> Option<NpuInfo> {
                                 if let Some(ref f) = friendly { hay.push_str(f); hay.push('\n'); }
                                 if let Some(ref c) = class_field { hay.push_str(c); hay.push('\n'); }
                                 let low = hay.to_lowercase();
-                                // Expand keyword list to catch Intel GNA and related captions
+                                // Expand keyword list to catch Intel GNA, AI Boost, and related captions and ComputeAccelerator class
                                 for kw in &[
                                     "neural processors",
                                     "neural processor",
@@ -209,13 +244,15 @@ fn detect_npu() -> Option<NpuInfo> {
                                     "gna",
                                     "gna scoring",
                                     "gna scoring accelerator",
+                                    "ai boost",
                                     "vision",
+                                    "compute accelerator",
                                 ] {
-                                    if low.contains(kw) {
-                                        // prefer friendly name then name then class
+                                    if low.contains(kw) || class_field.as_deref().map(|c| c.eq_ignore_ascii_case("ComputeAccelerator")).unwrap_or(false) {
                                         let dev_name = friendly.clone().or(name_field.clone()).or(class_field.clone()).or(Some(kw.to_string()));
                                         let dev_id = instance_id.clone();
-                                        return Some(NpuInfo { name: dev_name, utilization_percent: None, device_id: dev_id });
+                                        res.push(NpuInfo { name: dev_name, utilization_percent: None, device_id: dev_id, class: class_field.clone() });
+                                        break;
                                     }
                                 }
                             }
@@ -235,15 +272,23 @@ fn detect_npu() -> Option<NpuInfo> {
                                 "npu",
                                 "movidius",
                                 "intel neural",
+                                "intel gna",
                                 "gna",
+                                "gna scoring",
+                                "gna scoring accelerator",
+                                "ai boost",
                                 "vision",
+                                "compute accelerator",
                             ] {
-                                if low.contains(kw) {
-                                    let dev_name = friendly.or(name_field).or(class_field).or(Some(kw.to_string()));
-                                    return Some(NpuInfo { name: dev_name, utilization_percent: None });
+                                if low.contains(kw) || class_field.as_deref().map(|c| c.eq_ignore_ascii_case("ComputeAccelerator")).unwrap_or(false) {
+                                    let dev_name = friendly.clone().or(name_field.clone()).or(class_field.clone()).or(Some(kw.to_string()));
+                                    let dev_id = json.get("InstanceId").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                    res.push(NpuInfo { name: dev_name, utilization_percent: None, device_id: dev_id, class: class_field.clone() });
+                                    break;
                                 }
                             }
                         }
+                        if !res.is_empty() { return Some(res); }
                     }
                 }
             }
@@ -251,13 +296,14 @@ fn detect_npu() -> Option<NpuInfo> {
 
         // As a fallback, query CIM Win32_PnPEntity for caption/name fields
     // Include DeviceID so we can surface it
-    let ps_cim = r#"Get-CimInstance Win32_PnPEntity | Select-Object Name,Caption,DeviceID | ConvertTo-Json"#;
+    let ps_cim = r#"Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue | Select-Object Name,Caption,DeviceID | ConvertTo-Json -Compress"#;
         if let Ok(out) = Command::new("powershell").args(&["-NoProfile","-Command", ps_cim]).output() {
             if out.status.success() {
                 if let Ok(s) = str::from_utf8(&out.stdout) {
                     if let Ok(json) = serde_json::from_str::<JsonValue>(s) {
                         // Search per-item and return the device name/caption when matched
                         if json.is_array() {
+                            let mut res = Vec::new();
                             for item in json.as_array().unwrap_or(&vec![]) {
                                 let name_field = item.get("Name").and_then(|v| v.as_str()).map(|s| s.to_string());
                                 let caption = item.get("Caption").and_then(|v| v.as_str()).map(|s| s.to_string());
@@ -277,15 +323,19 @@ fn detect_npu() -> Option<NpuInfo> {
                                     "gna",
                                     "gna scoring",
                                     "gna scoring accelerator",
+                                    "ai boost",
                                     "vision",
+                                    "compute accelerator",
                                 ] {
                                     if low.contains(kw) {
                                         let dev_name = caption.clone().or(name_field.clone()).or(Some(kw.to_string()));
                                         let dev_id = device_id.clone();
-                                        return Some(NpuInfo { name: dev_name, utilization_percent: None, device_id: dev_id });
+                                        res.push(NpuInfo { name: dev_name, utilization_percent: None, device_id: dev_id, class: None });
+                                        break;
                                     }
                                 }
                             }
+                            if !res.is_empty() { return Some(res); }
                         } else if json.is_object() {
                             let name_field = json.get("Name").and_then(|v| v.as_str()).map(|s| s.to_string());
                             let caption = json.get("Caption").and_then(|v| v.as_str()).map(|s| s.to_string());
@@ -300,12 +350,18 @@ fn detect_npu() -> Option<NpuInfo> {
                                 "npu",
                                 "movidius",
                                 "intel neural",
+                                "intel gna",
                                 "gna",
+                                "gna scoring",
+                                "gna scoring accelerator",
+                                "ai boost",
                                 "vision",
+                                "compute accelerator",
                             ] {
                                 if low.contains(kw) {
                                     let dev_name = caption.or(name_field).or(Some(kw.to_string()));
-                                    return Some(NpuInfo { name: dev_name, utilization_percent: None });
+                                    let dev_id = json.get("DeviceID").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                    return Some(vec![NpuInfo { name: dev_name, utilization_percent: None, device_id: dev_id, class: None }]);
                                 }
                             }
                         }
@@ -321,7 +377,12 @@ fn detect_npu() -> Option<NpuInfo> {
             if out.status.success() {
                 if let Ok(s) = str::from_utf8(&out.stdout) {
                     if s.to_lowercase().contains("neural") || s.to_lowercase().contains("apple neural") {
-                        return Some(NpuInfo { name: Some("Apple Neural Engine".to_string()), utilization_percent: None });
+                        return Some(vec![NpuInfo {
+                            name: Some("Apple Neural Engine".to_string()),
+                            utilization_percent: None,
+                            device_id: None,
+                            class: Some("Apple Neural Engine".to_string())
+                        }]);
                     }
                 }
             }
