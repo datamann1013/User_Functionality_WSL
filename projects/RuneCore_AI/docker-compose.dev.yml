@@ -1,0 +1,81 @@
+version: '3.8'
+services:
+  backend:
+    build:
+      context: ../../
+      dockerfile: projects/RuneCore_AI/docker/Dockerfile.backend.dev
+    ports:
+      - '5000:5000'
+    networks:
+      runecore_dev:
+        aliases:
+          - ai_backend
+    environment:
+      - ERRORLOGGER_URL=http://runeguard:5001
+      - OLLAMA_SERVICE_URL=http://ollama_wrapper:5002
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    ports:
+      - '3000:3000'
+    networks:
+      runecore_dev:
+        aliases:
+          - ai_frontend
+    environment:
+      REACT_APP_API_URL: ""
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/" ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: runecore-ollama
+    restart: unless-stopped
+    networks:
+      runecore_dev:
+        aliases:
+          - ollama
+    volumes:
+      - ollama_data:/root/.ollama
+
+  ollama_wrapper:
+    build:
+      context: ./ollama_service
+      dockerfile: Dockerfile
+    container_name: runecore-ollama-wrapper
+    depends_on:
+      - ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - PORT=5002
+    ports:
+      - "5002:5002"
+    networks:
+      runecore_dev:
+        aliases:
+          - ollama_wrapper
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+networks:
+  runecore_dev:
+    external: true
+
+volumes:
+  ollama_data:
+    name: runecore_ollama_data

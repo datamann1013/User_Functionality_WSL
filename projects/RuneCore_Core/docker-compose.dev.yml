@@ -1,0 +1,26 @@
+version: '3.8'
+services:
+  core:
+    build: .
+    ports:
+      - '8080:8080'
+    environment:
+      - RUNECORE_MODE=development
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  frontend-router:
+    build:
+      context: ./docker/router
+      dockerfile: Dockerfile
+    ports:
+      - '80:80'
+    networks:
+      - runecore_dev
+
+networks:
+  runecore_dev:
+    external: true

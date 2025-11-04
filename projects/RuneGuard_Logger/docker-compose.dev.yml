@@ -1,0 +1,13 @@
+version: '3.8'
+services:
+  runeguard:
+    build: .
+    ports:
+      - '5001:5001'
+    environment:
+      - LOG_LEVEL=DEBUG
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3

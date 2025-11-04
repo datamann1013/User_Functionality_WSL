@@ -1,0 +1,42 @@
+version: '3.8'
+services:
+  postgres:
+    image: "${POSTGRES_IMAGE:-postgres:15}"
+    environment:
+      POSTGRES_USER: core
+      POSTGRES_PASSWORD: core
+      POSTGRES_DB: corememory
+    # Use a non-standard host port to avoid collisions with host Postgres
+    ports:
+      - '15432:5432'
+    volumes:
+      - core_pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    # Bind to an alternate host port to avoid conflicts with existing Redis
+    ports:
+      - '16379:6379'
+
+  influx:
+    # Use a stable tag or `latest` to avoid manifest-not-found issues in CI/docker hosts.
+    image: influxdb:latest
+    # Bind to an alternate host port to avoid conflicts
+    ports:
+      - '18086:8086'
+
+  core_memory:
+    build: .
+    ports:
+      - '5010:5010'
+    environment:
+      - POSTGRES_DSN=postgresql://core:core@postgres:5432/corememory
+      - REDIS_URL=redis://redis:6379/0
+      - INFLUX_URL=http://influx:8086
+    depends_on:
+      - postgres
+      - redis
+      - influx
+
+volumes:
+  core_pgdata:
