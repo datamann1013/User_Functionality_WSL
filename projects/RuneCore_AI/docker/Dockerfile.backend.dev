@@ -28,4 +28,4 @@ HEALTHCHECK --interval=60s --timeout=5s --start-period=30s --retries=2 \
 
 EXPOSE 5000
 WORKDIR /app/backend
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "app:app"]

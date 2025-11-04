@@ -120,8 +120,9 @@ def chat():
             },
         }
 
+        request_timeout = int(os.environ.get("OLLAMA_REQUEST_TIMEOUT", "60"))
         response = requests.post(
-            f"{OLLAMA_HOST}/api/generate", json=ollama_payload, timeout=60
+            f"{OLLAMA_HOST}/api/generate", json=ollama_payload, timeout=request_timeout
         )
 
         if response.status_code == 200:
@@ -154,7 +155,7 @@ def chat():
             return jsonify({"error": f"Ollama error: {response.status_code}", "body": response.text}), 502
 
     except requests.exceptions.Timeout:
-        return jsonify({"error": "Request timeout"}), 504
+        return jsonify({"error": "Ollama request timeout"}), 504
     except Exception as e:
         return jsonify({"error": f"Chat failed: {str(e)}"}), 500
 

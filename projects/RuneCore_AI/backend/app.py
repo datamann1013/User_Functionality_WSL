@@ -307,13 +307,17 @@ def chat():
 
         # Try Ollama service first
         try:
-            # Adjust timeout based on message complexity
+            # Adjust timeout based on message complexity. Make these values
+            # configurable via environment variables so long-running prompts
+            # can be supported in dev environments.
             message_length = len(message)
-            base_timeout = 20
+            BASE_TIMEOUT = int(os.environ.get("OLLAMA_BASE_TIMEOUT", "20"))
+            COMPLEX_TIMEOUT = int(os.environ.get("OLLAMA_COMPLEX_TIMEOUT", "180"))
+            # Use complex timeout for longer messages, otherwise base timeout
             complex_timeout = (
-                35
-                if message_length > 100 or len(message.split()) > 20
-                else base_timeout
+                COMPLEX_TIMEOUT
+                if message_length > 100 or len(message.split()) > 40
+                else BASE_TIMEOUT
             )
 
             # Lookup agent config from AGENTS_DATA
@@ -393,10 +397,35 @@ def chat():
             th = threading.Thread(target=call_ollama, daemon=True)
             th.start()
 
-            # Wait for the Ollama request thread to complete without aborting.
-            # This removes any health-poll based aborts so the backend will
-            # wait as long as the upstream service takes to respond.
-            th.join()  # blocking wait - preserves request result or error
+            # Wait for the Ollama request thread to complete, but don't block
+            # gunicorn workers forever. Use a join timeout slightly under the
+            # gunicorn worker timeout (configured via Dockerfile) so the worker
+            # can return a sensible 504 gateway-style response instead of being
+            # killed by the master process. Default join timeout is 55s.
+            # Join timeout should be slightly lower than the gunicorn worker
+            # timeout configured in the container to allow returning an error
+            # before the worker is killed. Default to 115s (gunicorn default
+            # in this repo is set to 120s for backend).
+            JOIN_TIMEOUT = int(os.environ.get("OLLAMA_JOIN_TIMEOUT", "115"))
+            th.join(timeout=JOIN_TIMEOUT)
+
+            # If thread is still alive after join timeout, treat as upstream
+            # timeout and return a 504 so the frontend can surface a clear
+            # error to the user instead of a generic 500 caused by worker exit.
+            if th.is_alive():
+                try:
+                    print(
+                        f"[AI_TIMEOUT] Ollama call exceeded join timeout ({JOIN_TIMEOUT}s); aborting request"
+                    )
+                except Exception:
+                    pass
+                error_payload = {
+                    "error": "OLLAMA_TIMEOUT",
+                    "error_code": "EABB6",
+                    "message": "Upstream AI service did not complete the request in time",
+                    "details": f"Join timeout after {JOIN_TIMEOUT}s",
+                }
+                return jsonify(error_payload), 504
 
             # Debug: print the result captured from the Ollama call for diagnosis
             try:
