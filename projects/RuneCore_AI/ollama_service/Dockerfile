@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM runecore/python-slim-dev:latest
 
 WORKDIR /app
 

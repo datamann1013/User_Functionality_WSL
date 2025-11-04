@@ -1,5 +1,5 @@
 # RuneGuard Security Service Dockerfile
-FROM python:3.11-alpine
+FROM runecore/python-alpine-dev:latest
 
 WORKDIR /app
 
