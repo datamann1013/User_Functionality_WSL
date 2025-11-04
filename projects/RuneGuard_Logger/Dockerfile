@@ -4,6 +4,7 @@ FROM runecore/python-alpine-dev:latest
 WORKDIR /app
 
 # Install minimal runtime dependencies
+USER root
 RUN apk add --no-cache curl
 
 # Install Python dependencies (copy requirements first to leverage Docker layer caching)

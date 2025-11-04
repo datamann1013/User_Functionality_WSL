@@ -12,7 +12,11 @@ COPY migrate.py /app/migrate.py
 # Small wrapper to run migrations or start the server
 COPY start_core_memory.sh /app/start_core_memory.sh
 COPY manage_migrations.sh /app/manage_migrations.sh
+USER root
 RUN chmod +x /app/start_core_memory.sh
 RUN chmod +x /app/manage_migrations.sh
+# Ensure files owned by non-root dev user if base image provides one
+RUN if id dev >/dev/null 2>&1; then chown -R dev:dev /app || true; fi
+USER dev
 ENV PYTHONUNBUFFERED=1
 CMD ["/app/start_core_memory.sh"]
