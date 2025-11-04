@@ -48,7 +48,7 @@ services:
         aliases:
           - ollama
     volumes:
-      - ./ollama_data:/root/.ollama
+      - ollama_data:/root/.ollama
 
   ollama_wrapper:
     build:
@@ -66,7 +66,16 @@ services:
       runecore_dev:
         aliases:
           - ollama_wrapper
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
 networks:
   runecore_dev:
     external: true
+
+volumes:
+  ollama_data:
+    name: runecore_ollama_data

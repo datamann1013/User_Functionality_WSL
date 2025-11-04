@@ -12,7 +12,7 @@ import EditAgentModal from "./components/EditAgentModal";
 import ModelManager from "./components/ModelManager";
 
 // API base URL
-const API_BASE = process.env.REACT_APP_API_URL || (process.env.NODE_ENV === "production" ? "" : "");
+const API_BASE = process.env.REACT_APP_API_URL || "";
 
 // Pre-computed avatar colors for better performance
 const AVATAR_COLORS = [

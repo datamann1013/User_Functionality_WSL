@@ -35,7 +35,7 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
     }
   }, [isOpen]);
 
-  const API_BASE = process.env.REACT_APP_API_URL || (process.env.NODE_ENV === "production" ? "" : "");
+  const API_BASE = process.env.REACT_APP_API_URL || "";
 
   const fetchAvailableModels = async () => {
     try {
@@ -101,7 +101,7 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
   const checkModelAvailability = async (modelName) => {
     try {
       const response = await fetch(
-        `${API_BASE}/api/models/check/${modelName}`
+        `${API_BASE}/api/models/check/${encodeURIComponent(modelName)}`
       );
       if (response.ok) {
         const data = await response.json();
@@ -124,7 +124,7 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
       setModelDownloading(modelName);
 
       const response = await fetch(
-        `${API_BASE}/api/models/download/${modelName}`,
+        `${API_BASE}/api/models/download/${encodeURIComponent(modelName)}`,
         {
           method: "POST",
         }

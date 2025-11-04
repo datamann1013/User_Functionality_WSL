@@ -8,7 +8,7 @@ const ModelManager = ({ isOpen, onClose }) => {
   const [newModelName, setNewModelName] = useState("");
 
   // API base URL
-  const API_BASE = process.env.REACT_APP_API_URL || (process.env.NODE_ENV === "production" ? "" : "");
+  const API_BASE = process.env.REACT_APP_API_URL || "";
 
   // Popular Ollama models
   const popularModels = [
@@ -158,7 +158,7 @@ const ModelManager = ({ isOpen, onClose }) => {
       return;
     }
 
-    await downloadModel(newModelName.trim());
+  await downloadModel(encodeURIComponent(newModelName.trim()));
     setNewModelName("");
   };
 
