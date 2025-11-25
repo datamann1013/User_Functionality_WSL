@@ -87,6 +87,27 @@ if command -v docker >/dev/null 2>&1; then
     COMPOSE_CMD=(docker compose)
   fi
 fi
+
+# Ensure the shared developer network exists and is attachable so compose stacks
+# that reference `runecore_dev` as an external network can join it. This avoids
+# manual steps where some services fail to resolve peers (e.g. `ollama` alias).
+ensure_dev_network() {
+  local net=runecore_dev
+  if ! docker network inspect "$net" >/dev/null 2>&1; then
+    echo "Creating docker network: $net (attachable)"
+    docker network create --driver bridge --attachable "$net"
+  else
+    # If network exists but is not attachable, warn the user.
+    local attachable
+    attachable=$(docker network inspect --format '{{.Attachable}}' "$net" 2>/dev/null || true)
+    if [ "$attachable" != "true" ]; then
+      echo "Note: existing network '$net' is not attachable. Some compose services may not be able to join it." >&2
+      echo "You can recreate it with: docker network rm $net && docker network create --driver bridge --attachable $net" >&2
+    fi
+  fi
+}
+
+ensure_dev_network
 if [ -z "${COMPOSE_CMD}" ]; then
   if command -v docker-compose >/dev/null 2>&1; then
     COMPOSE_CMD=(docker-compose)

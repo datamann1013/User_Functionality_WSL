@@ -166,11 +166,21 @@ def log_error(error_code, message=None, extra=None):
         }
         requests.post(ERRORLOGGER_URL, json=payload, timeout=1)
     except (requests.RequestException, requests.Timeout) as e:
-        # Fail silently for performance, but log the exception type
-        pass
+        # Fail silently for performance, but emit a brief stderr line for diagnostics
+        try:
+            import sys
+
+            print(f"[log_error_request_exception] {type(e).__name__}: {str(e)}", file=sys.stderr)
+        except Exception:
+            pass
     except Exception:
-        # Catch any other unexpected errors
-        pass  # nosec B110
+        # Catch any other unexpected errors; print to stderr as a last resort
+        try:
+            import sys
+
+            print(f"[log_error_exception] {error_code} - {message}", file=sys.stderr)
+        except Exception:
+            pass  # nosec B110
 
 
 def maybe_register_with_core():
@@ -329,6 +339,79 @@ def chat():
                 if agent_config and "model_name" in agent_config
                 else "llama3.2:1b"
             )
+            # Check model availability in Ollama wrapper and apply safeguards.
+            # Behavior controlled via env vars:
+            # - OLLAMA_AUTO_PULL=1  -> attempt to start a model download asynchronously
+            # - OLLAMA_FALLBACK_MODEL=<model> -> use this model if requested model missing
+            try:
+                try:
+                    models_resp = requests.get(f"{OLLAMA_SERVICE_URL}/api/models", timeout=5)
+                    available_models = []
+                    if models_resp.status_code == 200:
+                        jr = models_resp.json()
+                        # `models` may be a list of strings or dicts depending on wrapper
+                        raw = jr.get("models") if isinstance(jr, dict) else None
+                        if isinstance(raw, list):
+                            for m in raw:
+                                if isinstance(m, dict) and "name" in m:
+                                    available_models.append(m["name"])
+                                elif isinstance(m, str):
+                                    available_models.append(m)
+                        else:
+                            # fallback: flatten any top-level list
+                            if isinstance(jr, list):
+                                for m in jr:
+                                    if isinstance(m, str):
+                                        available_models.append(m)
+                    else:
+                        available_models = []
+                except Exception:
+                    available_models = []
+
+                if model_name not in available_models:
+                    # Model missing
+                    fallback = os.environ.get("OLLAMA_FALLBACK_MODEL")
+                    auto_pull = os.environ.get("OLLAMA_AUTO_PULL", "0") in ("1", "true", "True")
+
+                    if fallback:
+                        try:
+                            print(f"[AI_MODEL] Requested model '{model_name}' missing; using fallback '{fallback}'")
+                        except Exception:
+                            pass
+                        model_name = fallback
+                    elif auto_pull:
+                        # Trigger async pull and inform the caller to retry later
+                        def trigger_pull(name):
+                            try:
+                                requests.post(f"{OLLAMA_SERVICE_URL}/api/pull", json={"name": name}, timeout=5)
+                                try:
+                                    print(f"[AI_MODEL] Started async pull for model: {name}")
+                                except Exception:
+                                    pass
+                            except Exception:
+                                pass
+
+                        th_pull = threading.Thread(target=trigger_pull, args=(model_name,), daemon=True)
+                        th_pull.start()
+                        error_payload = {
+                            "error": "MODEL_MISSING",
+                            "error_code": "E_MODEL_MISSING_PULL_STARTED",
+                            "message": f"Requested model '{model_name}' is not available. A download has been started; please retry shortly.",
+                        }
+                        return jsonify(error_payload), 503
+                    else:
+                        error_payload = {
+                            "error": "MODEL_MISSING",
+                            "error_code": "E_MODEL_MISSING",
+                            "message": f"Requested model '{model_name}' is not available on the upstream AI service.",
+                        }
+                        return jsonify(error_payload), 503
+            except Exception as e:
+                # If model-check fails, continue and let the retrying call surface the error.
+                try:
+                    print(f"[AI_MODEL] model availability check failed: {e}")
+                except Exception:
+                    pass
             temperature = (
                 agent_config["temperature"]
                 if agent_config and "temperature" in agent_config
@@ -369,94 +452,72 @@ def chat():
             except Exception:
                 pass
 
-            # Run the Ollama request in a background thread and poll the
-            # Ollama /health endpoint while the request runs. If health
-            # fails repeatedly we abort waiting and fall back.
-            result = {"response": None, "error": None, "status_code": None}
+            # Call Ollama synchronously with retries/backoff to handle
+            # transient upstream failures in a predictable manner.
+            def call_ollama_with_retries(payload, per_request_timeout, max_retries=3):
+                attempt = 0
+                backoff = 1.0
+                last_error = None
+                status_code = None
+                while attempt < max_retries:
+                    attempt += 1
+                    try:
+                        try:
+                            print(f"[AI_CALL] Ollama attempt {attempt}/{max_retries}")
+                        except Exception:
+                            pass
 
-            def call_ollama():
-                try:
-                    # Include a timeout to avoid blocking forever and satisfy security scanners
-                    resp = requests.post(
-                        f"{OLLAMA_SERVICE_URL}/api/chat",
-                        json=payload,
-                        timeout=complex_timeout,
-                    )
-                    result["status_code"] = resp.status_code
-                    if resp.status_code == 200:
-                        jr = resp.json()
-                        result["response"] = jr.get("response", "No response from AI")
-                    else:
-                        # capture body for diagnostics (trimmed)
-                        result["error"] = (
-                            f"Ollama returned {resp.status_code}: {resp.text[:500]}"
+                        resp = requests.post(
+                            f"{OLLAMA_SERVICE_URL}/api/chat",
+                            json=payload,
+                            timeout=per_request_timeout,
                         )
-                except Exception as e:
-                    result["error"] = f"RequestException: {str(e)}"
+                        status_code = resp.status_code
+                        if resp.status_code == 200:
+                            jr = resp.json()
+                            return jr.get("response", "No response from AI"), None, 200
+                        else:
+                            last_error = f"non-200: {resp.status_code} body={resp.text[:300]}"
+                            time.sleep(backoff)
+                            backoff *= 2
+                            continue
+                    except requests.exceptions.Timeout as te:
+                        last_error = f"timeout: {str(te)}"
+                        time.sleep(backoff)
+                        backoff *= 2
+                        continue
+                    except requests.RequestException as re:
+                        last_error = f"request_exception: {str(re)}"
+                        time.sleep(backoff)
+                        backoff *= 2
+                        continue
+                    except Exception as e:
+                        last_error = f"exception: {str(e)}"
+                        time.sleep(backoff)
+                        backoff *= 2
+                        continue
 
-            th = threading.Thread(target=call_ollama, daemon=True)
-            th.start()
+                return None, last_error or "unknown_error", status_code or 503
 
-            # Wait for the Ollama request thread to complete, but don't block
-            # gunicorn workers forever. Use a join timeout slightly under the
-            # gunicorn worker timeout (configured via Dockerfile) so the worker
-            # can return a sensible 504 gateway-style response instead of being
-            # killed by the master process. Default join timeout is 55s.
-            # Join timeout should be slightly lower than the gunicorn worker
-            # timeout configured in the container to allow returning an error
-            # before the worker is killed. Default to 115s (gunicorn default
-            # in this repo is set to 120s for backend).
             JOIN_TIMEOUT = int(os.environ.get("OLLAMA_JOIN_TIMEOUT", "115"))
-            th.join(timeout=JOIN_TIMEOUT)
+            ai_response, error_text, status_code = call_ollama_with_retries(
+                payload, per_request_timeout=complex_timeout, max_retries=3
+            )
 
-            # If thread is still alive after join timeout, treat as upstream
-            # timeout and return a 504 so the frontend can surface a clear
-            # error to the user instead of a generic 500 caused by worker exit.
-            if th.is_alive():
-                try:
-                    print(
-                        f"[AI_TIMEOUT] Ollama call exceeded join timeout ({JOIN_TIMEOUT}s); aborting request"
-                    )
-                except Exception:
-                    pass
-                error_payload = {
-                    "error": "OLLAMA_TIMEOUT",
-                    "error_code": "EABB6",
-                    "message": "Upstream AI service did not complete the request in time",
-                    "details": f"Join timeout after {JOIN_TIMEOUT}s",
-                }
-                return jsonify(error_payload), 504
-
-            # Debug: print the result captured from the Ollama call for diagnosis
-            try:
-                print(f"[AI_DEBUG_RESULT] for agent {agent_id}: {result}")
-            except Exception:
-                pass
-
-            # If we have a response use it; otherwise escalate the captured error
-            if result.get("response"):
-                ai_response = result.get("response")
+            if ai_response:
                 response_mode = "ollama"
             else:
-                if result.get("error"):
-                    # Ollama returned an error or failed to respond. Instead
-                    # of returning a friendly fallback as a normal 200 response,
-                    # return a 503 with a standardized error_code so the frontend
-                    # can handle it explicitly.
-                    error_payload = {
-                        "error": "OLLAMA_UNAVAILABLE",
-                        "error_code": "EABB5",
-                        "message": "Upstream AI service unavailable",
-                        "details": result.get("error"),
-                    }
-                    return jsonify(error_payload), 503
-                else:
-                    error_payload = {
-                        "error": "OLLAMA_TIMEOUT",
-                        "error_code": "EABB5",
-                        "message": "Upstream AI service did not complete the request",
-                    }
-                    return jsonify(error_payload), 503
+                error_payload = {
+                    "error": "OLLAMA_UNAVAILABLE",
+                    "error_code": "EABB5",
+                    "message": "Upstream AI service unavailable",
+                    "details": error_text,
+                    "status_code": status_code,
+                }
+                return (
+                    jsonify(error_payload),
+                    504 if ("timeout" in (error_text or "").lower()) else 503,
+                )
 
         except Exception as e:
             # Log and print the exception for debugging; then return a
