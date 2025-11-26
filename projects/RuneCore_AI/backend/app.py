@@ -425,7 +425,7 @@ def chat():
                             error_payload = {
                                 "error": "MODEL_MISSING",
                                 "error_code": "E_MODEL_MISSING_PULL_TIMEOUT",
-                                "message": f"Requested model '{model_name}' is not available and automatic pull did not complete within {wait_seconds}s.",
+                                "message": f"Requested model '{model_name}' is not yet available; we are still attempting to download it. Press cancel in the UI to stop attempts.",
                             }
                             return jsonify(error_payload), 503
                         else:
