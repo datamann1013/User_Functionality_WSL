@@ -277,13 +277,17 @@ function App() {
           "Chat message sent successfully"
         );
       } else {
-        // If backend returned the specific EABB5 code, show server message
-        // but keep the thinking indicator visible so the UI indicates
-        // the request is still pending upstream.
+        // Handle specific backend error codes for model-missing and upstream failures.
+        const modelMissingCodes = new Set([
+          "E_MODEL_MISSING",
+          "E_MODEL_MISSING_PULL_TIMEOUT",
+          "E_MODEL_MISSING_PULL_STARTED",
+        ]);
+
         if (data && data.error_code === "EABB5") {
+          // Keep the thinking indicator visible so the UI indicates the request is pending upstream.
           const serverMsg = data.message || "Upstream AI service unavailable";
           setMessages((prev) => [
-            // Keep thinking indicator (do not remove thinkingId)
             ...prev,
             {
               id: Date.now() + Math.random(),
@@ -295,13 +299,112 @@ function App() {
               errorCode: "EABB5",
             },
           ]);
-          // Keep the thinking indicator visible for this agent
           keepThinkingVisible = true;
-          logFrontendError(
-            "FRONTEND_CHAT_EABB5",
-            "Received EABB5 from backend",
-            data
-          );
+          logFrontendError("FRONTEND_CHAT_EABB5", "Received EABB5 from backend", data);
+        } else if (data && modelMissingCodes.has(data.error_code)) {
+          // Automatic retry/backoff behavior for missing models.
+          // Configuration via environment variables:
+          // REACT_APP_MODEL_RETRY_MAX (default 6), REACT_APP_MODEL_RETRY_BASE_MS (default 2000)
+          const maxAttempts = parseInt(process.env.REACT_APP_MODEL_RETRY_MAX || "6", 10);
+          const baseMs = parseInt(process.env.REACT_APP_MODEL_RETRY_BASE_MS || "2000", 10);
+
+          let attempt = 0;
+          let success = false;
+
+          // Inform the user that we're attempting to resolve the model availability.
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: Date.now() + Math.random(),
+              sender: "ai",
+              text: data.message || "Requested model is not available. Attempting to resolve...",
+              timestamp: new Date().toISOString(),
+              agentId: selectedAgent,
+              error: true,
+              errorCode: data.error_code,
+            },
+          ]);
+
+          // Retry loop with exponential backoff
+          while (attempt < maxAttempts && !success) {
+            attempt += 1;
+            const waitMs = baseMs * Math.pow(2, attempt - 1);
+            // wait
+            await new Promise((res) => setTimeout(res, waitMs));
+
+            try {
+              const retryResp = await fetch(`${API_BASE}/api/chat`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: userMessage, agent_id: selectedAgent }),
+              });
+
+              const retryData = await retryResp.json().catch(() => ({}));
+
+              if (retryResp.ok) {
+                // Replace last error message and add successful response
+                setMessages((prev) => [
+                  ...prev.filter((m) => m.errorCode !== data.error_code),
+                  {
+                    id: Date.now() + Math.random(),
+                    sender: "ai",
+                    text: retryData.response,
+                    timestamp: new Date().toISOString(),
+                    agentId: selectedAgent,
+                  },
+                ]);
+                logFrontendError("FRONTEND_CHAT_SUCCESS_RETRY", "Chat succeeded after retry", { attempt });
+                success = true;
+                break;
+              } else {
+                // update UI with retry status
+                setMessages((prev) => [
+                  ...prev.filter((m) => m.id !== thinkingId && m.errorCode !== data.error_code),
+                  {
+                    id: Date.now() + Math.random(),
+                    sender: "ai",
+                    text: retryData.message || `Retry attempt ${attempt}/${maxAttempts} failed; will retry...`,
+                    timestamp: new Date().toISOString(),
+                    agentId: selectedAgent,
+                    error: true,
+                    errorCode: retryData.error_code || data.error_code,
+                  },
+                ]);
+              }
+            } catch (err) {
+              setMessages((prev) => [
+                ...prev.filter((m) => m.id !== thinkingId && m.errorCode !== data.error_code),
+                {
+                  id: Date.now() + Math.random(),
+                  sender: "ai",
+                  text: `Retry attempt ${attempt}/${maxAttempts} encountered network error; will retry...`,
+                  timestamp: new Date().toISOString(),
+                  agentId: selectedAgent,
+                  error: true,
+                },
+              ]);
+            }
+          }
+
+          if (!success) {
+            setMessages((prev) => [
+              ...prev.filter((m) => m.id !== thinkingId && m.errorCode !== data.error_code),
+              {
+                id: Date.now() + Math.random(),
+                sender: "ai",
+                text:
+                  `Unable to resolve model availability after ${maxAttempts} attempts. Please try again later or contact support.`,
+                timestamp: new Date().toISOString(),
+                agentId: selectedAgent,
+                error: true,
+                errorCode: data.error_code,
+              },
+            ]);
+            logFrontendError("FRONTEND_CHAT_RETRY_FAILED", "Automatic model retry failed", {
+              attempts: attempt,
+              error_code: data.error_code,
+            });
+          }
         } else {
           let errorMessage = "Sorry, I couldn't process your message. ";
 

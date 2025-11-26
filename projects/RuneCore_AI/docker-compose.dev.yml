@@ -13,6 +13,8 @@ services:
     environment:
       - ERRORLOGGER_URL=http://runeguard:5001
       - OLLAMA_SERVICE_URL=http://ollama_wrapper:5002
+      - OLLAMA_AUTO_PULL=1
+      - OLLAMA_AUTO_PULL_WAIT=30
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -33,6 +35,8 @@ services:
           - ai_frontend
     environment:
       REACT_APP_API_URL: ""
+      REACT_APP_MODEL_RETRY_MAX: "6"
+      REACT_APP_MODEL_RETRY_BASE_MS: "2000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/" ]
       interval: 15s
