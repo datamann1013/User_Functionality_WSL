@@ -369,9 +369,11 @@ def chat():
                     available_models = []
 
                 if model_name not in available_models:
-                    # Model missing
+                    # Model missing — try fallback, or trigger download and optionally wait.
                     fallback = os.environ.get("OLLAMA_FALLBACK_MODEL")
-                    auto_pull = os.environ.get("OLLAMA_AUTO_PULL", "0") in ("1", "true", "True")
+                    auto_pull = os.environ.get("OLLAMA_AUTO_PULL", "1") in ("1", "true", "True")
+                    wait_seconds = int(os.environ.get("OLLAMA_AUTO_PULL_WAIT", "60"))
+                    poll_interval = float(os.environ.get("OLLAMA_AUTO_PULL_POLL", "2"))
 
                     if fallback:
                         try:
@@ -380,25 +382,57 @@ def chat():
                             pass
                         model_name = fallback
                     elif auto_pull:
-                        # Trigger async pull and inform the caller to retry later
-                        def trigger_pull(name):
+                        # Trigger pull synchronously (best-effort) and poll for availability
+                        try:
+                            print(f"[AI_MODEL] Requested model '{model_name}' missing; triggering pull and waiting up to {wait_seconds}s")
+                        except Exception:
+                            pass
+
+                        try:
+                            requests.post(f"{OLLAMA_SERVICE_URL}/api/pull", json={"name": model_name}, timeout=10)
+                        except Exception:
+                            # best-effort trigger; continue to polling which will surface failures
+                            pass
+
+                        # Poll models endpoint until model appears or timeout
+                        deadline = time.time() + wait_seconds
+                        pulled = False
+                        while time.time() < deadline:
                             try:
-                                requests.post(f"{OLLAMA_SERVICE_URL}/api/pull", json={"name": name}, timeout=5)
-                                try:
-                                    print(f"[AI_MODEL] Started async pull for model: {name}")
-                                except Exception:
-                                    pass
+                                mr = requests.get(f"{OLLAMA_SERVICE_URL}/api/models", timeout=5)
+                                if mr.status_code == 200:
+                                    jr = mr.json()
+                                    candidates = []
+                                    raw = jr.get("models") if isinstance(jr, dict) else None
+                                    if isinstance(raw, list):
+                                        for m in raw:
+                                            if isinstance(m, dict) and "name" in m:
+                                                candidates.append(m["name"])
+                                            elif isinstance(m, str):
+                                                candidates.append(m)
+                                    elif isinstance(jr, list):
+                                        for m in jr:
+                                            if isinstance(m, str):
+                                                candidates.append(m)
+                                    if model_name in candidates:
+                                        pulled = True
+                                        break
                             except Exception:
                                 pass
+                            time.sleep(poll_interval)
 
-                        th_pull = threading.Thread(target=trigger_pull, args=(model_name,), daemon=True)
-                        th_pull.start()
-                        error_payload = {
-                            "error": "MODEL_MISSING",
-                            "error_code": "E_MODEL_MISSING_PULL_STARTED",
-                            "message": f"Requested model '{model_name}' is not available. A download has been started; please retry shortly.",
-                        }
-                        return jsonify(error_payload), 503
+                        if not pulled:
+                            error_payload = {
+                                "error": "MODEL_MISSING",
+                                "error_code": "E_MODEL_MISSING_PULL_TIMEOUT",
+                                "message": f"Requested model '{model_name}' is not available and automatic pull did not complete within {wait_seconds}s.",
+                            }
+                            return jsonify(error_payload), 503
+                        else:
+                            try:
+                                print(f"[AI_MODEL] Model '{model_name}' is now available after pull")
+                            except Exception:
+                                pass
                     else:
                         error_payload = {
                             "error": "MODEL_MISSING",
