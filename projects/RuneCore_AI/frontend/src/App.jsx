@@ -299,11 +299,9 @@ function App() {
           },
         ]);
 
-        // Save into per-agent store and update visible messages if this agent is selected
+        // Save into per-agent store and return the messages
         setMessageStore((prev) => ({ ...prev, [agentId]: historyMessages }));
-        if (agentId === selectedAgent) {
-          setMessages(historyMessages);
-        }
+        return historyMessages;
         logFrontendError(
           "CONVERSATION_HISTORY_LOADED",
           `Loaded ${conversations.length} conversations for agent ${agentId}`
@@ -317,9 +315,7 @@ function App() {
       );
       // Keep any existing store for the agent, but clear visible messages if currently selected
       setMessageStore((prev) => ({ ...prev, [agentId]: prev[agentId] || [] }));
-      if (agentId === selectedAgent) {
-        setMessages([]);
-      }
+      return [];
     }
   }, []);
 
@@ -337,7 +333,8 @@ function App() {
       } else {
         // Load from backend and populate store
         if (agentId) {
-          await loadConversationHistory(agentId);
+          const history = await loadConversationHistory(agentId);
+          setMessages(history || []);
         } else {
           setMessages([]);
         }
