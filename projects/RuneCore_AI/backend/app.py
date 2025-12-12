@@ -278,7 +278,17 @@ def get_cache_stats():
     """Get conversation cache statistics"""
     try:
         stats = conversation_cache.get_cache_stats()
-        return jsonify({"status": "ok", "cache": stats})
+        # Add a friendly suggestion when Redis is not in use
+        suggestion = None
+        if not stats.get("using_redis") and stats.get("enabled"):
+            suggestion = (
+                "In-memory conversation cache is active (last "
+                f"{stats.get('message_limit', 10)} messages). "
+                "For longer-term, shared memory across services, "
+                "deploy the Memory Core (Postgres + Redis) and point "
+                "the AI service at it."
+            )
+        return jsonify({"status": "ok", "cache": stats, "suggestion": suggestion})
     except Exception as e:
         return jsonify({"error": f"Cache stats failed: {str(e)}"}), 500
 
@@ -380,11 +390,36 @@ def get_agent_conversations(agent_id):
         else:
             recent = formatted_conversations
 
+        # Provide memory/cache diagnostics to help the frontend guide users
+        try:
+            cache_stats = conversation_cache.get_cache_stats()
+        except Exception:
+            cache_stats = {
+                "enabled": False,
+                "using_redis": False,
+                "message_limit": 10,
+                "context_size": 5,
+            }
+
+        memory_info = {
+            "using_redis": cache_stats.get("using_redis", False),
+            "message_limit": cache_stats.get("message_limit", 10),
+            "context_size": cache_stats.get("context_size", 5),
+        }
+
+        if not memory_info["using_redis"] and cache_stats.get("enabled"):
+            memory_info[
+                "suggestion"
+            ] = "Using fallback in-memory cache (last {n} messages). Install the Memory Core for longer, shared history.".format(
+                n=memory_info["message_limit"]
+            )
+
         return jsonify(
             {
                 "conversations": recent,
                 "count": len(formatted_conversations),
                 "source": "local_cache",
+                "memory": memory_info,
             }
         )
 
