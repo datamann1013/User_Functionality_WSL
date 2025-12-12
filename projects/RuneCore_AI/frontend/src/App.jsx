@@ -94,6 +94,8 @@ function App() {
   const [agentsLoading, setAgentsLoading] = useState(true);
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [messages, setMessages] = useState([]);
+  // Per-agent message store: { [agentId]: Message[] }
+  const [messageStore, setMessageStore] = useState({});
   const [inputText, setInputText] = useState("");
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -137,16 +139,18 @@ function App() {
 
           if (retryResp.ok) {
             // Replace previous model-missing messages and append the successful response
-            setMessages((prev) => [
-              ...prev.filter((m) => m.errorCode !== initialErrorCode),
-              {
-                id: Date.now() + Math.random(),
-                sender: "ai",
-                text: retryData.response,
-                timestamp: new Date().toISOString(),
-                agentId: agentId,
-              },
-            ]);
+            const successMsg = {
+              id: Date.now() + Math.random(),
+              sender: "ai",
+              text: retryData.response,
+              timestamp: new Date().toISOString(),
+              agentId: agentId,
+            };
+            setMessageStore((prev) => {
+              const list = (prev[agentId] || []).filter((m) => m.errorCode !== initialErrorCode).concat([successMsg]);
+              if (agentId === selectedAgent) setMessages(list);
+              return { ...prev, [agentId]: list };
+            });
             logFrontendError("FRONTEND_CHAT_SUCCESS_RETRY_BG", "Background retry succeeded", { attempt, agentId });
             // clear thinking and retrying state
             setThinkingAgents((prev) => {
@@ -154,53 +158,58 @@ function App() {
               newSet.delete(agentId);
               return newSet;
             });
-            setModelRetryingAgent(null);
             delete modelRetryCancelRef.current[agentId];
             break;
           } else {
             // update the visible status message so user knows we're still trying
-            setMessages((prev) => [
-              ...prev.filter((m) => m.errorCode !== initialErrorCode),
-              {
-                id: Date.now() + Math.random(),
-                sender: "ai",
-                text: retryData.message || `Attempt ${attempt} failed; still trying...`,
-                timestamp: new Date().toISOString(),
-                agentId,
-                error: true,
-                errorCode: retryData.error_code || initialErrorCode,
-              },
-            ]);
-          }
-        } catch (err) {
-          setMessages((prev) => [
-            ...prev.filter((m) => m.errorCode !== initialErrorCode),
-            {
+            const interim = {
               id: Date.now() + Math.random(),
               sender: "ai",
-              text: `Network error during retry; still trying...`,
+              text: retryData.message || `Attempt ${attempt} failed; still trying...`,
               timestamp: new Date().toISOString(),
               agentId,
               error: true,
-            },
-          ]);
+              errorCode: retryData.error_code || initialErrorCode,
+            };
+            setMessageStore((prev) => {
+              const list = (prev[agentId] || []).filter((m) => m.errorCode !== initialErrorCode).concat([interim]);
+              if (agentId === selectedAgent) setMessages(list);
+              return { ...prev, [agentId]: list };
+            });
+          }
+        } catch (err) {
+          const netErr = {
+            id: Date.now() + Math.random(),
+            sender: "ai",
+            text: `Network error during retry; still trying...`,
+            timestamp: new Date().toISOString(),
+            agentId,
+            error: true,
+          };
+          setMessageStore((prev) => {
+            const list = (prev[agentId] || []).filter((m) => m.errorCode !== initialErrorCode).concat([netErr]);
+            if (agentId === selectedAgent) setMessages(list);
+            return { ...prev, [agentId]: list };
+          });
         }
       }
 
       if (modelRetryCancelRef.current[agentId]) {
         // User canceled: inform in chat and clear thinking indicator
-        setMessages((prev) => [
-          ...prev.filter((m) => m.errorCode !== initialErrorCode),
-          {
-            id: Date.now() + Math.random(),
-            sender: "ai",
-            text: "Model download canceled by user.",
-            timestamp: new Date().toISOString(),
-            agentId,
-            error: true,
-            errorCode: "E_MODEL_PULL_CANCELED",
-          },
-        ]);
+        const cancelMsg = {
+          id: Date.now() + Math.random(),
+          sender: "ai",
+          text: "Model download canceled by user.",
+          timestamp: new Date().toISOString(),
+          agentId,
+          error: true,
+          errorCode: "E_MODEL_PULL_CANCELED",
+        };
+        setMessageStore((prev) => {
+          const list = (prev[agentId] || []).filter((m) => m.errorCode !== initialErrorCode).concat([cancelMsg]);
+          if (agentId === selectedAgent) setMessages(list);
+          return { ...prev, [agentId]: list };
+        });
         setThinkingAgents((prev) => {
           const newSet = new Set(prev);
           newSet.delete(agentId);
@@ -290,7 +299,11 @@ function App() {
           },
         ]);
 
-        setMessages(historyMessages);
+        // Save into per-agent store and update visible messages if this agent is selected
+        setMessageStore((prev) => ({ ...prev, [agentId]: historyMessages }));
+        if (agentId === selectedAgent) {
+          setMessages(historyMessages);
+        }
         logFrontendError(
           "CONVERSATION_HISTORY_LOADED",
           `Loaded ${conversations.length} conversations for agent ${agentId}`
@@ -302,7 +315,11 @@ function App() {
         `Failed to load conversation history for agent ${agentId}`,
         error
       );
-      setMessages([]);
+      // Keep any existing store for the agent, but clear visible messages if currently selected
+      setMessageStore((prev) => ({ ...prev, [agentId]: prev[agentId] || [] }));
+      if (agentId === selectedAgent) {
+        setMessages([]);
+      }
     }
   }, []);
 
@@ -310,15 +327,23 @@ function App() {
     async (agentId) => {
       if (agentId === selectedAgent) return;
 
+      // Switch selection and restore stored messages (or load from backend)
       setSelectedAgent(agentId);
-      setMessages([]);
       setInputText("");
 
-      if (agentId) {
-        await loadConversationHistory(agentId);
+      const stored = messageStore[agentId];
+      if (stored && stored.length > 0) {
+        setMessages(stored);
+      } else {
+        // Load from backend and populate store
+        if (agentId) {
+          await loadConversationHistory(agentId);
+        } else {
+          setMessages([]);
+        }
       }
     },
-    [selectedAgent, loadConversationHistory]
+    [selectedAgent, loadConversationHistory, messageStore]
   );
 
   const handleSend = useCallback(async () => {
@@ -333,6 +358,8 @@ function App() {
 
     // Mark this agent as thinking
     setThinkingAgents((prev) => new Set([...prev, selectedAgent]));
+    // Capture agent id for this send operation to avoid race conditions
+    const agentIdNow = selectedAgent;
 
     // Generate unique IDs once
     const messageId = Date.now() + Math.random();
@@ -347,20 +374,31 @@ function App() {
       timestamp,
       files: selectedFiles.length > 0 ? [...selectedFiles] : undefined,
     };
-    setMessages((prev) => [...prev, newMessage]);
+    // Persist the new user message into the per-agent store
+    setMessageStore((prev) => {
+      const cur = (prev[agentIdNow] || []).concat([newMessage]);
+      // if currently selected agent, update visible messages
+      if (agentIdNow === selectedAgent) {
+        setMessages(cur);
+      }
+      return { ...prev, [agentIdNow]: cur };
+    });
     setSelectedFiles([]);
 
     // Add thinking indicator
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: thinkingId,
-        sender: "ai",
-        text: "Thinking...",
-        timestamp,
-        isThinking: true,
-      },
-    ]);
+    const thinkingMsg = {
+      id: thinkingId,
+      sender: "ai",
+      text: "Thinking...",
+      timestamp,
+      isThinking: true,
+      agentId: agentIdNow,
+    };
+    setMessageStore((prev) => {
+      const cur = (prev[agentIdNow] || []).concat([thinkingMsg]);
+      if (agentIdNow === selectedAgent) setMessages(cur);
+      return { ...prev, [agentIdNow]: cur };
+    });
 
     try {
       const response = await fetch(`${API_BASE}/api/chat`, {
@@ -376,16 +414,18 @@ function App() {
 
       if (response.ok) {
         // Remove thinking message and add AI response
-        setMessages((prev) => [
-          ...prev.filter((msg) => msg.id !== thinkingId),
-          {
-            id: Date.now() + Math.random(),
-            sender: "ai",
-            text: data.response,
-            timestamp: new Date().toISOString(),
-            agentId: selectedAgent,
-          },
-        ]);
+        const aiMsg = {
+          id: Date.now() + Math.random(),
+          sender: "ai",
+          text: data.response,
+          timestamp: new Date().toISOString(),
+          agentId: agentIdNow,
+        };
+        setMessageStore((prev) => {
+          const list = (prev[agentIdNow] || []).filter((msg) => msg.id !== thinkingId).concat([aiMsg]);
+          if (agentIdNow === selectedAgent) setMessages(list);
+          return { ...prev, [agentIdNow]: list };
+        });
         logFrontendError(
           "FRONTEND_CHAT_SUCCESS",
           "Chat message sent successfully"
@@ -401,43 +441,47 @@ function App() {
         if (data && data.error_code === "EABB5") {
           // Keep the thinking indicator visible so the UI indicates the request is pending upstream.
           const serverMsg = data.message || "Upstream AI service unavailable";
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: Date.now() + Math.random(),
-              sender: "ai",
-              text: serverMsg,
-              timestamp: new Date().toISOString(),
-              agentId: selectedAgent,
-              error: true,
-              errorCode: "EABB5",
-            },
-          ]);
+          const eabbMsg = {
+            id: Date.now() + Math.random(),
+            sender: "ai",
+            text: serverMsg,
+            timestamp: new Date().toISOString(),
+            agentId: agentIdNow,
+            error: true,
+            errorCode: "EABB5",
+          };
+          setMessageStore((prev) => {
+            const list = (prev[agentIdNow] || []).concat([eabbMsg]);
+            if (agentIdNow === selectedAgent) setMessages(list);
+            return { ...prev, [agentIdNow]: list };
+          });
           keepThinkingVisible = true;
           logFrontendError("FRONTEND_CHAT_EABB5", "Received EABB5 from backend", data);
         } else if (data && modelMissingCodes.has(data.error_code)) {
           // Model missing: instead of immediately failing, start a background
           // retry loop and show a Cancel button so the user can stop attempts.
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: Date.now() + Math.random(),
-              sender: "ai",
-              text: data.message || "Requested model is not available. We are attempting to download it — press Cancel to stop.",
-              timestamp: new Date().toISOString(),
-              agentId: selectedAgent,
-              error: true,
-              errorCode: data.error_code,
-            },
-          ]);
+          const modelMissingMsg = {
+            id: Date.now() + Math.random(),
+            sender: "ai",
+            text: data.message || "Requested model is not available. We are attempting to download it — press Cancel to stop.",
+            timestamp: new Date().toISOString(),
+            agentId: agentIdNow,
+            error: true,
+            errorCode: data.error_code,
+          };
+          setMessageStore((prev) => {
+            const list = (prev[agentIdNow] || []).concat([modelMissingMsg]);
+            if (agentIdNow === selectedAgent) setMessages(list);
+            return { ...prev, [agentIdNow]: list };
+          });
 
           // Keep the thinking indicator visible while background retries proceed
           keepThinkingVisible = true;
 
           // Start background retries (non-blocking)
           try {
-            startBackgroundRetry(userMessage, selectedAgent, data.error_code);
-            logFrontendError("FRONTEND_MODEL_PULL_WAITING", "Started background retries for missing model", { agentId: selectedAgent, error_code: data.error_code });
+            startBackgroundRetry(userMessage, agentIdNow, data.error_code);
+            logFrontendError("FRONTEND_MODEL_PULL_WAITING", "Started background retries for missing model", { agentId: agentIdNow, error_code: data.error_code });
           } catch (err) {
             logFrontendError("FRONTEND_MODEL_PULL_WAIT_ERR", "Failed to start background retry", err);
           }
@@ -477,16 +521,19 @@ function App() {
           "Can't connect to the AI service. Please check your internet connection and try again.";
       }
 
-      setMessages((prev) => [
-        ...prev.filter((msg) => msg.id !== thinkingId),
-        {
-          id: Date.now() + Math.random(),
-          sender: "ai",
-          text: userFriendlyMessage,
-          timestamp: new Date().toISOString(),
-          error: true,
-        },
-      ]);
+      const errMsg = {
+        id: Date.now() + Math.random(),
+        sender: "ai",
+        text: userFriendlyMessage,
+        timestamp: new Date().toISOString(),
+        error: true,
+        agentId: agentIdNow,
+      };
+      setMessageStore((prev) => {
+        const list = (prev[agentIdNow] || []).filter((msg) => msg.id !== thinkingId).concat([errMsg]);
+        if (agentIdNow === selectedAgent) setMessages(list);
+        return { ...prev, [agentIdNow]: list };
+      });
       logFrontendError("FRONTEND_CHAT_ERROR", "Chat request failed", error);
     }
 
@@ -495,7 +542,7 @@ function App() {
     if (!keepThinkingVisible) {
       setThinkingAgents((prev) => {
         const newSet = new Set(prev);
-        newSet.delete(selectedAgent);
+        newSet.delete(agentIdNow);
         return newSet;
       });
     }
