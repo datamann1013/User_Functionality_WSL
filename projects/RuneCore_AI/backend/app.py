@@ -78,65 +78,65 @@ if cache_obj is not None:
     conversation_cache = cache_obj
 else:
     # Create mock classes for testing environments if import failed
-        class MockConversationCache:
-            def get_cache_stats(self):
-                return {
-                    "enabled": False,
-                    "using_redis": False,
-                    "message_limit": 10,
-                    "context_size": 5,
-                }
+    class MockConversationCache:
+        def get_cache_stats(self):
+            return {
+                "enabled": False,
+                "using_redis": False,
+                "message_limit": 10,
+                "context_size": 5,
+            }
 
-            def format_context_for_ai(self, agent_id):
-                return []
+        def format_context_for_ai(self, agent_id):
+            return []
 
-            def format_chat_history_to_string(self, history):
-                """
-                Minimal string formatter for mock cache so debug payloads include
-                the user's message when the real cache implementation isn't available.
-                """
-                if not history:
-                    return ""
+        def format_chat_history_to_string(self, history):
+            """
+            Minimal string formatter for mock cache so debug payloads include
+            the user's message when the real cache implementation isn't available.
+            """
+            if not history:
+                return ""
 
-                formatted_lines = []
-                for message in history:
-                    role = message.get("role", "")
-                    content = message.get("content", "")
-                    if role == "system":
-                        formatted_lines.append(f"System: {content}")
-                    elif role == "user":
-                        formatted_lines.append(f"User: {content}")
-                    elif role == "assistant":
-                        formatted_lines.append(f"Assistant: {content}")
+            formatted_lines = []
+            for message in history:
+                role = message.get("role", "")
+                content = message.get("content", "")
+                if role == "system":
+                    formatted_lines.append(f"System: {content}")
+                elif role == "user":
+                    formatted_lines.append(f"User: {content}")
+                elif role == "assistant":
+                    formatted_lines.append(f"Assistant: {content}")
 
-                return "\n\n".join(formatted_lines)
+            return "\n\n".join(formatted_lines)
 
-            def get_full_conversation(self, agent_id):
-                return []
+        def get_full_conversation(self, agent_id):
+            return []
 
-            def add_conversation(self, agent_id, user_msg, ai_msg):
-                pass
+        def add_conversation(self, agent_id, user_msg, ai_msg):
+            pass
 
-            def get_conversation_context(self, agent_id):
-                return []
+        def get_conversation_context(self, agent_id):
+            return []
 
-        class MockAsyncAgentManager:
-            async def submit_request(
-                self, agent_id, user_id, message, priority=0, timeout=None
-            ):
-                return "mock_request_id"
+    class MockAsyncAgentManager:
+        async def submit_request(
+            self, agent_id, user_id, message, priority=0, timeout=None
+        ):
+            return "mock_request_id"
 
-            async def get_response(self, request_id):
-                return None
+        async def get_response(self, request_id):
+            return None
 
-            async def get_request_status(self, request_id):
-                return "completed"
+        async def get_request_status(self, request_id):
+            return "completed"
 
-            async def start_workers(self):
-                pass
+        async def start_workers(self):
+            pass
 
-            def get_stats(self):
-                return {"mock": True}
+        def get_stats(self):
+            return {"mock": True}
 
     conversation_cache = MockConversationCache()
     async_agent_manager = MockAsyncAgentManager()
