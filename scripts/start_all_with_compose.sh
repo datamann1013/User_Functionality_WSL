@@ -19,8 +19,25 @@ ARTIFACT_DIR="$ROOT_DIR/artifacts/dev-bases"
 if [ -d "$ARTIFACT_DIR" ]; then
   for t in "$ARTIFACT_DIR"/*.tar; do
     [ -f "$t" ] || continue
-    echo "Loading prebuilt base image from $t"
-    docker load -i "$t" || true
+    # Try to derive image name from tarball filename to avoid re-loading
+    basename=$(basename "$t" .tar)
+    tag="${basename##*_}"
+    repo_part="${basename%_*}"
+    # convert underscores to slashes for repo/name parts: runecore_node-dev -> runecore/node-dev
+    repo="${repo_part//_/\/}"
+    imagename="${repo}:${tag}"
+    if docker image inspect "$imagename" >/dev/null 2>&1; then
+      echo "Image already present, skipping load: $imagename (from $t)"
+      continue
+    fi
+    echo "Loading prebuilt base image from $t -> $imagename"
+    if docker load -i "$t" >/dev/null 2>&1; then
+      echo "Loaded image: $imagename"
+    else
+      # Fallback: attempt to load without suppressing output so user can see errors
+      echo "docker load (quiet) failed for $t; retrying with verbose output..." >&2
+      docker load -i "$t" || true
+    fi
   done
 fi
 

@@ -7,6 +7,7 @@ import requests
 import asyncio
 import threading
 import time
+import uuid
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -118,6 +119,70 @@ print(f"[RuneCore] Using conversation cache: {cache_type}")
 # Configuration
 ERRORLOGGER_URL = os.environ.get("ERRORLOGGER_SERVICE_URL", "http://127.0.0.1:5001/log")
 OLLAMA_SERVICE_URL = os.environ.get("OLLAMA_SERVICE_URL", "http://127.0.0.1:5002")
+
+# Track background model-pull operations so callers can poll/cancel
+# operation_id -> {model, status, started_at, last_checked, error, stop_flag}
+MODEL_PULL_STATUS = {}
+
+
+def start_background_model_pull(model_name, operation_id, poll_interval=2.0):
+    """Start a daemon thread that monitors model availability after initiating pull.
+
+    The thread updates MODEL_PULL_STATUS[operation_id] with progress and final state.
+    """
+
+    def _worker():
+        entry = MODEL_PULL_STATUS.get(operation_id)
+        if entry is None:
+            return
+        # best-effort trigger pull once
+        try:
+            requests.post(f"{OLLAMA_SERVICE_URL}/api/pull", json={"name": model_name}, timeout=10)
+        except Exception:
+            pass
+
+        # Poll until model appears or stop flag set
+        while True:
+            entry = MODEL_PULL_STATUS.get(operation_id)
+            if entry is None:
+                return
+            if entry.get("stop", False):
+                entry["status"] = "cancelled"
+                entry["last_checked"] = datetime.now().isoformat()
+                return
+            try:
+                mr = requests.get(f"{OLLAMA_SERVICE_URL}/api/models", timeout=5)
+                if mr.status_code == 200:
+                    jr = mr.json()
+                    candidates = []
+                    raw = jr.get("models") if isinstance(jr, dict) else None
+                    if isinstance(raw, list):
+                        for m in raw:
+                            if isinstance(m, dict) and "name" in m:
+                                candidates.append(m["name"])
+                            elif isinstance(m, str):
+                                candidates.append(m)
+                    elif isinstance(jr, list):
+                        for m in jr:
+                            if isinstance(m, str):
+                                candidates.append(m)
+                    if model_name in candidates:
+                        entry["status"] = "available"
+                        entry["last_checked"] = datetime.now().isoformat()
+                        return
+                    else:
+                        entry["status"] = "pulling"
+                        entry["last_checked"] = datetime.now().isoformat()
+                else:
+                    entry["last_checked"] = datetime.now().isoformat()
+            except Exception as e:
+                entry["error"] = str(e)
+                entry["last_checked"] = datetime.now().isoformat()
+            time.sleep(poll_interval)
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
 
 # Pre-defined agent data for fast response
 AGENTS_DATA = {
@@ -394,7 +459,7 @@ def chat():
                             # best-effort trigger; continue to polling which will surface failures
                             pass
 
-                        # Poll models endpoint until model appears or timeout
+                        # Poll models endpoint until model appears or short timeout
                         deadline = time.time() + wait_seconds
                         pulled = False
                         while time.time() < deadline:
@@ -419,15 +484,46 @@ def chat():
                                         break
                             except Exception:
                                 pass
+                            # Informational log so the request shows progress
+                            try:
+                                elapsed = int(time.time() - (deadline - wait_seconds))
+                                print(f"[AI_MODEL] still pulling '{model_name}' (elapsed {elapsed}s)")
+                            except Exception:
+                                pass
                             time.sleep(poll_interval)
 
                         if not pulled:
-                            error_payload = {
-                                "error": "MODEL_MISSING",
-                                "error_code": "E_MODEL_MISSING_PULL_TIMEOUT",
-                                "message": f"Requested model '{model_name}' is not yet available; we are still attempting to download it. Press cancel in the UI to stop attempts.",
+                            # Start background monitor to continue pulling after the request's short wait
+                            operation_id = str(uuid.uuid4())
+                            MODEL_PULL_STATUS[operation_id] = {
+                                "model": model_name,
+                                "status": "pulling",
+                                "started_at": datetime.now().isoformat(),
+                                "last_checked": None,
+                                "error": None,
+                                "stop": False,
                             }
-                            return jsonify(error_payload), 503
+                            start_background_model_pull(model_name, operation_id, poll_interval=poll_interval)
+
+                            # Return 202 so UI can poll status or cancel; inform user we're continuing in background
+                            user_msg = (
+                                f"Requested model '{model_name}' is being downloaded. "
+                                f"This request timed out waiting ({wait_seconds}s) but the pull will continue in the background. "
+                                f"Poll /api/model_pull_status/{operation_id} or cancel."
+                            )
+                            return (
+                                jsonify(
+                                    {
+                                        "error": "MODEL_PULL_IN_PROGRESS",
+                                        "error_code": "E_MODEL_PULL_IN_PROGRESS",
+                                        "message": user_msg,
+                                        "response": user_msg,
+                                        "operation_id": operation_id,
+                                        "estimated_wait": wait_seconds,
+                                    }
+                                ),
+                                202,
+                            )
                         else:
                             try:
                                 print(f"[AI_MODEL] Model '{model_name}' is now available after pull")
@@ -538,9 +634,10 @@ def chat():
                 payload, per_request_timeout=complex_timeout, max_retries=3
             )
 
-            if ai_response:
-                response_mode = "ollama"
-            else:
+            # Normalize empty responses: empty-string responses should still be
+            # visible to users as a placeholder rather than being treated as
+            # a complete failure (which previously resulted in no UI text).
+            if ai_response is None:
                 error_payload = {
                     "error": "OLLAMA_UNAVAILABLE",
                     "error_code": "EABB5",
@@ -552,6 +649,10 @@ def chat():
                     jsonify(error_payload),
                     504 if ("timeout" in (error_text or "").lower()) else 503,
                 )
+            # If response is an empty string, show a friendly placeholder
+            if isinstance(ai_response, str) and ai_response.strip() == "":
+                ai_response = "[No response from model]"
+            response_mode = "ollama"
 
         except Exception as e:
             # Log and print the exception for debugging; then return a
@@ -648,6 +749,27 @@ def debug_payload():
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/model_pull_status/<operation_id>", methods=["GET"])
+def model_pull_status(operation_id):
+    """Return status for a background model-pull operation (operation_id)."""
+    entry = MODEL_PULL_STATUS.get(operation_id)
+    if not entry:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify(entry)
+
+
+@app.route("/api/model_pull_cancel/<operation_id>", methods=["POST"])
+def model_pull_cancel(operation_id):
+    """Request cancellation of a background model-pull operation."""
+    entry = MODEL_PULL_STATUS.get(operation_id)
+    if not entry:
+        return jsonify({"error": "not_found"}), 404
+    entry["stop"] = True
+    entry["status"] = "cancelling"
+    entry["last_checked"] = datetime.now().isoformat()
+    return jsonify({"status": "cancelling", "operation_id": operation_id})
 
 
 # === ASYNC MULTI-AGENT ENDPOINTS ===
