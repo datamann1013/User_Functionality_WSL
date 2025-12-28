@@ -31,80 +31,116 @@ for p in [backend_dir, project_root, cache_dir]:
 
 conversation_cache = None
 async_agent_manager = None
-try:
-    from cache.conversation_cache import conversation_cache
-    from async_agent_manager import async_agent_manager
-except (ModuleNotFoundError, ImportError):
-    try:
-        from conversation_cache import conversation_cache as _cache
-        from async_agent_manager import async_agent_manager as _async_manager
 
-        conversation_cache = _cache
-        async_agent_manager = _async_manager
-    except (ModuleNotFoundError, ImportError):
-        # Create mock classes for testing environments
-        class MockConversationCache:
-            def get_cache_stats(self):
-                return {
-                    "enabled": False,
-                    "using_redis": False,
-                    "message_limit": 10,
-                    "context_size": 5,
-                }
+# Try multiple import paths and emit diagnostics if imports fail so
+# running containers don't silently fall back to the mock cache.
+import importlib
+import traceback
 
-            def format_context_for_ai(self, agent_id):
-                return []
+def _try_import_cache_and_manager():
+    candidates = [
+        "cache.conversation_cache",
+        "conversation_cache",
+        "projects.RuneCore_AI.backend.cache.conversation_cache",
+    ]
+    manager_candidates = [
+        "async_agent_manager",
+        "projects.RuneCore_AI.backend.async_agent_manager",
+    ]
 
-            def format_chat_history_to_string(self, history):
-                """
-                Minimal string formatter for mock cache so debug payloads include
-                the user's message when the real cache implementation isn't available.
-                """
-                if not history:
-                    return ""
+    last_exc = None
+    for mod_name in candidates:
+        try:
+            mod = importlib.import_module(mod_name)
+            cache_obj = getattr(mod, "conversation_cache", None)
+            if cache_obj is not None:
+                return cache_obj, None
+        except Exception as e:
+            last_exc = e
+            print(f"[IMPORT_DEBUG] Failed to import {mod_name}: {e}")
+            traceback.print_exc()
 
-                formatted_lines = []
-                for message in history:
-                    role = message.get("role", "")
-                    content = message.get("content", "")
-                    if role == "system":
-                        formatted_lines.append(f"System: {content}")
-                    elif role == "user":
-                        formatted_lines.append(f"User: {content}")
-                    elif role == "assistant":
-                        formatted_lines.append(f"Assistant: {content}")
-
-                return "\n\n".join(formatted_lines)
-
-            def get_full_conversation(self, agent_id):
-                return []
-
-            def add_conversation(self, agent_id, user_msg, ai_msg):
+    # Try manager imports separately
+    for mname in manager_candidates:
+        try:
+            mgr_mod = importlib.import_module(mname)
+            mgr = getattr(mgr_mod, "async_agent_manager", None)
+            if mgr is not None:
+                # Attach manager if we find it later below
                 pass
+        except Exception:
+            pass
 
-            def get_conversation_context(self, agent_id):
-                return []
+    return None, last_exc
 
-        class MockAsyncAgentManager:
-            async def submit_request(
-                self, agent_id, user_id, message, priority=0, timeout=None
-            ):
-                return "mock_request_id"
 
-            async def get_response(self, request_id):
-                return None
+cache_obj, import_exc = _try_import_cache_and_manager()
+if cache_obj is not None:
+    conversation_cache = cache_obj
+else:
+    # Create mock classes for testing environments if import failed
+    class MockConversationCache:
+        def get_cache_stats(self):
+            return {
+                "enabled": False,
+                "using_redis": False,
+                "message_limit": 10,
+                "context_size": 5,
+            }
 
-            async def get_request_status(self, request_id):
-                return "completed"
+        def format_context_for_ai(self, agent_id):
+            return []
 
-            async def start_workers(self):
-                pass
+        def format_chat_history_to_string(self, history):
+            """
+            Minimal string formatter for mock cache so debug payloads include
+            the user's message when the real cache implementation isn't available.
+            """
+            if not history:
+                return ""
 
-            def get_stats(self):
-                return {"mock": True}
+            formatted_lines = []
+            for message in history:
+                role = message.get("role", "")
+                content = message.get("content", "")
+                if role == "system":
+                    formatted_lines.append(f"System: {content}")
+                elif role == "user":
+                    formatted_lines.append(f"User: {content}")
+                elif role == "assistant":
+                    formatted_lines.append(f"Assistant: {content}")
 
-        conversation_cache = MockConversationCache()
-        async_agent_manager = MockAsyncAgentManager()
+            return "\n\n".join(formatted_lines)
+
+        def get_full_conversation(self, agent_id):
+            return []
+
+        def add_conversation(self, agent_id, user_msg, ai_msg):
+            pass
+
+        def get_conversation_context(self, agent_id):
+            return []
+
+    class MockAsyncAgentManager:
+        async def submit_request(
+            self, agent_id, user_id, message, priority=0, timeout=None
+        ):
+            return "mock_request_id"
+
+        async def get_response(self, request_id):
+            return None
+
+        async def get_request_status(self, request_id):
+            return "completed"
+
+        async def start_workers(self):
+            pass
+
+        def get_stats(self):
+            return {"mock": True}
+
+    conversation_cache = MockConversationCache()
+    async_agent_manager = MockAsyncAgentManager()
 
 app = Flask(__name__)
 CORS(app)
@@ -329,7 +365,15 @@ def log_frontend_error():
 
 @app.route("/api/agents", methods=["GET"])
 def get_agents():
-    """Fast agent list retrieval - pre-computed data"""
+    """Agent list retrieval. Prefer database-backed list when available."""
+    try:
+        if db:
+            agents = db.list_agents()
+            return jsonify({"agents": agents, "count": len(agents)})
+    except Exception as e:
+        # Fall back to static data and log
+        log_error("DB_LIST_AGENTS_ERROR", str(e))
+
     return jsonify(AGENTS_DATA)
 
 
@@ -410,9 +454,85 @@ def get_cache_stats():
     """Get conversation cache statistics"""
     try:
         stats = conversation_cache.get_cache_stats()
-        return jsonify({"status": "ok", "cache": stats})
+        # Add a friendly suggestion when Redis is not in use
+        suggestion = None
+        if not stats.get("using_redis") and stats.get("enabled"):
+            suggestion = (
+                "In-memory conversation cache is active (last "
+                f"{stats.get('message_limit', 10)} messages). "
+                "For longer-term, shared memory across services, "
+                "deploy the Memory Core (Postgres + Redis) and point "
+                "the AI service at it."
+            )
+        return jsonify({"status": "ok", "cache": stats, "suggestion": suggestion})
     except Exception as e:
         return jsonify({"error": f"Cache stats failed: {str(e)}"}), 500
+
+
+@app.route("/api/agents", methods=["POST"])
+def create_agent_endpoint():
+    """Create a new agent. Uses DB when available, otherwise stores in-memory."""
+    try:
+        # Accept JSON or form-data
+        if request.content_type and "multipart/form-data" in request.content_type:
+            form = request.form.to_dict()
+            # convert numeric fields if present
+            try:
+                form["temperature"] = float(form.get("temperature", 0.7))
+            except Exception:
+                form["temperature"] = 0.7
+            try:
+                form["top_p"] = float(form.get("top_p", 0.9))
+            except Exception:
+                form["top_p"] = 0.9
+            # metadata may be JSON string
+            if "metadata" in form:
+                try:
+                    import json as _json
+
+                    form["metadata"] = _json.loads(form["metadata"])
+                except Exception:
+                    pass
+            payload = form
+        else:
+            payload = request.get_json() or {}
+
+        # Basic validation
+        if not payload.get("name") or not payload.get("model_name"):
+            return (
+                jsonify({"error": "Missing required fields: name and model_name"}),
+                400,
+            )
+
+        if db:
+            created = db.create_agent(payload)
+            return jsonify(created), 201
+
+        # Fallback: append to AGENTS_DATA in-memory list
+        import uuid
+
+        agent_id = str(uuid.uuid4())
+        agent = {
+            "id": agent_id,
+            "name": payload.get("name"),
+            "avatar_image": payload.get("avatar_image"),
+            "model_name": payload.get("model_name"),
+            "temperature": float(payload.get("temperature", 0.7)),
+            "top_p": float(payload.get("top_p", 0.9)),
+            "system_prompt": payload.get("system_prompt", "You are a helpful AI assistant."),
+            "max_tokens": int(payload.get("max_tokens", 2048)),
+            "status": "idle",
+            "created_at": datetime.now().isoformat(),
+            "last_active": datetime.now().isoformat(),
+            "metadata": payload.get("metadata", {}),
+        }
+        AGENTS_DATA.setdefault("agents", []).insert(0, agent)
+        AGENTS_DATA["count"] = len(AGENTS_DATA.get("agents", []))
+        return jsonify(agent), 201
+
+    except Exception as e:
+        log_error("CREATE_AGENT_ERROR", str(e))
+        return jsonify({"error": "Failed to create agent", "details": str(e)}), 500
 
 
 @app.route("/api/agents/<agent_id>/conversations", methods=["GET"])
@@ -477,6 +597,54 @@ def get_agent_conversations(agent_id):
             ),
             500,
         )
+
+
+    @app.route("/api/agents/<agent_id>", methods=["PUT"])
+    def update_agent(agent_id):
+        """Update agent data via DB when available, otherwise update in-memory."""
+        try:
+            payload = request.get_json() or {}
+            if db:
+                ok = db.update_agent(agent_id, payload)
+                if not ok:
+                    return jsonify({"error": "Agent not found"}), 404
+                updated = db.get_agent(agent_id)
+                return jsonify(updated)
+
+            # Fallback: update in-memory AGENTS_DATA
+            agents = AGENTS_DATA.get("agents", [])
+            for i, a in enumerate(agents):
+                if a.get("id") == agent_id:
+                    agents[i] = {**a, **payload}
+                    AGENTS_DATA["agents"] = agents
+                    return jsonify(agents[i])
+
+            return jsonify({"error": "Agent not found"}), 404
+        except Exception as e:
+            log_error("UPDATE_AGENT_ERROR", str(e))
+            return jsonify({"error": "Failed to update agent", "details": str(e)}), 500
+
+
+    @app.route("/api/agents/<agent_id>", methods=["DELETE"])
+    def delete_agent(agent_id):
+        """Delete agent and associated data via DB when available, otherwise in-memory."""
+        try:
+            if db:
+                ok = db.delete_agent(agent_id)
+                if not ok:
+                    return jsonify({"error": "Agent not found"}), 404
+                return jsonify({"status": "deleted"})
+
+            agents = AGENTS_DATA.get("agents", [])
+            new_agents = [a for a in agents if a.get("id") != agent_id]
+            if len(new_agents) == len(agents):
+                return jsonify({"error": "Agent not found"}), 404
+            AGENTS_DATA["agents"] = new_agents
+            AGENTS_DATA["count"] = len(new_agents)
+            return jsonify({"status": "deleted"})
+        except Exception as e:
+            log_error("DELETE_AGENT_ERROR", str(e))
+            return jsonify({"error": "Failed to delete agent", "details": str(e)}), 500
 
 
 @app.route("/health", methods=["GET"])

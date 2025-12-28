@@ -371,4 +371,59 @@ if [ "$action" = "test-ready" ]; then
     exit 3
   fi
   echo "Stacks are up and healthy."
+  
+  # Report all exposed ports
+  echo ""
+  echo "========================================"
+  echo "🚀 Available Service Ports:"
+  echo "========================================"
+  
+  # Extract and display ports from compose files
+  for cfile in "${COMPOSE_FILES[@]}"; do
+    if [ ! -f "$cfile" ]; then
+      continue
+    fi
+    if matches_filters "$cfile"; then
+      # Extract service name and ports from the compose file
+      in_ports=0
+      service_name=""
+      while IFS= read -r line || [ -n "$line" ]; do
+        # Match service names (lines ending with colon at start of line)
+        if [[ "$line" =~ ^[[:space:]]*[a-zA-Z0-9_-]+:[[:space:]]*$ ]]; then
+          service_name=$(echo "$line" | sed 's/:.*//' | xargs)
+          in_ports=0
+        fi
+        # Match ports section
+        if [[ "$line" =~ ^[[:space:]]*ports:[[:space:]]*$ ]]; then
+          in_ports=1
+          continue
+        fi
+        # Extract port mappings
+        if [ $in_ports -eq 1 ]; then
+          if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*\'([0-9]+):([0-9]+)\' ]]; then
+            host_port="${BASH_REMATCH[1]}"
+            container_port="${BASH_REMATCH[2]}"
+            echo "  ✓ $service_name: localhost:$host_port (container: $container_port)"
+          elif [[ "$line" =~ ^[[:space:]]*-[[:space:]]*\"([0-9]+):([0-9]+)\" ]]; then
+            host_port="${BASH_REMATCH[1]}"
+            container_port="${BASH_REMATCH[2]}"
+            echo "  ✓ $service_name: localhost:$host_port (container: $container_port)"
+          elif [[ "$line" =~ ^[[:space:]]*-[[:space:]]*([0-9]+):([0-9]+)$ ]]; then
+            host_port="${BASH_REMATCH[1]}"
+            container_port="${BASH_REMATCH[2]}"
+            echo "  ✓ $service_name: localhost:$host_port (container: $container_port)"
+          elif [[ "$line" =~ ^[[:space:]]*[a-zA-Z] ]]; then
+            # End of ports section (new key at same indent level)
+            in_ports=0
+          fi
+        fi
+      done < "$cfile"
+    fi
+  done
+  
+  echo ""
+  echo "Frontend URLs:"
+  echo "  🌐 RuneCore AI Frontend: http://localhost:3000"
+  echo "  🌐 RuneCore Core Frontend: http://localhost:80 (or http://localhost)"
+  echo ""
 fi

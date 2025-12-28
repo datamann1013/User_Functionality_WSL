@@ -10,6 +10,8 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from collections import deque, defaultdict
 import redis
+import tempfile
+import fcntl
 
 
 class ConversationCache:
@@ -38,8 +40,22 @@ class ConversationCache:
         self.redis_client = None
         self.using_redis = False
 
-        # Fallback to Python dict
+        # Fallback to Python dict (deque per agent). Also support a file-backed
+        # fallback so multiple gunicorn worker processes can share conversation
+        # history when Redis is not available.
         self.fallback_cache = defaultdict(lambda: deque(maxlen=self.message_limit))
+        # File path for fallback persistence (shared within container)
+        self.fallback_file = os.environ.get(
+            "LOCAL_CACHE_FALLBACK_FILE", "/tmp/runecore_fallback_cache.json"
+        )
+
+        # Load any existing fallback data from disk so separate worker
+        # processes see the same cached conversations.
+        try:
+            self._load_fallback()
+        except Exception:
+            # If loading fails, continue with an empty in-memory cache
+            pass
 
         if self.enabled:
             self._init_redis()
@@ -150,6 +166,11 @@ class ConversationCache:
         """Add message to fallback Python dict"""
         # Deque automatically handles rotation with maxlen
         self.fallback_cache[agent_id].appendleft(message_obj)
+        # Persist to disk for cross-process visibility
+        try:
+            self._persist_fallback()
+        except Exception:
+            pass
         return message_obj["id"]
 
     def get_conversation_context(
@@ -245,6 +266,10 @@ class ConversationCache:
         # Clear from fallback cache
         if agent_id in self.fallback_cache:
             self.fallback_cache[agent_id].clear()
+            try:
+                self._persist_fallback()
+            except Exception:
+                pass
             return True
 
         return False
@@ -269,8 +294,77 @@ class ConversationCache:
         # Clear fallback cache
         fallback_count = len(self.fallback_cache)
         self.fallback_cache.clear()
+        try:
+            self._persist_fallback()
+        except Exception:
+            pass
 
         return cleared_count + fallback_count
+
+    def _load_fallback(self):
+        """Load fallback cache from JSON file into memory."""
+        if not os.path.exists(self.fallback_file):
+            return
+        try:
+            with open(self.fallback_file, "r", encoding="utf-8") as fh:
+                # Acquire shared lock while reading
+                try:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_SH)
+                except Exception:
+                    pass
+                data = json.load(fh)
+                try:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+                except Exception:
+                    pass
+
+            # Expecting dict of agent_id -> list of message objs (newest-first)
+            for aid, msgs in (data or {}).items():
+                dq = deque(maxlen=self.message_limit)
+                # ensure newest-first order into deque (appendleft expects newest first)
+                for m in msgs:
+                    dq.appendleft(m)
+                self.fallback_cache[aid] = dq
+        except Exception:
+            # ignore parse errors
+            return
+
+    def _persist_fallback(self):
+        """Persist current fallback cache to a JSON file atomically."""
+        # Prepare serializable dict: agent_id -> list of messages (newest-first)
+        out = {}
+        for aid, dq in self.fallback_cache.items():
+            out[aid] = list(dq)
+
+        dirpath = os.path.dirname(self.fallback_file)
+        if dirpath and not os.path.exists(dirpath):
+            try:
+                os.makedirs(dirpath, exist_ok=True)
+            except Exception:
+                pass
+
+        # Atomic write via tempfile and os.replace
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=dirpath or None)
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
+                try:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+                except Exception:
+                    pass
+                json.dump(out, fh)
+                fh.flush()
+                os.fsync(fh.fileno())
+                try:
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+                except Exception:
+                    pass
+            os.replace(tmp_path, self.fallback_file)
+        finally:
+            try:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+            except Exception:
+                pass
 
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics and status"""

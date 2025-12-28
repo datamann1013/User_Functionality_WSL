@@ -15,6 +15,11 @@ services:
       - OLLAMA_SERVICE_URL=http://ollama_wrapper:5002
       - OLLAMA_AUTO_PULL=1
       - OLLAMA_AUTO_PULL_WAIT=30
+      - LOCAL_CACHE_ENABLED=true
+      - LOCAL_CACHE_MESSAGE_LIMIT=10
+      - LOCAL_CACHE_CONTEXT_SIZE=5
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
