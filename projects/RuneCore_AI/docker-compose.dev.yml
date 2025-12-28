@@ -42,6 +42,8 @@ services:
       REACT_APP_API_URL: ""
       REACT_APP_MODEL_RETRY_MAX: "6"
       REACT_APP_MODEL_RETRY_BASE_MS: "2000"
+    depends_on:
+      - backend
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/" ]
       interval: 15s

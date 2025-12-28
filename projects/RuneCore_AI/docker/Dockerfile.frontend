@@ -26,10 +26,9 @@ COPY --from=builder /app/build /usr/share/nginx/html
 # Copy optimized nginx configuration
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 
-# Ensure permissions. Avoid installing packages during image build to keep
-# builds fast and hermetic in environments without outbound network access.
-RUN chown -R root:root /usr/share/nginx/html /var/cache/nginx /var/run /var/log/nginx \
-    && mkdir -p /run && chown -R root:root /run
+# Ensure permissions
+RUN chown -R nginx:nginx /usr/share/nginx/html /var/cache/nginx /var/run /var/log/nginx \
+    && mkdir -p /run && chown -R nginx:nginx /run
 
 EXPOSE 3000
 
