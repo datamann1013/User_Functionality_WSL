@@ -69,6 +69,19 @@ body {
   flex: 1;
 }
 
+/* Memory core warning shown on the top bar when Redis is unavailable */
+.memory-warning {
+  margin-left: 16px;
+  color: white;
+  background-color: var(--error);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  white-space: nowrap;
+}
+
 /* Main Layout */
 .main-layout {
   flex: 1;

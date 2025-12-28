@@ -219,6 +219,38 @@ AGENTS_DATA = {
     "count": 2,
 }
 
+# Agents persistence (simple JSON file) to preserve created agents across restarts
+AGENTS_FILE = os.path.join(os.path.dirname(__file__), "agents.json")
+
+
+def load_agents_from_file():
+    global AGENTS_DATA
+    try:
+        if os.path.exists(AGENTS_FILE):
+            with open(AGENTS_FILE, "r", encoding="utf-8") as f:
+                AGENTS_DATA = json.load(f)
+                print(f"[AGENTS] Loaded {len(AGENTS_DATA.get('agents', []))} agents from {AGENTS_FILE}")
+    except Exception as e:
+        try:
+            print(f"[AGENTS] Failed to load agents file: {e}")
+        except Exception:
+            pass
+
+
+def save_agents_to_file():
+    try:
+        with open(AGENTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(AGENTS_DATA, f, default=str)
+    except Exception as e:
+        try:
+            print(f"[AGENTS] Failed to save agents file: {e}")
+        except Exception:
+            pass
+
+
+# Load persisted agents if present
+load_agents_from_file()
+
 
 def log_error(error_code, message=None, extra=None):
     """Optimized error logging with minimal overhead"""
@@ -238,6 +270,22 @@ def log_error(error_code, message=None, extra=None):
             print(f"[log_error_request_exception] {type(e).__name__}: {str(e)}", file=sys.stderr)
         except Exception:
             pass
+            # Also persist a local fallback copy so diagnostics survive restarts when
+            # the central ErrorLogger is not available (useful in dev environments).
+            try:
+                import json as _json
+                import os as _os
+                from datetime import datetime
+
+                _log_dir = _os.path.join(_os.path.dirname(__file__), "logs")
+                _os.makedirs(_log_dir, exist_ok=True)
+                _file = _os.path.join(_log_dir, "fallback_errors.jsonl")
+                entry = {"timestamp": datetime.now().isoformat(), **payload, "local_fallback": True}
+                with open(_file, "a", encoding="utf-8") as _f:
+                    _f.write(_json.dumps(entry, separators=(",", ":")))
+                    _f.write("\n")
+            except Exception:
+                pass
     except Exception:
         # Catch any other unexpected errors; print to stderr as a last resort
         try:
@@ -285,6 +333,78 @@ def get_agents():
     return jsonify(AGENTS_DATA)
 
 
+@app.route("/api/agents", methods=["POST"])
+def create_agent():
+    """Create a new agent. Accepts JSON or multipart/form-data for avatar uploads."""
+    try:
+        # Support both JSON and FormData submissions
+        if request.content_type and request.content_type.startswith("multipart/form-data"):
+            form = request.form
+            name = form.get("name", "").strip()
+            model_name = form.get("model_name", "llama3.2:1b")
+            temperature = float(form.get("temperature", 0.7))
+            top_p = float(form.get("top_p", 0.9))
+            system_prompt = form.get("system_prompt", "You are a helpful AI assistant.")
+            max_tokens = int(form.get("max_tokens", 2048))
+            metadata = {}
+            if form.get("metadata"):
+                try:
+                    metadata = json.loads(form.get("metadata"))
+                except Exception:
+                    metadata = {"raw_metadata": form.get("metadata")}
+            avatar = None
+            if "avatar_image" in request.files:
+                f = request.files["avatar_image"]
+                avatar = f.filename or "uploaded"
+        else:
+            data = request.get_json() or {}
+            name = (data.get("name") or "").strip()
+            model_name = data.get("model_name", "llama3.2:1b")
+            temperature = float(data.get("temperature", 0.7))
+            top_p = float(data.get("top_p", 0.9))
+            system_prompt = data.get("system_prompt", "You are a helpful AI assistant.")
+            max_tokens = int(data.get("max_tokens", 2048))
+            metadata = data.get("metadata", {}) or {}
+            avatar = data.get("avatar_image") if isinstance(data.get("avatar_image"), str) else None
+
+        if not name:
+            return jsonify({"error": "Name is required", "error_code": "E_MISSING_NAME"}), 400
+
+        new_agent = {
+            "id": str(uuid.uuid4()),
+            "name": name,
+            "avatar_image": avatar,
+            "model_name": model_name,
+            "temperature": temperature,
+            "top_p": top_p,
+            "system_prompt": system_prompt,
+            "max_tokens": max_tokens,
+            "status": "idle",
+            "created_at": datetime.now().isoformat(),
+            "last_active": None,
+            "metadata": metadata,
+        }
+
+        AGENTS_DATA.setdefault("agents", []).append(new_agent)
+
+        # Log creation event
+        try:
+            log_error("AGENT_CREATED", f"Agent created: {new_agent['id']}", {"service": "ai_service", "agent": new_agent['id']})
+        except Exception:
+            pass
+
+        # Persist agents to disk to survive restarts
+        try:
+            save_agents_to_file()
+        except Exception:
+            pass
+
+        return jsonify(new_agent), 201
+    except Exception as e:
+        log_error("AGENT_CREATE_FAILED", str(e))
+        return jsonify({"error": "Failed to create agent", "message": str(e)}), 500
+
+
 @app.route("/api/cache/stats", methods=["GET"])
 def get_cache_stats():
     """Get conversation cache statistics"""
@@ -304,27 +424,46 @@ def get_agent_conversations(agent_id):
         # Get from cache (limited by cache size)
         conversations = conversation_cache.get_full_conversation(agent_id)
 
-        # Format for frontend compatibility
+        # Format for frontend compatibility; skip malformed entries instead of failing
         formatted_conversations = []
-        for msg in conversations:
+        skipped = 0
+        for idx, msg in enumerate(conversations):
+            if not isinstance(msg, dict):
+                skipped += 1
+                continue
+            # Safely extract fields with defaults
+            cid = msg.get("id") or f"{agent_id}-{idx}"
+            user_message = msg.get("user_message") or ""
+            ai_response = msg.get("ai_response") or ""
+            timestamp = msg.get("timestamp") or datetime.now().isoformat()
+            model_used = msg.get("model_used", "cached")
+
             formatted_conversations.append(
                 {
-                    "id": msg["id"],
-                    "user_message": msg["user_message"],
-                    "ai_response": msg["ai_response"],
-                    "timestamp": msg["timestamp"],
-                    "model_used": "cached",  # Placeholder for now
+                    "id": cid,
+                    "user_message": user_message,
+                    "ai_response": ai_response,
+                    "timestamp": timestamp,
+                    "model_used": model_used,
                     "agent_id": agent_id,
                 }
             )
 
-        return jsonify(
-            {
-                "conversations": formatted_conversations[:limit],
-                "count": len(formatted_conversations),
-                "source": "local_cache",
-            }
-        )
+        # Return the most recent `limit` conversations while preserving chronological order
+        if limit and len(formatted_conversations) > limit:
+            sliced = formatted_conversations[-limit:]
+        else:
+            sliced = formatted_conversations
+
+        resp = {
+            "conversations": sliced,
+            "count": len(sliced),
+            "source": "local_cache",
+        }
+        if skipped > 0:
+            resp["skipped_malformed"] = skipped
+
+        return jsonify(resp)
 
     except Exception as e:
         log_error("CACHE_ERROR", str(e))
@@ -380,10 +519,19 @@ def chat():
         ai_response = None
         response_mode = "fallback"
 
+                # Diagnostic log: incoming request and cache mode
+                try:
+                    print(f"[CHAT_REQ] agent_id={agent_id} message_preview='{message[:120]}' cache_using_redis={conversation_cache.get_cache_stats().get('using_redis')}")
+                except Exception:
+                    pass
         # Try Ollama service first
         try:
             # Adjust timeout based on message complexity. Make these values
             # configurable via environment variables so long-running prompts
+                try:
+                    print(f"[CHAT_CTX] history_len={len(chat_history)} for agent={agent_id}")
+                except Exception:
+                    pass
             # can be supported in dev environments.
             message_length = len(message)
             BASE_TIMEOUT = int(os.environ.get("OLLAMA_BASE_TIMEOUT", "20"))
@@ -672,6 +820,10 @@ def chat():
             }
             return jsonify(error_payload), 503
 
+                    try:
+                        print(f"[CHAT_RESP] agent_id={agent_id} response_preview='{str(ai_response)[:200]}'")
+                    except Exception:
+                        pass
         # Store conversation in cache
         try:
             conversation_cache.add_conversation(agent_id, message, ai_response)
@@ -694,6 +846,10 @@ def chat():
                 "cached_messages": len(
                     conversation_cache.get_conversation_context(agent_id)
                 ),
+                    try:
+                        print(f"[CHAT_STORE] stored conversation for agent={agent_id}")
+                    except Exception:
+                        pass
             }
         )
 
@@ -770,6 +926,69 @@ def model_pull_cancel(operation_id):
     entry["status"] = "cancelling"
     entry["last_checked"] = datetime.now().isoformat()
     return jsonify({"status": "cancelling", "operation_id": operation_id})
+
+
+@app.route("/api/cache/raw/<agent_id>", methods=["GET"])
+def cache_raw(agent_id):
+    """Return raw cached entries for an agent (diagnostic)."""
+    try:
+        # Attempt to return Redis raw list if available
+        if hasattr(conversation_cache, "using_redis") and conversation_cache.using_redis:
+            try:
+                key = conversation_cache._get_key(agent_id)
+                raw = conversation_cache.redis_client.lrange(key, 0, conversation_cache.message_limit - 1)
+                return (
+                    jsonify({"source": "redis", "raw": raw, "count": len(raw)}),
+                    200,
+                )
+            except Exception as e:
+                # Fall through to fallback
+                print(f"[cache_raw] redis read failed for {agent_id}: {e}")
+
+        # Fallback: return fallback cache contents
+        fallback = []
+        try:
+            fallback = list(conversation_cache.fallback_cache.get(agent_id, []))
+        except Exception as e:
+            print(f"[cache_raw] fallback read failed for {agent_id}: {e}")
+
+        return jsonify({"source": "fallback", "raw": fallback, "count": len(fallback)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/cache/force_mode", methods=["POST"])
+def cache_force_mode():
+    """Force conversation cache mode for testing: {"mode": "fallback"|"redis"} """
+    try:
+        data = request.get_json() or {}
+        mode = data.get("mode")
+        if mode not in ("fallback", "redis"):
+            return jsonify({"error": "mode must be 'fallback' or 'redis'"}), 400
+
+        if mode == "fallback":
+            conversation_cache.using_redis = False
+            conversation_cache.redis_client = None
+            return jsonify({"status": "forced_fallback"}), 200
+
+        # attempt to re-init redis
+        try:
+            conversation_cache._init_redis()
+            return jsonify({"status": "attempted_redis_init", "using_redis": conversation_cache.using_redis}), 200
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/cache/clear/<agent_id>", methods=["POST"])
+def cache_clear_agent(agent_id):
+    """Clear conversation cache for given agent (both redis and fallback)."""
+    try:
+        ok = conversation_cache.clear_agent_cache(agent_id)
+        return jsonify({"cleared": bool(ok)}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 # === ASYNC MULTI-AGENT ENDPOINTS ===

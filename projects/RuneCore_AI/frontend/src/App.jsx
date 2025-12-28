@@ -104,6 +104,7 @@ function App() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [agentToEdit, setAgentToEdit] = useState(null);
   const [showModelManager, setShowModelManager] = useState(false);
+  const [cacheStatus, setCacheStatus] = useState(null);
 
   // Model retry/cancel helpers: when backend reports a model pull timeout we
   // start a background retry loop and present a Cancel button to the user.
@@ -530,7 +531,26 @@ function App() {
       }
     }, 5000);
 
-    return () => clearInterval(refreshInterval);
+    // Poll cache status separately so the UI can surface memory-core availability
+    const loadCacheStatus = async () => {
+      if (connecting) return;
+      try {
+        const r = await fetch(`${API_BASE}/api/cache/stats`);
+        if (r.ok) {
+          const d = await r.json();
+          setCacheStatus(d);
+        }
+      } catch (e) {
+        setCacheStatus({ cache: { using_redis: false } });
+      }
+    };
+    loadCacheStatus();
+    const cacheIv = setInterval(loadCacheStatus, 5000);
+
+    return () => {
+      clearInterval(refreshInterval);
+      clearInterval(cacheIv);
+    };
   }, [connecting, loadAgents]);
 
   // Auto scroll to bottom when new messages arrive
@@ -638,6 +658,11 @@ function App() {
           <h2>Rommesmo Informatics</h2>
         </div>
         <div className="top-bar-spacer"></div>
+        {cacheStatus && ((cacheStatus.cache && cacheStatus.cache.using_redis === false) || cacheStatus.using_redis === false) && (
+          <div className="memory-warning" title="Long-term memory (Redis) is unavailable; history will not persist across restarts">
+            Memory core offline — long-term history disabled
+          </div>
+        )}
       </div>
 
       <div className="main-layout">

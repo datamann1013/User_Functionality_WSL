@@ -14,6 +14,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${SCRIPT_DIR}/.."
 cd "${ROOT_DIR}"
 
+# Parse optional short flags before positional action. Support: -dev to enable developer verbose mode
+DEV_MODE=0
+if [ "${1-}" = "-dev" ]; then
+  DEV_MODE=1
+  shift || true
+  # Enable verbose shell tracing for developer mode
+  set -x
+  echo "[start_all_with_compose.sh] Developer mode enabled (-dev) -> verbose logging"
+  # Export a marker so compose files can use ${RUNECORE_MODE} if desired
+  export RUNECORE_MODE=dev
+  export ERRORLOGGER_DEBUG=1
+fi
+
 # Preload saved dev base images if present
 ARTIFACT_DIR="$ROOT_DIR/artifacts/dev-bases"
 if [ -d "$ARTIFACT_DIR" ]; then
@@ -94,6 +107,24 @@ if [ "$ALLOW_PROD_COMPOSE" != "1" ]; then
   done
   if [ ${#filtered[@]} -gt 0 ]; then
     COMPOSE_FILES=("${filtered[@]}")
+  fi
+fi
+
+# If in DEV_MODE, ensure ErrorLogger service is running locally so logs are persisted and visible
+if [ "$DEV_MODE" = "1" ]; then
+  # Simple healthcheck for ErrorLogger
+  echo "Checking ErrorLogger service..."
+  if command -v curl >/dev/null 2>&1; then
+    if ! curl -sS --max-time 2 http://127.0.0.1:5001/health >/dev/null 2>&1; then
+      echo "ErrorLogger not detected on 5001 — starting local ErrorLogger for dev"
+      # Start ErrorLogger in the background so docker compose can still run
+      python3 projects/RuneGuard_Logger/error_logger_service.py --host 127.0.0.1 --port 5001 --debug &
+      sleep 1
+    else
+      echo "ErrorLogger already running (127.0.0.1:5001)"
+    fi
+  else
+    echo "curl not available to probe ErrorLogger; skip health probe" >&2
   fi
 fi
 
@@ -247,11 +278,18 @@ run_up() {
       fi
     fi
     echo "--> Building images for: $file"
+    # Preserve exported env vars (like RUNECORE_MODE) for compose to pick up
     "${COMPOSE_CMD[@]}" -f "$file" build ${NO_CACHE_FLAG}
   else
     echo "--> SKIP_BUILD=1 set; skipping build for: $file"
   fi
-  "${COMPOSE_CMD[@]}" -f "$file" up -d
+  # In dev mode, enable additional compose verbosity if supported
+  if [ "$DEV_MODE" = "1" ]; then
+    echo "Running docker compose up (dev mode) for $file"
+    "${COMPOSE_CMD[@]}" -f "$file" up -d
+  else
+    "${COMPOSE_CMD[@]}" -f "$file" up -d
+  fi
 }
 
 # Wait for healthchecks exposed by compose stacks. This polls each container's

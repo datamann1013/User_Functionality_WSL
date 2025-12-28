@@ -89,6 +89,10 @@ class ConversationCache:
             str: Conversation ID
         """
         if not self.enabled:
+            try:
+                print(f"[ConversationCache] add_conversation skipped (disabled) for {agent_id}")
+            except Exception:
+                pass
             return None
 
         conversation_id = str(uuid.uuid4())
@@ -104,13 +108,28 @@ class ConversationCache:
 
         if self.using_redis and self.redis_client:
             try:
-                return self._add_to_redis(agent_id, message_obj)
+                cid = self._add_to_redis(agent_id, message_obj)
+                try:
+                    print(f"[ConversationCache] added to redis {agent_id} id={cid}")
+                except Exception:
+                    pass
+                return cid
             except Exception as e:
                 print(f"⚠️ Redis error, falling back to dict: {e}")
                 self.using_redis = False
-                return self._add_to_fallback(agent_id, message_obj)
+                cid = self._add_to_fallback(agent_id, message_obj)
+                try:
+                    print(f"[ConversationCache] redis add failed, added to fallback {agent_id} id={cid}")
+                except Exception:
+                    pass
+                return cid
         else:
-            return self._add_to_fallback(agent_id, message_obj)
+            cid = self._add_to_fallback(agent_id, message_obj)
+            try:
+                print(f"[ConversationCache] added to fallback {agent_id} id={cid}")
+            except Exception:
+                pass
+            return cid
 
     def _add_to_redis(self, agent_id: str, message_obj: Dict) -> str:
         """Add message to Redis with rotation"""
@@ -165,8 +184,19 @@ class ConversationCache:
     def _get_from_redis(self, agent_id: str, limit: int) -> List[Dict]:
         """Get messages from Redis"""
         key = self._get_key(agent_id)
-        messages = self.redis_client.lrange(key, 0, limit - 1)
-        return [json.loads(msg) for msg in messages]
+        raw_messages = self.redis_client.lrange(key, 0, limit - 1)
+        parsed = []
+        for i, msg in enumerate(raw_messages):
+            try:
+                parsed.append(json.loads(msg))
+            except Exception as e:
+                # Skip malformed entries but surface a short diagnostic to stdout
+                try:
+                    print(f"⚠️ Skipping malformed cached message for agent {agent_id} at index {i}: {e}")
+                except Exception:
+                    pass
+                continue
+        return parsed
 
     def _get_from_fallback(self, agent_id: str, limit: int) -> List[Dict]:
         """Get messages from fallback cache"""
@@ -181,8 +211,17 @@ class ConversationCache:
         if self.using_redis and self.redis_client:
             try:
                 key = self._get_key(agent_id)
-                messages = self.redis_client.lrange(key, 0, self.message_limit - 1)
-                parsed = [json.loads(msg) for msg in messages]
+                raw = self.redis_client.lrange(key, 0, self.message_limit - 1)
+                parsed = []
+                for i, m in enumerate(raw):
+                    try:
+                        parsed.append(json.loads(m))
+                    except Exception as e:
+                        try:
+                            print(f"⚠️ Skipping malformed cached message for agent {agent_id} at index {i}: {e}")
+                        except Exception:
+                            pass
+                        continue
                 return list(reversed(parsed))
             except Exception as e:
                 print(f"⚠️ Redis error in get_full_conversation: {e}")
