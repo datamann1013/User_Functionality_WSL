@@ -96,6 +96,12 @@ function App() {
   const [messages, setMessages] = useState([]);
   // Per-agent message store: { [agentId]: Message[] }
   const [messageStore, setMessageStore] = useState({});
+  
+  // Helper to trim message store to last 10 messages (matching backend limit)
+  const trimMessageStore = (store, agentId, messages) => {
+    const trimmed = messages.slice(-10);
+    return { ...store, [agentId]: trimmed };
+  };
   const [inputText, setInputText] = useState("");
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -151,7 +157,7 @@ function App() {
             setMessageStore((prev) => {
               const list = (prev[agentId] || []).filter((m) => m.errorCode !== initialErrorCode).concat([successMsg]);
               if (agentId === selectedAgent) setMessages(list);
-              return { ...prev, [agentId]: list };
+              return trimMessageStore(prev, agentId, list);
             });
             logFrontendError("FRONTEND_CHAT_SUCCESS_RETRY_BG", "Background retry succeeded", { attempt, agentId });
             // clear thinking and retrying state
@@ -176,7 +182,7 @@ function App() {
             setMessageStore((prev) => {
               const list = (prev[agentId] || []).filter((m) => m.errorCode !== initialErrorCode).concat([interim]);
               if (agentId === selectedAgent) setMessages(list);
-              return { ...prev, [agentId]: list };
+              return trimMessageStore(prev, agentId, list);
             });
           }
         } catch (err) {
@@ -191,7 +197,7 @@ function App() {
           setMessageStore((prev) => {
             const list = (prev[agentId] || []).filter((m) => m.errorCode !== initialErrorCode).concat([netErr]);
             if (agentId === selectedAgent) setMessages(list);
-            return { ...prev, [agentId]: list };
+            return trimMessageStore(prev, agentId, list);
           });
         }
       }
@@ -210,7 +216,7 @@ function App() {
         setMessageStore((prev) => {
           const list = (prev[agentId] || []).filter((m) => m.errorCode !== initialErrorCode).concat([cancelMsg]);
           if (agentId === selectedAgent) setMessages(list);
-          return { ...prev, [agentId]: list };
+          return trimMessageStore(prev, agentId, list);
         });
         setThinkingAgents((prev) => {
           const newSet = new Set(prev);
@@ -376,15 +382,15 @@ function App() {
       timestamp,
       files: selectedFiles.length > 0 ? [...selectedFiles] : undefined,
     };
-    // Persist the new user message into the per-agent store
+    // Persist the new user message into the per-agent store (limit to 10)
     setMessageStore((prev) => {
       const cur = (prev[agentIdNow] || []).concat([newMessage]);
-      // if currently selected agent, update visible messages
-      if (agentIdNow === selectedAgent) {
-        setMessages(cur);
-      }
-      return { ...prev, [agentIdNow]: cur };
+      return trimMessageStore(prev, agentIdNow, cur);
     });
+    // Update visible messages only if still viewing this agent
+    if (agentIdNow === selectedAgent) {
+      setMessages((prev) => [...prev, newMessage]);
+    }
     setSelectedFiles([]);
 
     // Add thinking indicator
@@ -398,9 +404,12 @@ function App() {
     };
     setMessageStore((prev) => {
       const cur = (prev[agentIdNow] || []).concat([thinkingMsg]);
-      if (agentIdNow === selectedAgent) setMessages(cur);
-      return { ...prev, [agentIdNow]: cur };
+      return trimMessageStore(prev, agentIdNow, cur);
     });
+    // Update visible messages only if still viewing this agent
+    if (agentIdNow === selectedAgent) {
+      setMessages((prev) => [...prev, thinkingMsg]);
+    }
 
     try {
       const response = await fetch(`${API_BASE}/api/chat`, {
@@ -436,19 +445,29 @@ function App() {
           timestamp: new Date().toISOString(),
           agentId: agentIdNow,
         };
+        
+        let shouldUpdateMessages = false;
         setMessageStore((prev) => {
           const list = (prev[agentIdNow] || []).filter((msg) => msg.id !== thinkingId).concat([aiMsg]);
-          if (agentIdNow === selectedAgent) {
-            setMessages(list);
+          // Don't update selectedAgent inside callback - check current value outside
+          return trimMessageStore(prev, agentIdNow, list);
+        });
+        
+        // Check current selectedAgent value and update accordingly
+        setSelectedAgent((currentAgent) => {
+          if (agentIdNow === currentAgent) {
+            // Still viewing the agent that received the response - update visible messages
+            setMessages((prev) => prev.filter((msg) => msg.id !== thinkingId).concat([aiMsg]));
           } else {
-            // Agent received message while not selected - increment unread count
+            // Viewing different agent - increment unread count
             setUnreadCounts((counts) => ({
               ...counts,
               [agentIdNow]: (counts[agentIdNow] || 0) + 1,
             }));
           }
-          return { ...prev, [agentIdNow]: list };
+          return currentAgent; // Don't change selected agent
         });
+        
         logFrontendError(
           "FRONTEND_CHAT_SUCCESS",
           "Chat message sent successfully"
@@ -476,7 +495,7 @@ function App() {
           setMessageStore((prev) => {
             const list = (prev[agentIdNow] || []).concat([eabbMsg]);
             if (agentIdNow === selectedAgent) setMessages(list);
-            return { ...prev, [agentIdNow]: list };
+            return trimMessageStore(prev, agentIdNow, list);
           });
           keepThinkingVisible = true;
           logFrontendError("FRONTEND_CHAT_EABB5", "Received EABB5 from backend", data);
@@ -495,7 +514,7 @@ function App() {
           setMessageStore((prev) => {
             const list = (prev[agentIdNow] || []).concat([modelMissingMsg]);
             if (agentIdNow === selectedAgent) setMessages(list);
-            return { ...prev, [agentIdNow]: list };
+            return trimMessageStore(prev, agentIdNow, list);
           });
 
           // Keep the thinking indicator visible while background retries proceed
@@ -552,10 +571,16 @@ function App() {
         error: true,
         agentId: agentIdNow,
       };
+      
+      // If network error, show connection lost indicator
+      if (error.name === "TypeError" || error.name === "NetworkError" || userFriendlyMessage.includes("Can't connect")) {
+        setConnecting(true);
+      }
+      
       setMessageStore((prev) => {
         const list = (prev[agentIdNow] || []).filter((msg) => msg.id !== thinkingId).concat([errMsg]);
         if (agentIdNow === selectedAgent) setMessages(list);
-        return { ...prev, [agentIdNow]: list };
+        return trimMessageStore(prev, agentIdNow, list);
       });
       logFrontendError("FRONTEND_CHAT_ERROR", "Chat request failed", error);
     }
