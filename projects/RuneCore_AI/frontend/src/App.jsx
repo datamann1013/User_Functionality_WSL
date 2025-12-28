@@ -102,6 +102,7 @@ function App() {
   const [dragOver, setDragOver] = useState(false);
   const [connecting, setConnecting] = useState(true);
   const [thinkingAgents, setThinkingAgents] = useState(new Set()); // Track which agents are thinking
+  const [unreadCounts, setUnreadCounts] = useState({}); // Track unread messages per agent
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [agentToEdit, setAgentToEdit] = useState(null);
@@ -328,6 +329,9 @@ function App() {
       setSelectedAgent(agentId);
       setInputText("");
 
+      // Clear unread count for this agent
+      setUnreadCounts((prev) => ({ ...prev, [agentId]: 0 }));
+
       const stored = messageStore[agentId];
       if (stored && stored.length > 0) {
         setMessages(stored);
@@ -408,7 +412,20 @@ function App() {
         }),
       });
 
-      const data = await response.json();
+      // Check if response is JSON before parsing
+      const contentType = response.headers.get("content-type");
+      let data;
+      try {
+        if (contentType && contentType.includes("application/json")) {
+          data = await response.json();
+        } else {
+          // Got HTML or other non-JSON response (nginx error page)
+          const text = await response.text();
+          throw new Error(`Server returned non-JSON response (${response.status}): ${text.substring(0, 100)}`);
+        }
+      } catch (parseError) {
+        throw new Error(`Failed to parse server response: ${parseError.message}`);
+      }
 
       if (response.ok) {
         // Remove thinking message and add AI response
@@ -421,7 +438,15 @@ function App() {
         };
         setMessageStore((prev) => {
           const list = (prev[agentIdNow] || []).filter((msg) => msg.id !== thinkingId).concat([aiMsg]);
-          if (agentIdNow === selectedAgent) setMessages(list);
+          if (agentIdNow === selectedAgent) {
+            setMessages(list);
+          } else {
+            // Agent received message while not selected - increment unread count
+            setUnreadCounts((counts) => ({
+              ...counts,
+              [agentIdNow]: (counts[agentIdNow] || 0) + 1,
+            }));
+          }
           return { ...prev, [agentIdNow]: list };
         });
         logFrontendError(
@@ -568,12 +593,17 @@ function App() {
 
     checkBackend();
 
-    // Set up periodic agent refresh
+    // Set up periodic agent refresh (less aggressive to prevent flickering)
     const refreshInterval = setInterval(async () => {
       if (!connecting) {
-        await loadAgents();
+        try {
+          await loadAgents();
+        } catch (error) {
+          // Silently fail on refresh errors to prevent UI disruption
+          console.error("Agent refresh failed:", error);
+        }
       }
-    }, 5000);
+    }, 30000); // Reduced from 5s to 30s to prevent flickering
 
     // Poll cache status separately so the UI can surface memory-core availability
     const loadCacheStatus = async () => {
@@ -703,8 +733,14 @@ function App() {
         </div>
         <div className="top-bar-spacer"></div>
         {cacheStatus && ((cacheStatus.cache && cacheStatus.cache.using_redis === false) || cacheStatus.using_redis === false) && (
-          <div className="memory-warning" title="Long-term memory (Redis) is unavailable; history will not persist across restarts">
-            Memory core offline — long-term history disabled
+          <div className="fallback-status-banner" title="Running in standalone mode with fallback systems">
+            <div className="fallback-icon">⚠️</div>
+            <div className="fallback-text">
+              <strong>Standalone Mode:</strong> Using in-memory cache (last {cacheStatus.cache?.message_limit || 10} messages)
+              {cacheStatus.suggestion && (
+                <div className="fallback-hint">💡 {cacheStatus.suggestion}</div>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -758,6 +794,11 @@ function App() {
                         )
                       ) : (
                         agent.name.charAt(0).toUpperCase()
+                      )}
+                      {unreadCounts[agent.id] > 0 && selectedAgent !== agent.id && (
+                        <div className="unread-badge" title={`${unreadCounts[agent.id]} unread messages`}>
+                          {unreadCounts[agent.id]}
+                        </div>
                       )}
                     </div>
                     <div className="agent-info">

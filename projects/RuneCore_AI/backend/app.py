@@ -3,6 +3,7 @@
 AI Service Backend - Optimized with Redis Conversation Cache
 """
 import os
+import json
 import requests
 import asyncio
 import threading
@@ -144,6 +145,9 @@ else:
 
 app = Flask(__name__)
 CORS(app)
+
+# Database connection (optional, None for now as we use file-based storage)
+db = None
 
 # Log which cache implementation is being used
 try:
@@ -599,8 +603,8 @@ def get_agent_conversations(agent_id):
         )
 
 
-    @app.route("/api/agents/<agent_id>", methods=["PUT"])
-    def update_agent(agent_id):
+@app.route("/api/agents/<agent_id>", methods=["PUT"])
+def update_agent(agent_id):
         """Update agent data via DB when available, otherwise update in-memory."""
         try:
             payload = request.get_json() or {}
@@ -625,8 +629,8 @@ def get_agent_conversations(agent_id):
             return jsonify({"error": "Failed to update agent", "details": str(e)}), 500
 
 
-    @app.route("/api/agents/<agent_id>", methods=["DELETE"])
-    def delete_agent(agent_id):
+@app.route("/api/agents/<agent_id>", methods=["DELETE"])
+def delete_agent(agent_id):
         """Delete agent and associated data via DB when available, otherwise in-memory."""
         try:
             if db:
@@ -687,20 +691,20 @@ def chat():
         ai_response = None
         response_mode = "fallback"
 
-                # Diagnostic log: incoming request and cache mode
-                try:
-                    print(f"[CHAT_REQ] agent_id={agent_id} message_preview='{message[:120]}' cache_using_redis={conversation_cache.get_cache_stats().get('using_redis')}")
-                except Exception:
-                    pass
+        # Diagnostic log: incoming request and cache mode
+        try:
+            print(f"[CHAT_REQ] agent_id={agent_id} message_preview='{message[:120]}' cache_using_redis={conversation_cache.get_cache_stats().get('using_redis')}")
+        except Exception:
+            pass
         # Try Ollama service first
         try:
             # Adjust timeout based on message complexity. Make these values
             # configurable via environment variables so long-running prompts
-                try:
-                    print(f"[CHAT_CTX] history_len={len(chat_history)} for agent={agent_id}")
-                except Exception:
-                    pass
             # can be supported in dev environments.
+            try:
+                print(f"[CHAT_CTX] history_len={len(chat_history)} for agent={agent_id}")
+            except Exception:
+                pass
             message_length = len(message)
             BASE_TIMEOUT = int(os.environ.get("OLLAMA_BASE_TIMEOUT", "20"))
             COMPLEX_TIMEOUT = int(os.environ.get("OLLAMA_COMPLEX_TIMEOUT", "180"))
@@ -988,10 +992,10 @@ def chat():
             }
             return jsonify(error_payload), 503
 
-                    try:
-                        print(f"[CHAT_RESP] agent_id={agent_id} response_preview='{str(ai_response)[:200]}'")
-                    except Exception:
-                        pass
+        try:
+            print(f"[CHAT_RESP] agent_id={agent_id} response_preview='{str(ai_response)[:200]}'")
+        except Exception:
+            pass
         # Store conversation in cache
         try:
             conversation_cache.add_conversation(agent_id, message, ai_response)
@@ -1014,12 +1018,13 @@ def chat():
                 "cached_messages": len(
                     conversation_cache.get_conversation_context(agent_id)
                 ),
-                    try:
-                        print(f"[CHAT_STORE] stored conversation for agent={agent_id}")
-                    except Exception:
-                        pass
             }
         )
+
+        try:
+            print(f"[CHAT_STORE] stored conversation for agent={agent_id}")
+        except Exception:
+            pass
 
     except Exception as e:
         log_error("CHAT_ERROR", str(e))
