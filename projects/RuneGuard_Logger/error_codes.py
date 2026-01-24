@@ -40,6 +40,7 @@ ERROR_CODE_DEFINITIONS = {
     "EABB2": "No available model for inference",
     "EABB3": "Model loading failed - unsupported format",
     "EABB4": "Inference timeout",
+    "EABB5": "Upstream AI service unavailable or unresponsive",
     "IABS6": "Model loaded successfully",
     # ===== Frontend =====
     "IAFX1": "Frontend transmission received",

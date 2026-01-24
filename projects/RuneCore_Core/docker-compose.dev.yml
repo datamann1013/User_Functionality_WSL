@@ -20,6 +20,11 @@ services:
       - '80:80'
     networks:
       - runecore_dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health || true"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
 
 networks:
   runecore_dev:

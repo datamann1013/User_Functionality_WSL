@@ -14,13 +14,43 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${SCRIPT_DIR}/.."
 cd "${ROOT_DIR}"
 
+# Parse optional short flags before positional action. Support: -dev to enable developer verbose mode
+DEV_MODE=0
+if [ "${1-}" = "-dev" ]; then
+  DEV_MODE=1
+  shift || true
+  # Enable verbose shell tracing for developer mode
+  set -x
+  echo "[start_all_with_compose.sh] Developer mode enabled (-dev) -> verbose logging"
+  # Export a marker so compose files can use ${RUNECORE_MODE} if desired
+  export RUNECORE_MODE=dev
+  export ERRORLOGGER_DEBUG=1
+fi
+
 # Preload saved dev base images if present
 ARTIFACT_DIR="$ROOT_DIR/artifacts/dev-bases"
 if [ -d "$ARTIFACT_DIR" ]; then
   for t in "$ARTIFACT_DIR"/*.tar; do
     [ -f "$t" ] || continue
-    echo "Loading prebuilt base image from $t"
-    docker load -i "$t" || true
+    # Try to derive image name from tarball filename to avoid re-loading
+    basename=$(basename "$t" .tar)
+    tag="${basename##*_}"
+    repo_part="${basename%_*}"
+    # convert underscores to slashes for repo/name parts: runecore_node-dev -> runecore/node-dev
+    repo="${repo_part//_/\/}"
+    imagename="${repo}:${tag}"
+    if docker image inspect "$imagename" >/dev/null 2>&1; then
+      echo "Image already present, skipping load: $imagename (from $t)"
+      continue
+    fi
+    echo "Loading prebuilt base image from $t -> $imagename"
+    if docker load -i "$t" >/dev/null 2>&1; then
+      echo "Loaded image: $imagename"
+    else
+      # Fallback: attempt to load without suppressing output so user can see errors
+      echo "docker load (quiet) failed for $t; retrying with verbose output..." >&2
+      docker load -i "$t" || true
+    fi
   done
 fi
 
@@ -80,6 +110,24 @@ if [ "$ALLOW_PROD_COMPOSE" != "1" ]; then
   fi
 fi
 
+# If in DEV_MODE, ensure ErrorLogger service is running locally so logs are persisted and visible
+if [ "$DEV_MODE" = "1" ]; then
+  # Simple healthcheck for ErrorLogger
+  echo "Checking ErrorLogger service..."
+  if command -v curl >/dev/null 2>&1; then
+    if ! curl -sS --max-time 2 http://127.0.0.1:5001/health >/dev/null 2>&1; then
+      echo "ErrorLogger not detected on 5001 — starting local ErrorLogger for dev"
+      # Start ErrorLogger in the background so docker compose can still run
+      python3 projects/RuneGuard_Logger/error_logger_service.py --host 127.0.0.1 --port 5001 --debug &
+      sleep 1
+    else
+      echo "ErrorLogger already running (127.0.0.1:5001)"
+    fi
+  else
+    echo "curl not available to probe ErrorLogger; skip health probe" >&2
+  fi
+fi
+
 # Detect docker compose command
 COMPOSE_CMD=""
 if command -v docker >/dev/null 2>&1; then
@@ -87,6 +135,27 @@ if command -v docker >/dev/null 2>&1; then
     COMPOSE_CMD=(docker compose)
   fi
 fi
+
+# Ensure the shared developer network exists and is attachable so compose stacks
+# that reference `runecore_dev` as an external network can join it. This avoids
+# manual steps where some services fail to resolve peers (e.g. `ollama` alias).
+ensure_dev_network() {
+  local net=runecore_dev
+  if ! docker network inspect "$net" >/dev/null 2>&1; then
+    echo "Creating docker network: $net (attachable)"
+    docker network create --driver bridge --attachable "$net"
+  else
+    # If network exists but is not attachable, warn the user.
+    local attachable
+    attachable=$(docker network inspect --format '{{.Attachable}}' "$net" 2>/dev/null || true)
+    if [ "$attachable" != "true" ]; then
+      echo "Note: existing network '$net' is not attachable. Some compose services may not be able to join it." >&2
+      echo "You can recreate it with: docker network rm $net && docker network create --driver bridge --attachable $net" >&2
+    fi
+  fi
+}
+
+ensure_dev_network
 if [ -z "${COMPOSE_CMD}" ]; then
   if command -v docker-compose >/dev/null 2>&1; then
     COMPOSE_CMD=(docker-compose)
@@ -209,11 +278,18 @@ run_up() {
       fi
     fi
     echo "--> Building images for: $file"
+    # Preserve exported env vars (like RUNECORE_MODE) for compose to pick up
     "${COMPOSE_CMD[@]}" -f "$file" build ${NO_CACHE_FLAG}
   else
     echo "--> SKIP_BUILD=1 set; skipping build for: $file"
   fi
-  "${COMPOSE_CMD[@]}" -f "$file" up -d
+  # In dev mode, enable additional compose verbosity if supported
+  if [ "$DEV_MODE" = "1" ]; then
+    echo "Running docker compose up (dev mode) for $file"
+    "${COMPOSE_CMD[@]}" -f "$file" up -d
+  else
+    "${COMPOSE_CMD[@]}" -f "$file" up -d
+  fi
 }
 
 # Wait for healthchecks exposed by compose stacks. This polls each container's
@@ -295,4 +371,59 @@ if [ "$action" = "test-ready" ]; then
     exit 3
   fi
   echo "Stacks are up and healthy."
+  
+  # Report all exposed ports
+  echo ""
+  echo "========================================"
+  echo "🚀 Available Service Ports:"
+  echo "========================================"
+  
+  # Extract and display ports from compose files
+  for cfile in "${COMPOSE_FILES[@]}"; do
+    if [ ! -f "$cfile" ]; then
+      continue
+    fi
+    if matches_filters "$cfile"; then
+      # Extract service name and ports from the compose file
+      in_ports=0
+      service_name=""
+      while IFS= read -r line || [ -n "$line" ]; do
+        # Match service names (lines ending with colon at start of line)
+        if [[ "$line" =~ ^[[:space:]]*[a-zA-Z0-9_-]+:[[:space:]]*$ ]]; then
+          service_name=$(echo "$line" | sed 's/:.*//' | xargs)
+          in_ports=0
+        fi
+        # Match ports section
+        if [[ "$line" =~ ^[[:space:]]*ports:[[:space:]]*$ ]]; then
+          in_ports=1
+          continue
+        fi
+        # Extract port mappings
+        if [ $in_ports -eq 1 ]; then
+          if [[ "$line" =~ ^[[:space:]]*-[[:space:]]*\'([0-9]+):([0-9]+)\' ]]; then
+            host_port="${BASH_REMATCH[1]}"
+            container_port="${BASH_REMATCH[2]}"
+            echo "  ✓ $service_name: localhost:$host_port (container: $container_port)"
+          elif [[ "$line" =~ ^[[:space:]]*-[[:space:]]*\"([0-9]+):([0-9]+)\" ]]; then
+            host_port="${BASH_REMATCH[1]}"
+            container_port="${BASH_REMATCH[2]}"
+            echo "  ✓ $service_name: localhost:$host_port (container: $container_port)"
+          elif [[ "$line" =~ ^[[:space:]]*-[[:space:]]*([0-9]+):([0-9]+)$ ]]; then
+            host_port="${BASH_REMATCH[1]}"
+            container_port="${BASH_REMATCH[2]}"
+            echo "  ✓ $service_name: localhost:$host_port (container: $container_port)"
+          elif [[ "$line" =~ ^[[:space:]]*[a-zA-Z] ]]; then
+            # End of ports section (new key at same indent level)
+            in_ports=0
+          fi
+        fi
+      done < "$cfile"
+    fi
+  done
+  
+  echo ""
+  echo "Frontend URLs:"
+  echo "  🌐 RuneCore AI Frontend: http://localhost:3000"
+  echo "  🌐 RuneCore Core Frontend: http://localhost:80 (or http://localhost)"
+  echo ""
 fi

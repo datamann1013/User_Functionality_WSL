@@ -1,6 +1,6 @@
 # Multi-stage Dockerfile for RuneCore Core
 # Builder stage: use official Rust image and install OpenSSL dev packages
-FROM rust:1.82-slim-bullseye as builder
+FROM runecore/rust-builder-dev:latest as builder
 
 # Install system deps and rustup so we can use a newer toolchain (nightly)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -28,6 +28,7 @@ COPY src ./src
  RUN cargo build --release
 
 # Final runtime stage
+FROM runecore/python-slim-dev:latest as runtime_base
 FROM debian:bullseye-slim
 # Ensure runtime has the OpenSSL 1.1 compatibility library used by the built binary
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl1.1 && rm -rf /var/lib/apt/lists/*

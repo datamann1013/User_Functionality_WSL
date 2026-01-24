@@ -1,4 +1,4 @@
-FROM rust:1.83-slim-bullseye as builder
+FROM runecore/rust-builder-dev:latest as builder
 WORKDIR /app
 # Copy only Cargo.toml (Cargo.lock may not exist in this workspace)
 COPY Cargo.toml ./

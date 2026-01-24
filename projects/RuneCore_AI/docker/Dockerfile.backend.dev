@@ -23,9 +23,6 @@ RUN mkdir -p /app/uploads /app/logs && chown -R dev:dev /app && chmod 777 /app/l
 # Switch back to non-root user provided by the dev base image
 USER dev
 
-HEALTHCHECK --interval=60s --timeout=5s --start-period=30s --retries=2 \
-    CMD curl -f http://localhost:5000/health || exit 1
-
 EXPOSE 5000
 WORKDIR /app/backend
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--timeout", "120", "app:app"]

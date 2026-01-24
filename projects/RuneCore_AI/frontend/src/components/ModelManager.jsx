@@ -4,7 +4,8 @@ const ModelManager = ({ isOpen, onClose }) => {
   const [availableModels, setAvailableModels] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
-  const [downloadingModels, setDownloadingModels] = useState(new Set());
+  // Map of modelName -> { progress: number (0-100)?, status: 'started'|'running'|'completed'|'failed' }
+  const [downloadingModels, setDownloadingModels] = useState({});
   const [newModelName, setNewModelName] = useState("");
 
   // API base URL
@@ -91,25 +92,97 @@ const ModelManager = ({ isOpen, onClose }) => {
   };
 
   const downloadModel = async (modelName) => {
-    if (downloadingModels.has(modelName)) return;
+    if (downloadingModels[modelName]) return;
 
-    setDownloadingModels((prev) => new Set([...prev, modelName]));
+    setDownloadingModels((prev) => ({ ...prev, [modelName]: { progress: 0, status: "started" } }));
     setError("");
 
     try {
-      const response = await fetch(
-        `${API_BASE}/api/models/download/${encodeURIComponent(modelName)}`,
-        {
-          method: "POST",
-        }
-      );
+      // Use the new model pull endpoint
+      const response = await fetch(`${API_BASE}/api/models/pull`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: modelName }),
+      });
 
       if (response.ok) {
-        // Refresh available models after download
-        await fetchAvailableModels();
-        setError(
-          `✅ Successfully downloaded ${modelName}! You can now use this model in your agents.`
-        );
+        const data = await response.json().catch(() => ({}));
+
+        // If wrapper returned started, begin polling pull status and models
+        if (data && (data.status === "started" || data.status === "running")) {
+          // mark running and poll progress until complete
+          setDownloadingModels((prev) => ({ ...prev, [modelName]: { progress: 0, status: "running" } }));
+
+          (async function pollProgress() {
+            try {
+              // Poll pull status until completed or failed, or model shows up
+              while (true) {
+                // Check if model has appeared in available models
+                const modelsResp = await fetch(`${API_BASE}/api/models`);
+                if (modelsResp.ok) {
+                  const mdata = await modelsResp.json().catch(() => ({}));
+                  const models = mdata.models || [];
+                  if (models.includes(modelName)) {
+                    // finished
+                    setDownloadingModels((prev) => {
+                      const copy = { ...prev };
+                      delete copy[modelName];
+                      return copy;
+                    });
+                    setError(`✅ Successfully downloaded ${modelName}! You can now use this model in your agents.`);
+                    await fetchAvailableModels();
+                    break;
+                  }
+                }
+
+                // Query pull status using new endpoint
+                try {
+                  const pullResp = await fetch(`${API_BASE}/api/models/pull/${encodeURIComponent(modelName)}/status`);
+                  if (pullResp.ok) {
+                    const pullData = await pullResp.json().catch(() => ({}));
+                    const prog = pullData.progress || 0;
+                    const status = pullData.status || "running";
+                    setDownloadingModels((prev) => ({ ...prev, [modelName]: { progress: prog, status } }));
+                    if (status === "completed") {
+                      setDownloadingModels((prev) => {
+                        const copy = { ...prev };
+                        delete copy[modelName];
+                        return copy;
+                      });
+                      setError(`✅ Successfully downloaded ${modelName}!`);
+                      await fetchAvailableModels();
+                      break;
+                    }
+                    if (status === "failed") {
+                      setDownloadingModels((prev) => {
+                        const copy = { ...prev };
+                        delete copy[modelName];
+                        return copy;
+                      });
+                      setError(`Failed to download ${modelName}. See logs for details.`);
+                      break;
+                    }
+                  }
+                } catch (e) {
+                  // ignore transient errors
+                }
+
+                await new Promise((res) => setTimeout(res, 2000));
+              }
+            } catch (err) {
+              setDownloadingModels((prev) => {
+                const copy = { ...prev };
+                delete copy[modelName];
+                return copy;
+              });
+              setError(`Download monitoring failed for ${modelName}`);
+            }
+          })();
+        } else {
+          // If wrapper returned non-started OK, refresh models
+          await fetchAvailableModels();
+          setError(`✅ Successfully downloaded ${modelName}! You can now use this model in your agents.`);
+        }
       } else {
         const errorData = await response.json().catch(() => ({}));
         if (response.status === 404) {
@@ -142,11 +215,7 @@ const ModelManager = ({ isOpen, onClose }) => {
         );
       }
     } finally {
-      setDownloadingModels((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(modelName);
-        return newSet;
-      });
+      // leave downloadingModels entry to be cleared by poll loop or error handling
     }
   };
 
@@ -222,7 +291,9 @@ const ModelManager = ({ isOpen, onClose }) => {
             <div className="models-grid">
               {popularModels.map((model) => {
                 const isDownloaded = availableModels.includes(model.name);
-                const isDownloading = downloadingModels.has(model.name);
+                const downloadingEntry = downloadingModels[model.name];
+                const isDownloading = !!downloadingEntry;
+                const progress = downloadingEntry ? downloadingEntry.progress || 0 : 0;
 
                 return (
                   <div
@@ -241,13 +312,17 @@ const ModelManager = ({ isOpen, onClose }) => {
                         <span className="status-badge downloaded">
                           ✅ Downloaded
                         </span>
+                      ) : isDownloading ? (
+                        <div className="download-progress">
+                          <div className="progress-bar" style={{ width: `${progress}%` }} />
+                          <div className="progress-label">{progress}%</div>
+                        </div>
                       ) : (
                         <button
                           onClick={() => downloadModel(model.name)}
-                          disabled={isDownloading}
                           className="download-btn"
                         >
-                          {isDownloading ? "⏳ Downloading..." : "📥 Download"}
+                          📥 Download
                         </button>
                       )}
                     </div>
@@ -273,7 +348,7 @@ const ModelManager = ({ isOpen, onClose }) => {
                 onClick={downloadCustomModel}
                 disabled={
                   !newModelName.trim() ||
-                  downloadingModels.has(newModelName.trim())
+                  !!downloadingModels[newModelName.trim()]
                 }
                 className="download-btn"
               >
