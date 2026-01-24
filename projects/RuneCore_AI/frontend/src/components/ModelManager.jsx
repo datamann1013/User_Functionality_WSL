@@ -98,12 +98,12 @@ const ModelManager = ({ isOpen, onClose }) => {
     setError("");
 
     try {
-      const response = await fetch(
-        `${API_BASE}/api/models/download/${encodeURIComponent(modelName)}`,
-        {
-          method: "POST",
-        }
-      );
+      // Use the new model pull endpoint
+      const response = await fetch(`${API_BASE}/api/models/pull`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: modelName }),
+      });
 
       if (response.ok) {
         const data = await response.json().catch(() => ({}));
@@ -135,9 +135,9 @@ const ModelManager = ({ isOpen, onClose }) => {
                   }
                 }
 
-                // Query pull status
+                // Query pull status using new endpoint
                 try {
-                  const pullResp = await fetch(`${API_BASE}/api/pulls/${encodeURIComponent(modelName)}`);
+                  const pullResp = await fetch(`${API_BASE}/api/models/pull/${encodeURIComponent(modelName)}/status`);
                   if (pullResp.ok) {
                     const pullData = await pullResp.json().catch(() => ({}));
                     const prog = pullData.progress || 0;
@@ -348,7 +348,7 @@ const ModelManager = ({ isOpen, onClose }) => {
                 onClick={downloadCustomModel}
                 disabled={
                   !newModelName.trim() ||
-                  downloadingModels.has(newModelName.trim())
+                  !!downloadingModels[newModelName.trim()]
                 }
                 className="download-btn"
               >

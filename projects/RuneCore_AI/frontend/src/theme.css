@@ -222,7 +222,7 @@ body {
   font-size: 1.1rem;
   text-transform: uppercase;
   flex-shrink: 0;
-  overflow: hidden;
+  overflow: visible;
   position: relative;
 }
 
@@ -262,6 +262,7 @@ body {
   height: 100%;
   object-fit: cover;
   border-radius: 50%;
+  clip-path: circle(50%);
 }
 
 .create-avatar {

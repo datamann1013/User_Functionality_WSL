@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
-AI Service Backend - Optimized with Redis Conversation Cache
+AI Service Backend - RuneCore AI with Multi-Agent Support
+
+Features:
+- Async multi-agent processing with per-agent queues
+- Conversation caching with Memory Core integration
+- Model management through Ollama
+- Rate limiting and input sanitization
+- Proper error codes following RuneGuard conventions
 """
 import os
 import json
@@ -12,7 +19,8 @@ import uuid
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-# optional integration with core
+
+# Optional integration with RuneCore Core for mTLS and service registration
 try:
     from shared_utils.core_client import CoreClient
 except Exception:
@@ -20,7 +28,6 @@ except Exception:
 
 # Import conversation cache with robust path handling
 import sys
-import os
 
 # Add backend root and cache directory to sys.path for robust import
 backend_dir = os.path.dirname(os.path.abspath(__file__))
@@ -32,54 +39,90 @@ for p in [backend_dir, project_root, cache_dir]:
 
 conversation_cache = None
 async_agent_manager = None
+model_manager = None
+rate_limiter = None
+input_sanitizer = None
 
 # Try multiple import paths and emit diagnostics if imports fail so
 # running containers don't silently fall back to the mock cache.
 import importlib
 import traceback
 
-def _try_import_cache_and_manager():
-    candidates = [
+def _try_import_modules():
+    """Import all required modules with fallback handling"""
+    global conversation_cache, async_agent_manager, model_manager, rate_limiter, input_sanitizer
+
+    # Import conversation cache
+    cache_candidates = [
         "cache.conversation_cache",
         "conversation_cache",
         "projects.RuneCore_AI.backend.cache.conversation_cache",
     ]
-    manager_candidates = [
-        "async_agent_manager",
-        "projects.RuneCore_AI.backend.async_agent_manager",
-    ]
-
-    last_exc = None
-    for mod_name in candidates:
+    for mod_name in cache_candidates:
         try:
             mod = importlib.import_module(mod_name)
             cache_obj = getattr(mod, "conversation_cache", None)
             if cache_obj is not None:
-                return cache_obj, None
+                conversation_cache = cache_obj
+                print(f"[IABC01] Conversation cache loaded from {mod_name}")
+                break
         except Exception as e:
-            last_exc = e
             print(f"[IMPORT_DEBUG] Failed to import {mod_name}: {e}")
-            traceback.print_exc()
 
-    # Try manager imports separately
-    for mname in manager_candidates:
+    # Import async agent manager
+    manager_candidates = [
+        "async_agent_manager",
+        "projects.RuneCore_AI.backend.async_agent_manager",
+    ]
+    for mod_name in manager_candidates:
         try:
-            mgr_mod = importlib.import_module(mname)
-            mgr = getattr(mgr_mod, "async_agent_manager", None)
+            mod = importlib.import_module(mod_name)
+            mgr = getattr(mod, "async_agent_manager", None)
             if mgr is not None:
-                # Attach manager if we find it later below
-                pass
-        except Exception:
-            pass
+                async_agent_manager = mgr
+                print(f"[IABA02] Async agent manager loaded from {mod_name}")
+                break
+        except Exception as e:
+            print(f"[IMPORT_DEBUG] Failed to import async_agent_manager from {mod_name}: {e}")
 
-    return None, last_exc
+    # Import model manager
+    model_candidates = [
+        "model_manager",
+        "projects.RuneCore_AI.backend.model_manager",
+    ]
+    for mod_name in model_candidates:
+        try:
+            mod = importlib.import_module(mod_name)
+            mgr = getattr(mod, "model_manager", None)
+            if mgr is not None:
+                model_manager = mgr
+                print(f"[IABM01] Model manager loaded from {mod_name}")
+                break
+        except Exception as e:
+            print(f"[IMPORT_DEBUG] Failed to import model_manager from {mod_name}: {e}")
+
+    # Import security module
+    security_candidates = [
+        "security",
+        "projects.RuneCore_AI.backend.security",
+    ]
+    for mod_name in security_candidates:
+        try:
+            mod = importlib.import_module(mod_name)
+            rate_limiter = getattr(mod, "rate_limiter", None)
+            input_sanitizer = getattr(mod, "input_sanitizer", None)
+            if rate_limiter and input_sanitizer:
+                print(f"[IABS01] Security module loaded from {mod_name}")
+                break
+        except Exception as e:
+            print(f"[IMPORT_DEBUG] Failed to import security from {mod_name}: {e}")
 
 
-cache_obj, import_exc = _try_import_cache_and_manager()
-if cache_obj is not None:
-    conversation_cache = cache_obj
-else:
-    # Create mock classes for testing environments if import failed
+# Try to import all modules
+_try_import_modules()
+
+# Create mock classes for testing environments if imports failed
+if conversation_cache is None:
     class MockConversationCache:
         def get_cache_stats(self):
             return {
@@ -93,13 +136,8 @@ else:
             return []
 
         def format_chat_history_to_string(self, history):
-            """
-            Minimal string formatter for mock cache so debug payloads include
-            the user's message when the real cache implementation isn't available.
-            """
             if not history:
                 return ""
-
             formatted_lines = []
             for message in history:
                 role = message.get("role", "")
@@ -110,7 +148,6 @@ else:
                     formatted_lines.append(f"User: {content}")
                 elif role == "assistant":
                     formatted_lines.append(f"Assistant: {content}")
-
             return "\n\n".join(formatted_lines)
 
         def get_full_conversation(self, agent_id):
@@ -122,10 +159,12 @@ else:
         def get_conversation_context(self, agent_id):
             return []
 
+    conversation_cache = MockConversationCache()
+    print("[WABC02] Using mock conversation cache")
+
+if async_agent_manager is None:
     class MockAsyncAgentManager:
-        async def submit_request(
-            self, agent_id, user_id, message, priority=0, timeout=None
-        ):
+        async def submit_request(self, agent_id, user_id, message, priority=0, timeout=None):
             return "mock_request_id"
 
         async def get_response(self, request_id):
@@ -140,8 +179,11 @@ else:
         def get_stats(self):
             return {"mock": True}
 
-    conversation_cache = MockConversationCache()
+        def update_agent_config(self, agent_id, config):
+            pass
+
     async_agent_manager = MockAsyncAgentManager()
+    print("[WABA01] Using mock async agent manager")
 
 app = Flask(__name__)
 CORS(app)
@@ -376,7 +418,7 @@ def get_agents():
             return jsonify({"agents": agents, "count": len(agents)})
     except Exception as e:
         # Fall back to static data and log
-        log_error("DB_LIST_AGENTS_ERROR", str(e))
+        log_error("EAB#02", str(e))
 
     return jsonify(AGENTS_DATA)
 
@@ -437,7 +479,7 @@ def create_agent():
 
         # Log creation event
         try:
-            log_error("AGENT_CREATED", f"Agent created: {new_agent['id']}", {"service": "ai_service", "agent": new_agent['id']})
+            log_error("IAB#03", f"Agent created: {new_agent['id']}", {"service": "ai_service", "agent": new_agent['id']})
         except Exception:
             pass
 
@@ -449,7 +491,7 @@ def create_agent():
 
         return jsonify(new_agent), 201
     except Exception as e:
-        log_error("AGENT_CREATE_FAILED", str(e))
+        log_error("EAB#03", str(e))
         return jsonify({"error": "Failed to create agent", "message": str(e)}), 500
 
 
@@ -535,7 +577,7 @@ def create_agent_endpoint():
         return jsonify(agent), 201
 
     except Exception as e:
-        log_error("CREATE_AGENT_ERROR", str(e))
+        log_error("EAB#03", str(e))
         return jsonify({"error": "Failed to create agent", "details": str(e)}), 500
 
 
@@ -590,7 +632,7 @@ def get_agent_conversations(agent_id):
         return jsonify(resp)
 
     except Exception as e:
-        log_error("CACHE_ERROR", str(e))
+        log_error("EABC01", str(e))
         return (
             jsonify(
                 {
@@ -625,7 +667,7 @@ def update_agent(agent_id):
 
             return jsonify({"error": "Agent not found"}), 404
         except Exception as e:
-            log_error("UPDATE_AGENT_ERROR", str(e))
+            log_error("EAB#04", str(e))
             return jsonify({"error": "Failed to update agent", "details": str(e)}), 500
 
 
@@ -647,7 +689,7 @@ def delete_agent(agent_id):
             AGENTS_DATA["count"] = len(new_agents)
             return jsonify({"status": "deleted"})
         except Exception as e:
-            log_error("DELETE_AGENT_ERROR", str(e))
+            log_error("EAB#05", str(e))
             return jsonify({"error": "Failed to delete agent", "details": str(e)}), 500
 
 
@@ -665,14 +707,33 @@ def health():
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
-    """Optimized chat endpoint with conversation cache and context"""
+    """Chat endpoint with conversation cache, rate limiting, and input sanitization"""
     try:
         data = request.get_json() or {}
         message = data.get("message", "").strip()
         agent_id = data.get("agent_id", "assistant-1")
 
         if not message:
-            return jsonify({"error": "Message is required"}), 400
+            return jsonify({"error": "Message is required", "error_code": "EABB06"}), 400
+
+        # Rate limiting check
+        if rate_limiter:
+            allowed, error_msg = rate_limiter.check_rate_limit(agent_id)
+            if not allowed:
+                log_error("EABS01", error_msg, {"agent_id": agent_id})
+                return jsonify({
+                    "error": "Rate limit exceeded",
+                    "error_code": "EABS01",
+                    "message": error_msg,
+                }), 429
+
+        # Input sanitization
+        if input_sanitizer:
+            message, warnings = input_sanitizer.sanitize_message(message)
+            for warning in warnings:
+                log_error("WABS01", warning, {"agent_id": agent_id})
+            if not message:
+                return jsonify({"error": "Message is empty after sanitization", "error_code": "EABS02"}), 400
 
         # Get conversation context from cache as structured format
         chat_history = conversation_cache.format_context_for_ai(agent_id)
@@ -977,8 +1038,7 @@ def chat():
         except Exception as e:
             # Log and print the exception for debugging; then return a
             # standardized 503 so the frontend can react to upstream failures.
-            log_error("OLLAMA_ERROR", str(e))
-            log_error("OLLAMA_CONNECTION_ERROR", str(e))
+            log_error("EABB05", str(e))
             try:
                 print(f"[AI_EXCEPTION] chat handler exception: {str(e)}")
             except Exception:
@@ -999,10 +1059,10 @@ def chat():
         # Store conversation in cache
         try:
             conversation_cache.add_conversation(agent_id, message, ai_response)
-            log_error("CACHE_SUCCESS", f"Conversation cached for agent {agent_id}")
+            log_error("IABC02", f"Conversation cached for agent {agent_id}")
         except Exception as cache_error:
             log_error(
-                "CACHE_ERROR", f"Failed to cache conversation: {str(cache_error)}"
+                "EABC02", f"Failed to cache conversation: {str(cache_error)}"
             )
             # Continue anyway - caching failure shouldn't break the response
 
@@ -1027,7 +1087,7 @@ def chat():
             pass
 
     except Exception as e:
-        log_error("CHAT_ERROR", str(e))
+        log_error("EABB05", str(e))
         return jsonify({"error": "Chat failed"}), 500
 
 
@@ -1174,15 +1234,39 @@ def submit_async_chat():
     User can then poll for the response using the request_id
     """
     try:
-        data = request.json
-        message = data.get("message", "")
+        data = request.json or {}
+        message = data.get("message", "").strip()
         agent_id = data.get("agent_id", "71dc06c0-7b49-4a7d-9afb-a2d7fdcde53b")
         user_id = data.get("user_id", "anonymous")
         priority = data.get("priority", 0)
         timeout = data.get("timeout", 60.0)
 
         if not message:
-            return jsonify({"error": "Message is required"}), 400
+            return jsonify({"error": "Message is required", "error_code": "EABB06"}), 400
+
+        # Rate limiting check
+        if rate_limiter:
+            allowed, error_msg = rate_limiter.check_rate_limit(agent_id)
+            if not allowed:
+                log_error("EABS01", error_msg, {"agent_id": agent_id})
+                return jsonify({
+                    "error": "Rate limit exceeded",
+                    "error_code": "EABS01",
+                    "message": error_msg,
+                }), 429
+
+        # Input sanitization
+        if input_sanitizer:
+            message, warnings = input_sanitizer.sanitize_message(message)
+            for warning in warnings:
+                log_error("WABS01", warning, {"agent_id": agent_id})
+            if not message:
+                return jsonify({"error": "Message is empty after sanitization", "error_code": "EABS02"}), 400
+
+        # Update agent config in async manager
+        agent_config = next((a for a in AGENTS_DATA["agents"] if a["id"] == agent_id), None)
+        if agent_config and async_agent_manager:
+            async_agent_manager.update_agent_config(agent_id, agent_config)
 
         # Submit async request
         loop = asyncio.new_event_loop()
@@ -1220,8 +1304,8 @@ def submit_async_chat():
             loop.close()
 
     except Exception as e:
-        log_error("ASYNC_CHAT_SUBMIT_ERROR", str(e))
-        return jsonify({"error": "Failed to submit async request"}), 500
+        log_error("EABA07", str(e))
+        return jsonify({"error": "Failed to submit async request", "error_code": "EABA07"}), 500
 
 
 @app.route("/api/chat/async/<request_id>", methods=["GET"])
@@ -1290,7 +1374,7 @@ def get_async_response(request_id):
             loop.close()
 
     except Exception as e:
-        log_error("ASYNC_CHAT_GET_ERROR", str(e))
+        log_error("EABA05", str(e))
         return jsonify({"error": "Failed to get async response"}), 500
 
 
@@ -1357,7 +1441,7 @@ def submit_batch_requests():
             loop.close()
 
     except Exception as e:
-        log_error("ASYNC_BATCH_SUBMIT_ERROR", str(e))
+        log_error("EABA07", str(e))
         return jsonify({"error": "Failed to submit batch requests"}), 500
 
 
@@ -1435,7 +1519,7 @@ def get_batch_status():
             loop.close()
 
     except Exception as e:
-        log_error("ASYNC_BATCH_STATUS_ERROR", str(e))
+        log_error("EABA05", str(e))
         return jsonify({"error": "Failed to get batch status"}), 500
 
 
@@ -1455,19 +1539,212 @@ def get_async_stats():
         )
 
     except Exception as e:
-        log_error("ASYNC_STATS_ERROR", str(e))
-        return jsonify({"error": "Failed to get stats"}), 500
+        log_error("EABA07", str(e))
+        return jsonify({"error": "Failed to get stats", "error_code": "EABA07"}), 500
+
+
+# === MODEL MANAGEMENT ENDPOINTS ===
+
+
+@app.route("/api/models", methods=["GET"])
+def list_models():
+    """List all available models from Ollama"""
+    try:
+        if model_manager:
+            models = model_manager.list_models()
+            return jsonify({
+                "models": [{"name": m.name, "size": m.size, "modified_at": m.modified_at} for m in models],
+                "count": len(models),
+                "timestamp": datetime.now().isoformat(),
+            })
+        else:
+            # Fallback: direct call to ollama service
+            try:
+                response = requests.get(f"{OLLAMA_SERVICE_URL}/api/models", timeout=10)
+                if response.status_code == 200:
+                    return jsonify(response.json())
+                return jsonify({"models": [], "error": "Failed to fetch models"}), 503
+            except Exception as e:
+                return jsonify({"models": [], "error": str(e), "error_code": "EABM01"}), 503
+    except Exception as e:
+        log_error("EABM01", str(e))
+        return jsonify({"error": "Failed to list models", "error_code": "EABM01"}), 500
+
+
+@app.route("/api/models/<path:model_name>", methods=["GET"])
+def get_model_info(model_name):
+    """Get detailed information about a specific model"""
+    try:
+        # Validate model name
+        if input_sanitizer:
+            valid, error = input_sanitizer.validate_model_name(model_name)
+            if not valid:
+                return jsonify({"error": error, "error_code": "EABM05"}), 400
+
+        if model_manager:
+            model = model_manager.get_model(model_name)
+            if model:
+                details = model_manager.get_model_details(model_name)
+                return jsonify({
+                    "name": model.name,
+                    "size": model.size,
+                    "modified_at": model.modified_at,
+                    "details": details,
+                    "available": True,
+                })
+            return jsonify({"error": "Model not found", "error_code": "EABM04"}), 404
+        else:
+            return jsonify({"error": "Model manager not available", "error_code": "EABM01"}), 503
+    except Exception as e:
+        log_error("EABM01", str(e))
+        return jsonify({"error": str(e), "error_code": "EABM01"}), 500
+
+
+@app.route("/api/models/pull", methods=["POST"])
+def pull_model():
+    """Initiate a model download/pull"""
+    try:
+        data = request.get_json() or {}
+        model_name = data.get("name") or data.get("model")
+
+        if not model_name:
+            return jsonify({"error": "Model name is required", "error_code": "EABM05"}), 400
+
+        # Validate model name
+        if input_sanitizer:
+            valid, error = input_sanitizer.validate_model_name(model_name)
+            if not valid:
+                return jsonify({"error": error, "error_code": "EABM05"}), 400
+
+        if model_manager:
+            status = model_manager.pull_model(model_name)
+            return jsonify({
+                "model": status.model,
+                "status": status.status,
+                "progress": status.progress,
+                "started_at": status.started_at,
+                "message": f"Pull initiated for {model_name}",
+            })
+        else:
+            # Fallback: direct call
+            try:
+                response = requests.post(
+                    f"{OLLAMA_SERVICE_URL}/api/pull",
+                    json={"name": model_name},
+                    timeout=10
+                )
+                if response.status_code in (200, 202):
+                    return jsonify({"status": "started", "model": model_name})
+                return jsonify({"error": "Failed to initiate pull", "error_code": "EABM03"}), 503
+            except Exception as e:
+                return jsonify({"error": str(e), "error_code": "EABM03"}), 503
+    except Exception as e:
+        log_error("EABM03", str(e))
+        return jsonify({"error": str(e), "error_code": "EABM03"}), 500
+
+
+@app.route("/api/models/pull/<path:model_name>/status", methods=["GET"])
+def get_pull_status(model_name):
+    """Get the status of a model pull operation"""
+    try:
+        if model_manager:
+            status = model_manager.get_pull_status(model_name)
+            if status:
+                return jsonify({
+                    "model": status.model,
+                    "status": status.status,
+                    "progress": status.progress,
+                    "started_at": status.started_at,
+                    "last_update": status.last_update,
+                    "error": status.error,
+                })
+            return jsonify({"error": "No active pull for this model", "error_code": "WABM03"}), 404
+        else:
+            return jsonify({"error": "Model manager not available", "error_code": "EABM01"}), 503
+    except Exception as e:
+        return jsonify({"error": str(e), "error_code": "EABM01"}), 500
+
+
+@app.route("/api/models/pulls", methods=["GET"])
+def list_active_pulls():
+    """List all active model pull operations"""
+    try:
+        if model_manager:
+            pulls = model_manager.list_active_pulls()
+            return jsonify({
+                "pulls": {
+                    name: {
+                        "status": s.status,
+                        "progress": s.progress,
+                        "started_at": s.started_at,
+                    }
+                    for name, s in pulls.items()
+                },
+                "count": len(pulls),
+            })
+        else:
+            return jsonify({"pulls": {}, "count": 0})
+    except Exception as e:
+        return jsonify({"error": str(e), "error_code": "EABM01"}), 500
+
+
+@app.route("/api/models/<path:model_name>", methods=["DELETE"])
+def delete_model(model_name):
+    """Delete a model from Ollama"""
+    try:
+        # Validate model name
+        if input_sanitizer:
+            valid, error = input_sanitizer.validate_model_name(model_name)
+            if not valid:
+                return jsonify({"error": error, "error_code": "EABM05"}), 400
+
+        if model_manager:
+            success = model_manager.delete_model(model_name)
+            if success:
+                return jsonify({"status": "deleted", "model": model_name})
+            return jsonify({"error": "Failed to delete model", "error_code": "EABM02"}), 500
+        else:
+            return jsonify({"error": "Model manager not available", "error_code": "EABM01"}), 503
+    except Exception as e:
+        log_error("EABM02", str(e))
+        return jsonify({"error": str(e), "error_code": "EABM02"}), 500
+
+
+@app.route("/api/models/stats", methods=["GET"])
+def get_model_stats():
+    """Get model manager statistics"""
+    try:
+        if model_manager:
+            return jsonify(model_manager.get_stats())
+        return jsonify({"error": "Model manager not available", "error_code": "EABM01"}), 503
+    except Exception as e:
+        return jsonify({"error": str(e), "error_code": "EABM01"}), 500
+
+
+# === RATE LIMITING ENDPOINT ===
+
+
+@app.route("/api/rate_limit/stats", methods=["GET"])
+def get_rate_limit_stats():
+    """Get rate limiting statistics"""
+    try:
+        agent_id = request.args.get("agent_id")
+        if rate_limiter:
+            return jsonify(rate_limiter.get_stats(agent_id))
+        return jsonify({"error": "Rate limiter not available"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
     print(
-        "🤖 AI Service Backend Starting with Redis Conversation Cache & Async Multi-Agent System"
+        "🤖 RuneCore AI Service Starting - Multi-Agent System with Model Management"
     )
 
     # Print cache configuration
     cache_status = conversation_cache.get_cache_stats()
     print(
-        f"💾 Cache Status: {'Redis' if cache_status['using_redis'] else 'Fallback Dict'}"
+        f"💾 Cache Status: {'Memory Core Redis' if cache_status['using_redis'] else 'Fallback (in-memory)'}"
     )
     print(f"📝 Message Limit: {cache_status['message_limit']} per agent")
     print(f"🧠 Context Size: {cache_status['context_size']} messages for AI")
@@ -1478,13 +1755,38 @@ if __name__ == "__main__":
         f"⚡ Async System: {'Available' if not async_stats.get('mock') else 'Mock Mode'}"
     )
 
+    # Print model manager info
+    if model_manager:
+        model_stats = model_manager.get_stats()
+        print(f"📦 Model Manager: {model_stats['total_models']} models available")
+    else:
+        print("📦 Model Manager: Using direct Ollama calls")
+
+    # Print security info
+    if rate_limiter and input_sanitizer:
+        print("🔒 Security: Rate limiting and input sanitization enabled")
+    else:
+        print("🔒 Security: Basic mode (no rate limiting)")
+
     port = int(os.environ.get("PORT", 5000))
     print(f"🌐 Starting server on port {port}")
-    print("📡 Async Endpoints Available:")
-    print("   POST /api/chat/async - Submit async request (returns request_id)")
-    print("   GET  /api/chat/async/<request_id> - Poll for response")
-    print("   POST /api/chat/async/batch - Submit multiple requests")
-    print("   POST /api/chat/async/batch/status - Check batch status")
-    print("   GET  /api/chat/async/stats - System statistics")
+    print("")
+    print("📡 Available Endpoints:")
+    print("  Chat:")
+    print("    POST /api/chat - Synchronous chat")
+    print("    POST /api/chat/async - Submit async request")
+    print("    GET  /api/chat/async/<id> - Poll for response")
+    print("    POST /api/chat/async/batch - Submit multiple requests")
+    print("  Models:")
+    print("    GET  /api/models - List available models")
+    print("    POST /api/models/pull - Download a model")
+    print("    DELETE /api/models/<name> - Delete a model")
+    print("  Agents:")
+    print("    GET/POST /api/agents - List/create agents")
+    print("    PUT/DELETE /api/agents/<id> - Update/delete agent")
+    print("")
+
+    # Attempt registration with RuneCore Core if configured
+    maybe_register_with_core()
 
     app.run(host="0.0.0.0", port=port, debug=False)  # nosec B104
