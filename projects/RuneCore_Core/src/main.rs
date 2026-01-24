@@ -1,4 +1,4 @@
-use axum::{extract::State, response::Json, routing::{get, post}, Router, body::Bytes};
+use axum::{extract::State, response::Json, routing::{get, post}, Router, body::Bytes, extract::Path as AxumPath};
 use axum::http::HeaderMap;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,7 @@ mod diag;
 mod ca;
 mod db;
 mod cli;
+mod proxy;
 
 #[derive(Clone)]
 struct AppState {
@@ -25,6 +26,12 @@ struct ServiceInfo {
     ws_url: Option<String>,
     rest_url: Option<String>,
     public_key_pem: Option<String>,
+    #[serde(default)]
+    dependencies: Vec<String>,
+    #[serde(default)]
+    wishlist: Vec<String>,
+    #[serde(default)]
+    container_name: Option<String>,
 }
 
 #[tokio::main]
@@ -79,7 +86,10 @@ async fn main() -> anyhow::Result<()> {
         .route("/health", get(health))
         .route("/api/v1/services/register", post(register_service))
         .route("/api/v1/services", get(get_services))
+        .route("/api/v1/services/query", get(proxy::query_service))
+        .route("/api/v1/services/heartbeat", post(heartbeat_service))
         .route("/api/v1/pki/sign", post(sign_csr))
+        .route("/api/proxy/*path", axum::routing::any(proxy_route_handler))
         .with_state(state);
 
     // Load server cert & key and start TLS server
@@ -202,6 +212,25 @@ async fn register_service(State(state): State<AppState>, headers: HeaderMap, bod
     if info.id.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
         info.id = Some(uuid::Uuid::new_v4().to_string());
     }
+
+    // Validate dependencies (check for cycles and missing services)
+    let dependencies_json = serde_json::to_string(&info.dependencies).unwrap_or_else(|_| "[]".to_string());
+    let wishlist_json = serde_json::to_string(&info.wishlist).unwrap_or_else(|_| "[]".to_string());
+
+    // Check each dependency exists in registry
+    let mut missing_deps = Vec::new();
+    let mut available_deps = Vec::new();
+    for dep in &info.dependencies {
+        match db::get_service_by_name(&state.db, dep).await {
+            Ok(Some(svc)) if svc.status == "running" || svc.status == "limb_mode" => {
+                available_deps.push(dep.clone());
+            }
+            _ => {
+                missing_deps.push(dep.clone());
+            }
+        }
+    }
+
     let row = db::ServiceRow {
         id: info.id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         name: info.name.clone(),
@@ -209,14 +238,30 @@ async fn register_service(State(state): State<AppState>, headers: HeaderMap, bod
         ws_url: info.ws_url.clone(),
         rest_url: info.rest_url.clone(),
         public_key_pem: info.public_key_pem.clone(),
+        dependencies: dependencies_json,
+        wishlist: wishlist_json,
+        container_name: info.container_name.clone(),
+        status: if missing_deps.is_empty() { "running".to_string() } else { "limb_mode".to_string() },
+        last_seen: chrono::Utc::now().timestamp(),
+        offline_since: None,
     };
+
     if let Err(e) = db::insert_service(&state.db, &row).await {
         // Report DB insert failure to ErrorLogger for diagnostics
         let _ = diag::report_error_sync(&format!("db insert error: {}", e), None);
         return Json(serde_json::json!({"ok": false, "error": format!("db error: {}", e)}));
     }
-    tracing::info!("register_service succeeded: id={}", info.id.clone().unwrap_or_default());
-    Json(serde_json::json!({"ok": true, "service_id": info.id}))
+
+    tracing::info!("register_service succeeded: id={}, status={}", info.id.clone().unwrap_or_default(), row.status);
+    
+    Json(serde_json::json!({
+        "ok": true,
+        "registered": true,
+        "service_id": info.id,
+        "status": row.status,
+        "missing_dependencies": missing_deps,
+        "available_dependencies": available_deps,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -239,3 +284,67 @@ async fn get_services(State(state): State<AppState>) -> Json<serde_json::Value> 
         Err(e) => Json(serde_json::json!({"ok": false, "error": format!("db error: {}", e)})),
     }
 }
+
+#[derive(Deserialize)]
+struct HeartbeatRequest {
+    name: String,
+    #[serde(default = "default_status")]
+    status: String,
+    #[serde(default)]
+    metadata: Option<serde_json::Value>,
+}
+
+fn default_status() -> String {
+    "healthy".to_string()
+}
+
+async fn heartbeat_service(State(state): State<AppState>, Json(payload): Json<HeartbeatRequest>) -> Json<serde_json::Value> {
+    tracing::debug!("heartbeat from service: {}, status: {}", payload.name, payload.status);
+    
+    match db::update_service_heartbeat(&state.db, &payload.name, &payload.status).await {
+        Ok(_) => Json(serde_json::json!({"ok": true})),
+        Err(e) => {
+            tracing::error!("failed to update heartbeat for {}: {}", payload.name, e);
+            Json(serde_json::json!({"ok": false, "error": format!("db error: {}", e)}))
+        }
+    }
+}
+
+// Route handler that extracts service name and path from wildcard route
+async fn proxy_route_handler(
+    state: State<AppState>,
+    req: axum::extract::Request,
+) -> impl axum::response::IntoResponse {
+    let path = req.uri().path();
+    
+    // Extract service name and remaining path from /api/proxy/{service}/{path}
+    let parts: Vec<&str> = path.trim_start_matches("/api/proxy/").split('/').collect();
+    if parts.is_empty() || parts[0].is_empty() {
+        return (axum::http::StatusCode::BAD_REQUEST, "Missing service name").into_response();
+    }
+    
+    let service_name = parts[0].to_string();
+    let remaining_path = if parts.len() > 1 {
+        parts[1..].join("/")
+    } else {
+        String::new()
+    };
+    
+    tracing::debug!("proxy route: service={}, path={}", service_name, remaining_path);
+    
+    // Extract headers and body
+    let (parts, body) = req.into_parts();
+    let headers = parts.headers;
+    
+    // Call proxy handler
+    match proxy::proxy_handler(
+        state,
+        AxumPath((service_name.clone(), remaining_path.clone())),
+        headers,
+        body,
+    ).await {
+        Ok(response) => response.into_response(),
+        Err((status, msg)) => (status, msg).into_response(),
+    }
+}
+
