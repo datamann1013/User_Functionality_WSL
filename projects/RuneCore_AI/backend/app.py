@@ -26,6 +26,13 @@ try:
 except Exception:
     CoreClient = None
 
+# Import service discovery and integrated mode support
+try:
+    import service_discovery
+except ImportError as e:
+    print(f"[WAFX07] Service discovery module not available: {e}")
+    service_discovery = None
+
 # Import conversation cache with robust path handling
 import sys
 
@@ -705,6 +712,117 @@ def health():
     )
 
 
+@app.route("/api/internal/dependency_available", methods=["POST"])
+def dependency_available():
+    """
+    Called by Core when a missing dependency becomes available.
+    Triggers reconnection and syncs limb mode data if applicable.
+    """
+    try:
+        data = request.get_json() or {}
+        service_name = data.get("service_name")
+        
+        if not service_name:
+            return jsonify({"error": "service_name required"}), 400
+        
+        print(f"[DEPENDENCY] Notified that {service_name} is available")
+        
+        # If we're in limb mode and service_discovery is available
+        if service_discovery and service_discovery.LIMB_MODE:
+            # Wait random delay (0-5s) to avoid thundering herd
+            import random
+            import time
+            delay = random.uniform(0, 5)
+            print(f"[DEPENDENCY] Waiting {delay:.1f}s before reconnect attempt")
+            time.sleep(delay)
+            
+            # Try to re-register with Core
+            try:
+                standalone, integrated, limb = service_discovery.detect_mode()
+                
+                if integrated:
+                    # Successfully transitioned to integrated mode!
+                    print("[DEPENDENCY] Successfully transitioned to integrated mode")
+                    
+                    # Sync limb storage to CoreMemoryAPI if it's the Memory service
+                    if service_name == "CoreMemoryAPI":
+                        limb_storage = service_discovery.get_limb_storage()
+                        if limb_storage:
+                            # Get all agents with local data
+                            all_agents = limb_storage.get_all_agent_ids()
+                            synced_count = 0
+                            
+                            for agent_id in all_agents:
+                                conversations = limb_storage.get_last_n_conversations(agent_id, 10)
+                                
+                                # Send to CoreMemoryAPI via Core proxy
+                                try:
+                                    memory_url = service_discovery.get_service_url("CoreMemoryAPI")
+                                    if memory_url:
+                                        # Batch upload conversations
+                                        for conv in conversations:
+                                            payload = {
+                                                "agent_id": agent_id,
+                                                "user_message": conv.get("user_message"),
+                                                "ai_response": conv.get("ai_response"),
+                                                "timestamp": conv.get("timestamp"),
+                                                "synced_from_limb": True
+                                            }
+                                            requests.post(
+                                                f"{memory_url}/api/conversations/store",
+                                                json=payload,
+                                                timeout=10
+                                            )
+                                        
+                                        synced_count += len(conversations)
+                                        print(f"[LIMB_SYNC] Synced {len(conversations)} conversations for agent {agent_id}")
+                                except Exception as sync_error:
+                                    print(f"[LIMB_SYNC] Failed to sync agent {agent_id}: {sync_error}")
+                            
+                            print(f"[LIMB_SYNC] Total synced: {synced_count} conversations")
+                            
+                            # Clear local limb storage after successful sync
+                            limb_storage.clear_all()
+                            
+                    # Start heartbeat thread if not already running
+                    service_discovery.start_heartbeat_thread()
+                    
+                    return jsonify({
+                        "status": "transitioned_to_integrated",
+                        "service": service_name
+                    }), 200
+                elif limb:
+                    print(f"[DEPENDENCY] Still in limb mode after {service_name} available")
+                    return jsonify({
+                        "status": "still_limb_mode",
+                        "service": service_name
+                    }), 200
+                else:
+                    print(f"[DEPENDENCY] Now in standalone mode")
+                    return jsonify({
+                        "status": "standalone_mode",
+                        "service": service_name
+                    }), 200
+                    
+            except Exception as e:
+                print(f"[DEPENDENCY] Reconnect failed: {e}")
+                return jsonify({
+                    "status": "reconnect_failed",
+                    "error": str(e)
+                }), 500
+        else:
+            # Not in limb mode, just acknowledge
+            return jsonify({
+                "status": "acknowledged",
+                "service": service_name,
+                "current_mode": "integrated" if service_discovery and service_discovery.INTEGRATION_MODE else "standalone"
+            }), 200
+            
+    except Exception as e:
+        log_error("EABB08", f"Dependency notification failed: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/chat", methods=["POST"])
 def chat():
     """Chat endpoint with conversation cache, rate limiting, and input sanitization"""
@@ -1056,7 +1174,8 @@ def chat():
             print(f"[CHAT_RESP] agent_id={agent_id} response_preview='{str(ai_response)[:200]}'")
         except Exception:
             pass
-        # Store conversation in cache
+        
+        # Store conversation in cache (integrated/standalone mode)
         try:
             conversation_cache.add_conversation(agent_id, message, ai_response)
             log_error("IABC02", f"Conversation cached for agent {agent_id}")
@@ -1065,6 +1184,16 @@ def chat():
                 "EABC02", f"Failed to cache conversation: {str(cache_error)}"
             )
             # Continue anyway - caching failure shouldn't break the response
+        
+        # Store in limb mode local storage if in limb mode
+        if service_discovery and service_discovery.LIMB_MODE:
+            try:
+                limb_storage = service_discovery.get_limb_storage()
+                if limb_storage:
+                    limb_storage.store_conversation(agent_id, message, ai_response)
+                    print(f"[LIMB] Stored conversation for agent {agent_id}")
+            except Exception as limb_error:
+                log_error("EABB07", f"Failed to store in limb storage: {str(limb_error)}")
 
         # Return response
         return jsonify(
@@ -1741,10 +1870,30 @@ if __name__ == "__main__":
         "🤖 RuneCore AI Service Starting - Multi-Agent System with Model Management"
     )
 
+    # Detect operation mode and register with Core if available
+    if service_discovery:
+        print("\n🔍 Detecting operation mode...")
+        standalone, integrated, limb = service_discovery.detect_mode()
+        
+        if standalone:
+            print("📍 Mode: STANDALONE (no Core integration)")
+        elif limb:
+            print("⚠️  Mode: LIMB (missing dependencies, using local storage)")
+            print(f"💾 Local storage: {service_discovery.LOCAL_DB_PATH}")
+        else:
+            print("✅ Mode: INTEGRATED (fully connected to Core)")
+        
+        # Start heartbeat thread if in integrated mode
+        if integrated:
+            service_discovery.start_heartbeat_thread()
+            print("💓 Heartbeat thread started")
+    else:
+        print("📍 Mode: STANDALONE (service discovery not available)")
+
     # Print cache configuration
     cache_status = conversation_cache.get_cache_stats()
     print(
-        f"💾 Cache Status: {'Memory Core Redis' if cache_status['using_redis'] else 'Fallback (in-memory)'}"
+        f"\n💾 Cache Status: {'Memory Core Redis' if cache_status['using_redis'] else 'Fallback (in-memory)'}"
     )
     print(f"📝 Message Limit: {cache_status['message_limit']} per agent")
     print(f"🧠 Context Size: {cache_status['context_size']} messages for AI")
@@ -1769,7 +1918,7 @@ if __name__ == "__main__":
         print("🔒 Security: Basic mode (no rate limiting)")
 
     port = int(os.environ.get("PORT", 5000))
-    print(f"🌐 Starting server on port {port}")
+    print(f"\n🌐 Starting server on port {port}")
     print("")
     print("📡 Available Endpoints:")
     print("  Chat:")

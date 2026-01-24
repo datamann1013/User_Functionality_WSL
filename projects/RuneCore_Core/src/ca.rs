@@ -75,7 +75,7 @@ fn derive_key(passphrase: &str) -> [u8; 32] {
     derived
 }
 
-fn load_encrypted_key(data_dir: &str, passphrase: &str) -> Result<Vec<u8>> {
+pub fn load_encrypted_key(data_dir: &str, passphrase: &str) -> Result<Vec<u8>> {
     let key_path = Path::new(data_dir).join("ca_key.enc");
     let content = fs::read_to_string(key_path)?;
     let parts: Vec<&str> = content.split(':').collect();

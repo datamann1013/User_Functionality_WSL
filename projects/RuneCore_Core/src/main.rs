@@ -10,6 +10,7 @@ mod ca;
 mod db;
 mod cli;
 mod proxy;
+mod crl;
 
 #[derive(Clone)]
 struct AppState {
@@ -56,6 +57,10 @@ async fn main() -> anyhow::Result<()> {
     };
 
     ca::init_ca(&data_dir, &passphrase).expect("Failed to initialize CA");
+    
+    // Initialize CRL
+    let crl_manager = crl::CrlManager::new(&data_dir);
+    crl_manager.init_crl(&passphrase).expect("Failed to initialize CRL");
 
     // Initialize tracing (configurable through RUST_LOG). Also install a panic hook to send
     // fatal errors to the ErrorLogger service so we can diagnose crashes in containers.
@@ -89,6 +94,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/services/query", get(proxy::query_service))
         .route("/api/v1/services/heartbeat", post(heartbeat_service))
         .route("/api/v1/pki/sign", post(sign_csr))
+        .route("/api/v1/pki/renew", post(renew_certificate))
+        .route("/api/v1/pki/revoke", post(revoke_certificate))
+        .route("/api/v1/pki/crl", get(get_crl))
         .route("/api/proxy/*path", axum::routing::any(proxy_route_handler))
         .with_state(state);
 
@@ -306,6 +314,120 @@ async fn heartbeat_service(State(state): State<AppState>, Json(payload): Json<He
         Err(e) => {
             tracing::error!("failed to update heartbeat for {}: {}", payload.name, e);
             Json(serde_json::json!({"ok": false, "error": format!("db error: {}", e)}))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct RenewCertRequest {
+    service_name: String,
+    container_name: String,
+    old_serial: String,
+    csr_pem: String,
+}
+
+async fn renew_certificate(State(state): State<AppState>, Json(payload): Json<RenewCertRequest>) -> Json<serde_json::Value> {
+    let cert_registry = crl::CertificateRegistry::new(&state.data_dir);
+    
+    // Verify container name matches the original certificate
+    match cert_registry.verify_renewal(&payload.old_serial, &payload.container_name) {
+        Ok(true) => {
+            // Container verified, issue new certificate with 7 days validity
+            match ca::sign_csr(&state.data_dir, &state.ca_passphrase, &payload.csr_pem, 7) {
+                Ok(cert_pem) => {
+                    // Extract serial from new certificate and register it
+                    let cert_str = String::from_utf8_lossy(&cert_pem);
+                    // Register in certificate registry
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs() as i64;
+                    
+                    // Note: In production, extract actual serial from cert
+                    // For now, use timestamp as proxy
+                    let new_serial = format!("{:x}", now);
+                    let _ = cert_registry.register_certificate(
+                        &new_serial,
+                        &payload.container_name,
+                        &payload.service_name,
+                        now
+                    );
+                    
+                    tracing::info!("renewed certificate for service {} container {}", 
+                        payload.service_name, payload.container_name);
+                    
+                    Json(serde_json::json!({
+                        "ok": true,
+                        "cert_pem": cert_str,
+                        "expires_in_days": 7
+                    }))
+                },
+                Err(e) => Json(serde_json::json!({
+                    "ok": false,
+                    "error": format!("signing error: {}", e)
+                })),
+            }
+        },
+        Ok(false) => {
+            tracing::warn!("renewal denied: container name mismatch for service {} serial {}",
+                payload.service_name, payload.old_serial);
+            Json(serde_json::json!({
+                "ok": false,
+                "error": "container name verification failed"
+            }))
+        },
+        Err(e) => Json(serde_json::json!({
+            "ok": false,
+            "error": format!("verification error: {}", e)
+        })),
+    }
+}
+
+#[derive(Deserialize)]
+struct RevokeCertRequest {
+    serial: String,
+    reason: String,
+}
+
+async fn revoke_certificate(State(state): State<AppState>, Json(payload): Json<RevokeCertRequest>) -> Json<serde_json::Value> {
+    let crl_manager = crl::CrlManager::new(&state.data_dir);
+    let cert_registry = crl::CertificateRegistry::new(&state.data_dir);
+    
+    match crl_manager.revoke_certificate(&state.ca_passphrase, &payload.serial, &payload.reason) {
+        Ok(_) => {
+            // Mark as revoked in registry
+            let _ = cert_registry.mark_revoked(&payload.serial);
+            
+            tracing::info!("revoked certificate serial {}: {}", payload.serial, payload.reason);
+            Json(serde_json::json!({
+                "ok": true,
+                "revoked": payload.serial
+            }))
+        },
+        Err(e) => Json(serde_json::json!({
+            "ok": false,
+            "error": format!("revocation error: {}", e)
+        })),
+    }
+}
+
+async fn get_crl(State(state): State<AppState>) -> impl axum::response::IntoResponse {
+    let crl_manager = crl::CrlManager::new(&state.data_dir);
+    
+    match crl_manager.get_crl_pem() {
+        Ok(crl_pem) => {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                axum::http::header::CONTENT_TYPE,
+                "application/x-pem-file".parse().unwrap()
+            );
+            (headers, crl_pem).into_response()
+        },
+        Err(e) => {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to read CRL: {}", e)
+            ).into_response()
         }
     }
 }
