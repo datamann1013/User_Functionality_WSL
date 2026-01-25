@@ -44,6 +44,7 @@ volumes:
     name: ollama_models
   core_data_primary:
   core_data_secondary:
+  core_data_ha:
   postgres_data:
   redis_data:
   influx_data:
@@ -116,6 +117,31 @@ services:
     restart: unless-stopped
     depends_on:
       - core_primary
+
+  runecore_ha:
+    build:
+      context: ./projects/RuneCore_Core
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_ha_1
+    environment:
+      - RUNECORE_DATA_DIR=/data
+      - RUNECORE_CA_PASSPHRASE=${CA_PASSPHRASE:-changeme_in_production}
+      - RUNECORE_DISABLE_MTLS=${DISABLE_MTLS:-false}
+      - RUNECORE_ENABLE_RAFT=true
+      - RAFT_NODE_ID=3
+      - RAFT_PEER_URLS=https://core_primary:11440,https://core_secondary:11441
+      - RUNECORE_HA_MODE=true
+    volumes:
+      - core_data_ha:/data
+      - certs:/certs:ro
+    networks:
+      - core_ha_bridge
+    ports:
+      - "11442:11440"
+    restart: unless-stopped
+    depends_on:
+      - core_primary
+      - core_secondary
 
   # ============================================================================
   # AI SERVICE BRIDGE (Backend, Frontend, Ollama Wrapper, Ollama)

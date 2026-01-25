@@ -11,12 +11,15 @@ mod db;
 mod cli;
 mod proxy;
 mod crl;
+mod raft_consensus;
 
 #[derive(Clone)]
 struct AppState {
     db: sqlx::SqlitePool,
     data_dir: String,
     ca_passphrase: String,
+    raft_manager: Option<Arc<parking_lot::Mutex<raft_consensus::RaftManager>>>,
+    enable_raft: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -84,7 +87,40 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = db::init_db(&data_dir).await?;
 
-    let state = AppState { db: pool, data_dir: data_dir.clone(), ca_passphrase: passphrase.clone() };
+    // Initialize Raft consensus if enabled
+    let enable_raft = env::var("RUNECORE_ENABLE_RAFT").unwrap_or_else(|_| "false".to_string()) == "true";
+    let raft_manager = if enable_raft {
+        let node_id = env::var("RAFT_NODE_ID")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(1);
+        
+        tracing::info!("Initializing Raft consensus for node {}", node_id);
+        
+        match raft_consensus::create_three_node_cluster(node_id) {
+            Ok(mut manager) => {
+                if let Err(e) = manager.bootstrap_cluster() {
+                    tracing::warn!("Failed to bootstrap Raft cluster: {}", e);
+                }
+                Some(Arc::new(parking_lot::Mutex::new(manager)))
+            }
+            Err(e) => {
+                tracing::error!("Failed to create Raft manager: {}", e);
+                None
+            }
+        }
+    } else {
+        tracing::info!("Raft consensus disabled, using direct database writes");
+        None
+    };
+
+    let state = AppState { 
+        db: pool, 
+        data_dir: data_dir.clone(), 
+        ca_passphrase: passphrase.clone(),
+        raft_manager,
+        enable_raft,
+    };
 
     let app = Router::new()
         .route("/", get(root))
@@ -184,6 +220,27 @@ async fn main() -> anyhow::Result<()> {
     let rustls_cfg: axum_server::tls_rustls::RustlsConfig = axum_server::tls_rustls::RustlsConfig::from_config(tls_cfg);
     let addr = SocketAddr::from(([0, 0, 0, 0], 11440));
     println!("RuneCore core listening on https://{}", addr);
+    
+    // Start Raft background task if enabled
+    if let Some(ref raft_mgr) = state.raft_manager {
+        let raft_clone = Arc::clone(raft_mgr);
+        tokio::spawn(async move {
+            loop {
+                {
+                    let mut manager = raft_clone.lock();
+                    if let Err(e) = manager.tick() {
+                        tracing::error!("Raft tick error: {}", e);
+                    }
+                    if let Err(e) = manager.process_ready() {
+                        tracing::error!("Raft process_ready error: {}", e);
+                    }
+                }
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
+        });
+        tracing::info!("Raft background task started");
+    }
+    
     axum_server::bind_rustls(addr, rustls_cfg)
         .serve(app.into_make_service())
         .await
@@ -246,18 +303,71 @@ async fn register_service(State(state): State<AppState>, headers: HeaderMap, bod
         ws_url: info.ws_url.clone(),
         rest_url: info.rest_url.clone(),
         public_key_pem: info.public_key_pem.clone(),
-        dependencies: dependencies_json,
-        wishlist: wishlist_json,
+        dependencies: dependencies_json.clone(),
+        wishlist: wishlist_json.clone(),
         container_name: info.container_name.clone(),
         status: if missing_deps.is_empty() { "running".to_string() } else { "limb_mode".to_string() },
         last_seen: chrono::Utc::now().timestamp(),
         offline_since: None,
     };
 
-    if let Err(e) = db::insert_service(&state.db, &row).await {
-        // Report DB insert failure to ErrorLogger for diagnostics
-        let _ = diag::report_error_sync(&format!("db insert error: {}", e), None);
-        return Json(serde_json::json!({"ok": false, "error": format!("db error: {}", e)}));
+    // If Raft is enabled, propose registration through consensus
+    if state.enable_raft {
+        if let Some(ref raft_mgr) = state.raft_manager {
+            let manager = raft_mgr.lock();
+            
+            // Check if we're the leader
+            if !manager.is_leader() {
+                let leader_id = manager.leader_id();
+                tracing::debug!("Not leader, current leader is node {}", leader_id);
+                
+                // Return redirect to leader (in production, include leader URL)
+                return Json(serde_json::json!({
+                    "ok": false,
+                    "error": "not_leader",
+                    "leader_id": leader_id,
+                    "message": "Please retry request with the leader node"
+                }));
+            }
+            
+            // Propose registration via Raft
+            let cmd = raft_consensus::RegistryCommand::RegisterService {
+                name: info.name.clone(),
+                version: info.version.clone(),
+                rest_url: info.rest_url.clone(),
+                ws_url: info.ws_url.clone(),
+                dependencies: info.dependencies.clone(),
+                wishlist: info.wishlist.clone(),
+                container_name: info.container_name.clone(),
+            };
+            
+            drop(manager); // Release lock before async operation
+            
+            match raft_mgr.lock().propose(cmd).await {
+                Ok(_) => {
+                    tracing::info!("Service registration proposed via Raft: {}", info.name);
+                    
+                    // Also write to local DB for now (dual-write pattern during migration)
+                    // TODO: Remove once Raft is fully operational
+                    if let Err(e) = db::insert_service(&state.db, &row).await {
+                        tracing::warn!("Local DB write failed: {}", e);
+                    }
+                },
+                Err(e) => {
+                    tracing::error!("Raft propose failed: {}", e);
+                    return Json(serde_json::json!({
+                        "ok": false,
+                        "error": format!("raft error: {}", e)
+                    }));
+                }
+            }
+        }
+    } else {
+        // Direct database write (legacy mode)
+        if let Err(e) = db::insert_service(&state.db, &row).await {
+            let _ = diag::report_error_sync(&format!("db insert error: {}", e), None);
+            return Json(serde_json::json!({"ok": false, "error": format!("db error: {}", e)}));
+        }
     }
 
     tracing::info!("register_service succeeded: id={}, status={}", info.id.clone().unwrap_or_default(), row.status);
