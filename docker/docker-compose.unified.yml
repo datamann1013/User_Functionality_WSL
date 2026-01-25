@@ -74,6 +74,7 @@ services:
       - RAFT_NODE_ID=1
       - RAFT_PEER_URLS=2=http://core_secondary:11440,3=http://runecore_ha:11440
       - RAFT_STORAGE_PATH=/var/lib/runecore/raft
+      - RAFT_SNAPSHOT_INTERVAL=1000
       - AUTO_RESTART_SERVICES=true
     volumes:
       - core_data_primary:/data
@@ -109,6 +110,7 @@ services:
       - RAFT_NODE_ID=2
       - RAFT_PEER_URLS=1=http://core_primary:11440,3=http://runecore_ha:11440
       - RAFT_STORAGE_PATH=/var/lib/runecore/raft
+      - RAFT_SNAPSHOT_INTERVAL=1000
     volumes:
       - core_data_secondary:/data
       - raft_secondary_data:/var/lib/runecore/raft
@@ -140,6 +142,7 @@ services:
       - RAFT_NODE_ID=3
       - RAFT_PEER_URLS=1=http://core_primary:11440,2=http://core_secondary:11440
       - RAFT_STORAGE_PATH=/var/lib/runecore/raft
+      - RAFT_SNAPSHOT_INTERVAL=1000
       - RUNECORE_HA_MODE=true
     volumes:
       - core_data_ha:/data

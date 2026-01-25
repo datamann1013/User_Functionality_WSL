@@ -162,6 +162,10 @@ pub struct RaftManager {
     peers: Vec<u64>,
     tick_interval: Duration,
     last_tick: Instant,
+    /// Number of log entries between snapshots
+    snapshot_interval: u64,
+    /// Last index that was snapshotted
+    last_snapshot_index: u64,
 }
 
 impl RaftManager {
@@ -181,6 +185,12 @@ impl RaftManager {
         
         let raft_node = RaftNode::new(&config, storage, &raft::default_logger())?;
         
+        // Get snapshot interval from environment or use default (1000 entries)
+        let snapshot_interval = std::env::var("RAFT_SNAPSHOT_INTERVAL")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(1000);
+        
         Ok(RaftManager {
             node: Arc::new(Mutex::new(raft_node)),
             state_machine: Arc::new(Mutex::new(RegistryStateMachine::new())),
@@ -188,6 +198,8 @@ impl RaftManager {
             peers,
             tick_interval: Duration::from_millis(100),
             last_tick: Instant::now(),
+            snapshot_interval,
+            last_snapshot_index: 0,
         })
     }
     
@@ -283,6 +295,97 @@ impl RaftManager {
         node.advance_apply();
         
         Ok(messages)
+    }
+    
+    /// Check if snapshot should be created and do so if needed
+    pub fn maybe_create_snapshot(&mut self) -> Result<()> {
+        let node = self.node.lock().unwrap();
+        let storage = node.store();
+        
+        // Get current applied index
+        let last_index = storage.last_index()
+            .map_err(|e| anyhow::anyhow!("Failed to get last index: {:?}", e))?;
+        
+        // Check if we should create a snapshot
+        let entries_since_snapshot = last_index.saturating_sub(self.last_snapshot_index);
+        
+        if entries_since_snapshot < self.snapshot_interval {
+            return Ok(()); // Not time yet
+        }
+        
+        // Only leader creates snapshots to avoid wasted work
+        if node.state != StateRole::Leader {
+            return Ok(());
+        }
+        
+        drop(node); // Release lock before snapshot creation
+        
+        tracing::info!(
+            "Creating snapshot at index {} ({} entries since last snapshot)",
+            last_index,
+            entries_since_snapshot
+        );
+        
+        // Create snapshot from state machine
+        let state_machine = self.state_machine.lock().unwrap();
+        let snapshot_data = state_machine.snapshot();
+        drop(state_machine);
+        
+        // Create snapshot metadata
+        let mut snapshot = Snapshot::default();
+        snapshot.set_data(snapshot_data);
+        
+        let metadata = snapshot.mut_metadata();
+        metadata.index = last_index;
+        metadata.term = {
+            let node = self.node.lock().unwrap();
+            let storage = node.store();
+            storage.term(last_index)
+                .map_err(|e| anyhow::anyhow!("Failed to get term: {:?}", e))?
+        };
+        
+        // Set conf_state
+        let conf_state = {
+            let node = self.node.lock().unwrap();
+            let storage = node.store();
+            storage.snapshot(0, 0)
+                .map_err(|e| anyhow::anyhow!("Failed to get snapshot: {:?}", e))?
+                .get_metadata()
+                .get_conf_state()
+                .clone()
+        };
+        metadata.set_conf_state(conf_state);
+        
+        // Apply snapshot to storage
+        let node = self.node.lock().unwrap();
+        let storage = node.store();
+        storage.apply_snapshot_persist(snapshot.clone())
+            .map_err(|e| anyhow::anyhow!("Failed to persist snapshot: {:?}", e))?;
+        
+        drop(node);
+        
+        // Compact log entries older than snapshot
+        self.compact_log(last_index)?;
+        
+        self.last_snapshot_index = last_index;
+        
+        tracing::info!("Snapshot created and log compacted up to index {}", last_index);
+        
+        Ok(())
+    }
+    
+    /// Compact log entries up to the given index
+    fn compact_log(&mut self, compact_index: u64) -> Result<()> {
+        let node = self.node.lock().unwrap();
+        let storage = node.store();
+        
+        // Compact removes all entries before compact_index
+        storage.compact(compact_index)
+            .map_err(|e| anyhow::anyhow!("Failed to compact log: {:?}", e))?;
+        
+        tracing::debug!("Log compacted up to index {}", compact_index);
+        
+        Ok(())
     }
     
     /// Process an incoming Raft message from a peer

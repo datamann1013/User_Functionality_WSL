@@ -150,6 +150,7 @@ pub async fn raft_network_task(
     transport: RaftTransport,
 ) -> Result<()> {
     let mut interval = tokio::time::interval(Duration::from_millis(100));
+    let mut snapshot_check_counter = 0u64;
 
     loop {
         interval.tick().await;
@@ -178,6 +179,22 @@ pub async fn raft_network_task(
         if !messages.is_empty() {
             tracing::trace!("Sending {} Raft messages to peers", messages.len());
             if let Err(e) = transport.send_messages(messages).await {
+                tracing::error!("Failed to send Raft messages: {}", e);
+            }
+        }
+        
+        // Check for snapshot creation every 10 seconds (100 ticks)
+        snapshot_check_counter += 1;
+        if snapshot_check_counter >= 100 {
+            snapshot_check_counter = 0;
+            
+            let mut manager = raft_manager.lock();
+            if let Err(e) = manager.maybe_create_snapshot() {
+                tracing::error!("Failed to create snapshot: {}", e);
+            }
+        }
+    }
+}
                 tracing::error!("Failed to send Raft messages: {}", e);
             }
         }
