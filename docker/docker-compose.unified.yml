@@ -45,6 +45,9 @@ volumes:
   core_data_primary:
   core_data_secondary:
   core_data_ha:
+  raft_primary_data:
+  raft_secondary_data:
+  raft_ha_data:
   postgres_data:
   redis_data:
   influx_data:
@@ -70,9 +73,11 @@ services:
       - RUNECORE_ENABLE_RAFT=true
       - RAFT_NODE_ID=1
       - RAFT_PEER_URLS=2=http://core_secondary:11440,3=http://runecore_ha:11440
+      - RAFT_STORAGE_PATH=/var/lib/runecore/raft
       - AUTO_RESTART_SERVICES=true
     volumes:
       - core_data_primary:/data
+      - raft_primary_data:/var/lib/runecore/raft
       - certs:/certs
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
@@ -103,8 +108,10 @@ services:
       - RUNECORE_ENABLE_RAFT=true
       - RAFT_NODE_ID=2
       - RAFT_PEER_URLS=1=http://core_primary:11440,3=http://runecore_ha:11440
+      - RAFT_STORAGE_PATH=/var/lib/runecore/raft
     volumes:
       - core_data_secondary:/data
+      - raft_secondary_data:/var/lib/runecore/raft
       - certs:/certs:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
@@ -132,9 +139,11 @@ services:
       - RUNECORE_ENABLE_RAFT=true
       - RAFT_NODE_ID=3
       - RAFT_PEER_URLS=1=http://core_primary:11440,2=http://core_secondary:11440
+      - RAFT_STORAGE_PATH=/var/lib/runecore/raft
       - RUNECORE_HA_MODE=true
     volumes:
       - core_data_ha:/data
+      - raft_ha_data:/var/lib/runecore/raft
       - certs:/certs:ro
     networks:
       - core_ha_bridge

@@ -1,11 +1,14 @@
+// Persistent storage for Raft consensus
 use raft::prelude::*;
-use raft::{storage::MemStorage, Config as RaftConfig, Raft as RaftNode, StateRole};
+use raft::{Config as RaftConfig, Raft as RaftNode, StateRole};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use serde::{Deserialize, Serialize};
 use anyhow::Result;
+
+use crate::raft_storage::PersistentStorage;
 
 /// Commands that can be applied to the service registry state machine
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,9 +154,9 @@ impl RegistryStateMachine {
     }
 }
 
-/// Raft node manager
+/// Raft node manager with persistent storage
 pub struct RaftManager {
-    node: Arc<Mutex<RaftNode<MemStorage>>>,
+    node: Arc<Mutex<RaftNode<PersistentStorage>>>,
     state_machine: Arc<Mutex<RegistryStateMachine>>,
     node_id: u64,
     peers: Vec<u64>,
@@ -162,7 +165,7 @@ pub struct RaftManager {
 }
 
 impl RaftManager {
-    pub fn new(node_id: u64, peers: Vec<u64>) -> Result<Self> {
+    pub fn new(node_id: u64, peers: Vec<u64>, storage_path: &str) -> Result<Self> {
         let config = RaftConfig {
             id: node_id,
             election_tick: 10,
@@ -172,7 +175,10 @@ impl RaftManager {
             ..Default::default()
         };
         
-        let storage = MemStorage::new();
+        // Use persistent storage instead of MemStorage
+        let storage = PersistentStorage::new(storage_path)
+            .map_err(|e| anyhow::anyhow!("Failed to create persistent storage: {:?}", e))?;
+        
         let raft_node = RaftNode::new(&config, storage, &raft::default_logger())?;
         
         Ok(RaftManager {
@@ -229,6 +235,24 @@ impl RaftManager {
         
         let mut ready = node.ready();
         
+        // Persist entries and hard state to stable storage
+        let storage = node.mut_store();
+        
+        if !ready.entries().is_empty() {
+            storage.append_entries(ready.entries())
+                .map_err(|e| anyhow::anyhow!("Failed to append entries: {:?}", e))?;
+        }
+        
+        if let Some(hs) = ready.hs() {
+            storage.set_hardstate_persist(hs.clone())
+                .map_err(|e| anyhow::anyhow!("Failed to persist hard state: {:?}", e))?;
+        }
+        
+        if !ready.snapshot().is_empty() {
+            storage.apply_snapshot_persist(ready.snapshot().clone())
+                .map_err(|e| anyhow::anyhow!("Failed to persist snapshot: {:?}", e))?;
+        }
+        
         // Apply committed entries to state machine
         if !ready.committed_entries().is_empty() {
             let mut state_machine = self.state_machine.lock().unwrap();
@@ -245,9 +269,6 @@ impl RaftManager {
             }
         }
         
-        // Persist to stable storage (in production, write to disk)
-        // For now, MemStorage handles this automatically
-        
         // Extract messages to send to peers
         let messages = ready.messages().to_vec();
         
@@ -256,7 +277,7 @@ impl RaftManager {
         
         // Process light ready if needed
         if let Some(commit_idx) = light_ready.commit_index() {
-            // Commit index updated
+            tracing::debug!("Commit index advanced to {}", commit_idx);
         }
         
         node.advance_apply();
@@ -309,8 +330,8 @@ pub struct RaftMessage {
     pub message: Vec<u8>,
 }
 
-/// Create a Raft manager for a 3-node cluster
-pub fn create_three_node_cluster(node_id: u64) -> Result<RaftManager> {
+/// Create a Raft manager for a 3-node cluster with persistent storage
+pub fn create_three_node_cluster(node_id: u64, storage_path: &str) -> Result<RaftManager> {
     let peers = match node_id {
         1 => vec![2, 3],
         2 => vec![1, 3],
@@ -318,5 +339,5 @@ pub fn create_three_node_cluster(node_id: u64) -> Result<RaftManager> {
         _ => return Err(anyhow::anyhow!("Invalid node_id, must be 1, 2, or 3")),
     };
     
-    RaftManager::new(node_id, peers)
+    RaftManager::new(node_id, peers, storage_path)
 }

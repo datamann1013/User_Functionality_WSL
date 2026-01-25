@@ -13,6 +13,7 @@ mod proxy;
 mod crl;
 mod raft_consensus;
 mod raft_network;
+mod raft_storage;
 
 #[derive(Clone)]
 struct AppState {
@@ -96,9 +97,13 @@ async fn main() -> anyhow::Result<()> {
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(1);
         
-        tracing::info!("Initializing Raft consensus for node {}", node_id);
+        // Get storage path from env or use default in data_dir
+        let storage_path = env::var("RAFT_STORAGE_PATH")
+            .unwrap_or_else(|_| format!("{}/raft_node_{}", data_dir, node_id));
         
-        match raft_consensus::create_three_node_cluster(node_id) {
+        tracing::info!("Initializing Raft consensus for node {} with storage at {}", node_id, storage_path);
+        
+        match raft_consensus::create_three_node_cluster(node_id, &storage_path) {
             Ok(mut manager) => {
                 if let Err(e) = manager.bootstrap_cluster() {
                     tracing::warn!("Failed to bootstrap Raft cluster: {}", e);
