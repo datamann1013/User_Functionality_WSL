@@ -67,8 +67,9 @@ services:
       - RUNECORE_DATA_DIR=/data
       - RUNECORE_CA_PASSPHRASE=${CA_PASSPHRASE:-changeme_in_production}
       - RUNECORE_DISABLE_MTLS=${DISABLE_MTLS:-false}
+      - RUNECORE_ENABLE_RAFT=true
       - RAFT_NODE_ID=1
-      - RAFT_PEER_URLS=https://core_secondary:11440,https://runecore_ha:11442
+      - RAFT_PEER_URLS=2=http://core_secondary:11440,3=http://runecore_ha:11440
       - AUTO_RESTART_SERVICES=true
     volumes:
       - core_data_primary:/data
@@ -99,8 +100,9 @@ services:
       - RUNECORE_DATA_DIR=/data
       - RUNECORE_CA_PASSPHRASE=${CA_PASSPHRASE:-changeme_in_production}
       - RUNECORE_DISABLE_MTLS=${DISABLE_MTLS:-false}
+      - RUNECORE_ENABLE_RAFT=true
       - RAFT_NODE_ID=2
-      - RAFT_PEER_URLS=https://core_primary:11440,https://runecore_ha:11442
+      - RAFT_PEER_URLS=1=http://core_primary:11440,3=http://runecore_ha:11440
     volumes:
       - core_data_secondary:/data
       - certs:/certs:ro
@@ -129,7 +131,7 @@ services:
       - RUNECORE_DISABLE_MTLS=${DISABLE_MTLS:-false}
       - RUNECORE_ENABLE_RAFT=true
       - RAFT_NODE_ID=3
-      - RAFT_PEER_URLS=https://core_primary:11440,https://core_secondary:11441
+      - RAFT_PEER_URLS=1=http://core_primary:11440,2=http://core_secondary:11440
       - RUNECORE_HA_MODE=true
     volumes:
       - core_data_ha:/data

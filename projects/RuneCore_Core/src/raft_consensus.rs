@@ -219,12 +219,12 @@ impl RaftManager {
         Ok(serde_json::json!({"ok": true, "pending": true}))
     }
     
-    /// Process ready events (call in a loop)
-    pub fn process_ready(&mut self) -> Result<()> {
+    /// Process ready events and return messages to send to peers
+    pub fn process_ready(&mut self) -> Result<Vec<raft::eraftpb::Message>> {
         let mut node = self.node.lock().unwrap();
         
         if !node.has_ready() {
-            return Ok(());
+            return Ok(Vec::new());
         }
         
         let mut ready = node.ready();
@@ -248,8 +248,8 @@ impl RaftManager {
         // Persist to stable storage (in production, write to disk)
         // For now, MemStorage handles this automatically
         
-        // Send messages to peers (in production, send via network)
-        // This would be handled by the networking layer
+        // Extract messages to send to peers
+        let messages = ready.messages().to_vec();
         
         // Advance the Raft node
         let mut light_ready = node.advance(ready);
@@ -261,6 +261,13 @@ impl RaftManager {
         
         node.advance_apply();
         
+        Ok(messages)
+    }
+    
+    /// Process an incoming Raft message from a peer
+    pub fn step(&mut self, msg: raft::eraftpb::Message) -> Result<()> {
+        let mut node = self.node.lock().unwrap();
+        node.step(msg)?;
         Ok(())
     }
     

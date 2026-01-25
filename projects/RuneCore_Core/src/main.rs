@@ -12,6 +12,7 @@ mod cli;
 mod proxy;
 mod crl;
 mod raft_consensus;
+mod raft_network;
 
 #[derive(Clone)]
 struct AppState {
@@ -133,6 +134,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/pki/renew", post(renew_certificate))
         .route("/api/v1/pki/revoke", post(revoke_certificate))
         .route("/api/v1/pki/crl", get(get_crl))
+        .route("/api/v1/raft/message", post(raft_message_handler))
         .route("/api/proxy/*path", axum::routing::any(proxy_route_handler))
         .with_state(state);
 
@@ -221,24 +223,30 @@ async fn main() -> anyhow::Result<()> {
     let addr = SocketAddr::from(([0, 0, 0, 0], 11440));
     println!("RuneCore core listening on https://{}", addr);
     
-    // Start Raft background task if enabled
+    // Start Raft network task if enabled
     if let Some(ref raft_mgr) = state.raft_manager {
-        let raft_clone = Arc::clone(raft_mgr);
-        tokio::spawn(async move {
-            loop {
-                {
-                    let mut manager = raft_clone.lock();
-                    if let Err(e) = manager.tick() {
-                        tracing::error!("Raft tick error: {}", e);
+        let peer_urls = env::var("RAFT_PEER_URLS")
+            .unwrap_or_else(|_| "1=http://core_primary:11440,2=http://core_secondary:11441,3=http://runecore_ha:11442".to_string());
+        
+        let node_id = env::var("RAFT_NODE_ID")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(1);
+        
+        match raft_network::RaftTransport::new(node_id, &peer_urls) {
+            Ok(transport) => {
+                let raft_clone = Arc::clone(raft_mgr);
+                tokio::spawn(async move {
+                    if let Err(e) = raft_network::raft_network_task(raft_clone, transport).await {
+                        tracing::error!("Raft network task failed: {}", e);
                     }
-                    if let Err(e) = manager.process_ready() {
-                        tracing::error!("Raft process_ready error: {}", e);
-                    }
-                }
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                });
+                tracing::info!("Raft network task started");
             }
-        });
-        tracing::info!("Raft background task started");
+            Err(e) => {
+                tracing::error!("Failed to create Raft transport: {}", e);
+            }
+        }
     }
     
     axum_server::bind_rustls(addr, rustls_cfg)
@@ -256,6 +264,24 @@ async fn root() -> &'static str {
 async fn health() -> Json<serde_json::Value> {
     tracing::info!("health handler invoked");
     Json(serde_json::json!({"status": "ok"}))
+}
+
+// Handler for incoming Raft messages from peer nodes
+async fn raft_message_handler(
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Json<serde_json::Value> {
+    if let Some(ref raft_mgr) = state.raft_manager {
+        match raft_network::handle_raft_message(Arc::clone(raft_mgr), body.to_vec()).await {
+            Ok(_) => Json(serde_json::json!({"ok": true})),
+            Err(e) => {
+                tracing::error!("Failed to handle Raft message: {}", e);
+                Json(serde_json::json!({"ok": false, "error": e.to_string()}))
+            }
+        }
+    } else {
+        Json(serde_json::json!({"ok": false, "error": "Raft not enabled"}))
+    }
 }
 
 async fn register_service(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Json<serde_json::Value> {
