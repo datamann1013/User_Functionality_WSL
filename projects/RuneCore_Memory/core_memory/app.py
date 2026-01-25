@@ -5,6 +5,8 @@ from .utils import log_exception
 import traceback
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
+from . import service_discovery
+import os
 
 
 app = FastAPI(title="CoreMemory", version="0.1.0")
@@ -18,6 +20,53 @@ app.add_middleware(
 )
 
 app.include_router(memories.router, prefix="/v1")
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize service on startup"""
+    print("🗄️  CoreMemory API Starting")
+    
+    # Register with Core if configured
+    core_url = os.environ.get("RUNECORE_CORE_URL")
+    if core_url:
+        print(f"📍 Core URL: {core_url}")
+        result = service_discovery.register_with_core()
+        
+        if result.get("registered"):
+            print("✅ Registered with Core")
+            # Start heartbeat thread
+            service_discovery.start_heartbeat_thread()
+        else:
+            print(f"⚠️  Registration failed: {result.get('reason', 'unknown')}")
+    else:
+        print("📍 Running in standalone mode (no Core URL)")
+    
+    # Check database connection
+    try:
+        from .db import engine
+        with engine.connect() as conn:
+            conn.execute("SELECT 1")
+        print("✅ PostgreSQL connected")
+    except Exception as e:
+        print(f"⚠️  PostgreSQL connection failed: {e}")
+    
+    # Check Redis connection
+    redis_url = os.environ.get("REDIS_URL")
+    if redis_url:
+        try:
+            import redis
+            r = redis.from_url(redis_url)
+            r.ping()
+            print("✅ Redis connected")
+        except Exception as e:
+            print(f"⚠️  Redis connection failed: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    service_discovery.stop_heartbeat_thread()
 
 
 @app.get("/v1/health")
