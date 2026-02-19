@@ -853,19 +853,8 @@ def chat():
             if not message:
                 return jsonify({"error": "Message is empty after sanitization", "error_code": "EABS02"}), 400
 
-        # Get conversation context from cache as structured format
-        chat_history = conversation_cache.format_context_for_ai(agent_id)
-
-        # Add current user message to chat history
-        chat_history.append({"role": "user", "content": message})
-
-        # Convert to string format for Ollama
-        enhanced_message = conversation_cache.format_chat_history_to_string(
-            chat_history
-        )
-
-        # Add the assistant prompt at the end
-        enhanced_message += "\n\nAssistant:"
+        # Get conversation history as role-based pairs (oldest first)
+        history_pairs = conversation_cache.format_context_for_ai(agent_id)
 
         ai_response = None
         response_mode = "fallback"
@@ -881,7 +870,7 @@ def chat():
             # configurable via environment variables so long-running prompts
             # can be supported in dev environments.
             try:
-                print(f"[CHAT_CTX] history_len={len(chat_history)} for agent={agent_id}")
+                print(f"[CHAT_CTX] history_len={len(history_pairs)} for agent={agent_id}")
             except Exception:
                 pass
             message_length = len(message)
@@ -1062,21 +1051,28 @@ def chat():
                 else ""
             )
 
+            # Build proper role-based messages array for Ollama /api/chat
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.extend(history_pairs)
+            messages.append({"role": "user", "content": message})
+
             payload = {
-                "message": enhanced_message,
+                "messages": messages,
                 "agent_id": agent_id,
                 "model_name": model_name,
                 "temperature": temperature,
                 "top_p": top_p,
                 "max_tokens": max_tokens,
-                "system_prompt": system_prompt,
                 "timestamp": datetime.now().isoformat(),
             }
 
             # Debug: log what we're sending to Ollama (truncated for safety)
             try:
                 print(
-                    f"[AI_DEBUG] Sending to Ollama for agent {agent_id}: message_preview='{enhanced_message[:200]}' system_prompt='{system_prompt[:200]}'"
+                    f"[AI_DEBUG] Sending to Ollama for agent {agent_id}: "
+                    f"messages={len(messages)} system_prompt='{system_prompt[:100]}'"
                 )
             except Exception:
                 pass

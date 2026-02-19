@@ -161,14 +161,19 @@ class AgentWorker:
             max_tokens = self.agent_config.get("max_tokens", 2048)
             system_prompt = self.agent_config.get("system_prompt", "")
 
+            # Build role-based messages array for Ollama /api/chat
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": request.message})
+
             payload = {
-                "message": request.message,
+                "messages": messages,
                 "agent_id": request.agent_id,
                 "model_name": model_name,
                 "temperature": temperature,
                 "top_p": top_p,
                 "max_tokens": max_tokens,
-                "system_prompt": system_prompt,
             }
 
             # Call Ollama with timeout
@@ -189,7 +194,14 @@ class AgentWorker:
 
             if response.status_code == 200:
                 data = response.json()
-                ai_response = data.get("response", "No response from AI")
+                # Ollama /api/chat returns {"message": {"role": "assistant", "content": "..."}}
+                msg_obj = data.get("message", {})
+                ai_response = (
+                    msg_obj.get("content") if isinstance(msg_obj, dict)
+                    else data.get("response", "No response from AI")
+                )
+                if not ai_response:
+                    ai_response = data.get("response", "No response from AI")
 
                 # Store the response
                 result = AgentResponse(

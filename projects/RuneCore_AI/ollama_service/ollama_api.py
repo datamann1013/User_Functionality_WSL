@@ -276,29 +276,31 @@ def get_pull(model):
 
 @app.route("/api/chat", methods=["POST"])
 def chat():
-    """Chat/generate endpoint with retries and diagnostics."""
+    """Chat endpoint using Ollama /api/chat with role-based messages array."""
     try:
         data = request.get_json() or {}
-        message = data.get("message", "").strip()
         agent_id = data.get("agent_id", "default")
-
-        if not message:
-            return jsonify({"error": "Message required"}), 400
-
         model_name = data.get("model_name", DEFAULT_MODEL)
         temperature = float(data.get("temperature", 0.7))
         top_p = float(data.get("top_p", 0.9))
         max_tokens = int(data.get("max_tokens", 2048))
-        system_prompt = data.get("system_prompt", "")
 
-        # Build prompt
-        full_prompt = (
-            f"{system_prompt}\n\nUser: {message}\n\nAssistant:" if system_prompt else message
-        )
+        # Accept either a pre-built messages array (preferred) or a legacy
+        # single message string for backwards compatibility.
+        messages = data.get("messages")
+        if not messages:
+            message = data.get("message", "").strip()
+            if not message:
+                return jsonify({"error": "messages or message required"}), 400
+            system_prompt = data.get("system_prompt", "")
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": message})
 
         ollama_payload = {
             "model": model_name,
-            "prompt": full_prompt,
+            "messages": messages,
             "stream": False,
             "options": {
                 "temperature": temperature,
@@ -307,48 +309,47 @@ def chat():
             },
         }
 
-        # Use environment override for timeout
         request_timeout = int(os.environ.get("OLLAMA_REQUEST_TIMEOUT", "60"))
-
-        # Retry loop with exponential backoff (from the dev variant)
         max_retries = int(os.environ.get("OLLAMA_MAX_RETRIES", "3"))
         backoff = float(os.environ.get("OLLAMA_RETRY_BASE_S", "1"))
         response = None
         for attempt in range(max_retries):
             try:
-                logger.info("[OLLAMA_RETRY] attempt %s/%s -> %s/api/generate", attempt + 1, max_retries, OLLAMA_HOST)
+                logger.info(
+                    "[OLLAMA_RETRY] attempt %s/%s -> %s/api/chat model=%s msgs=%s",
+                    attempt + 1, max_retries, OLLAMA_HOST, model_name, len(messages),
+                )
                 start_ts = datetime.now()
                 response = requests.post(
-                    f"{OLLAMA_HOST}/api/generate",
+                    f"{OLLAMA_HOST}/api/chat",
                     json=ollama_payload,
                     timeout=max(request_timeout, 10),
                 )
                 duration_ms = int((datetime.now() - start_ts).total_seconds() * 1000)
-                if response is not None:
-                    logger.info("[OLLAMA_RETRY] status=%s duration_ms=%s", response.status_code, duration_ms)
+                logger.info("[OLLAMA_RETRY] status=%s duration_ms=%s", response.status_code, duration_ms)
 
-                if response and response.status_code == 200:
+                if response.status_code == 200:
                     break
                 else:
-                    try:
-                        body_snippet = response.text[:300] if response is not None else "<no-body>"
-                        logger.debug("[OLLAMA_RETRY] non-200 response snippet=%s", body_snippet)
-                    except Exception:
-                        pass
+                    logger.debug("[OLLAMA_RETRY] non-200 snippet=%s", response.text[:300])
                     _time.sleep(backoff)
                     backoff *= 2
             except requests.exceptions.Timeout as te:
-                logger.warning("[OLLAMA_RETRY] timeout on attempt %s: %s", attempt + 1, repr(te))
+                logger.warning("[OLLAMA_RETRY] timeout attempt %s: %s", attempt + 1, repr(te))
                 _time.sleep(backoff)
                 backoff *= 2
                 response = None
             except Exception as ex:
-                logger.exception("[OLLAMA_RETRY] exception on attempt %s: %s", attempt + 1, ex)
+                logger.exception("[OLLAMA_RETRY] exception attempt %s: %s", attempt + 1, ex)
                 response = None
 
         if response and response.status_code == 200:
             result = response.json()
-            ai_response = result.get("response", "No response")
+            # Ollama /api/chat returns {"message": {"role": "assistant", "content": "..."}}
+            msg_obj = result.get("message", {})
+            ai_response = msg_obj.get("content") if isinstance(msg_obj, dict) else result.get("response", "")
+            if not ai_response:
+                ai_response = result.get("response", "No response")
 
             return jsonify(
                 {
@@ -358,17 +359,14 @@ def chat():
                     "model_name": model_name,
                     "timestamp": datetime.now().isoformat(),
                     "mode": "ollama_powered",
-                    "tokens_used": len(ai_response.split()),
-                    "parameters_used": {
-                        "temperature": temperature,
-                        "top_p": top_p,
-                        "max_tokens": max_tokens,
-                        "system_prompt": system_prompt,
-                    },
+                    "tokens_used": result.get("eval_count", len(ai_response.split())),
                 }
             )
         else:
-            logger.error("Ollama generate failed after retries: status=%s", getattr(response, 'status_code', None))
+            logger.error(
+                "Ollama chat failed after retries: status=%s",
+                getattr(response, "status_code", None),
+            )
             return jsonify({"error": "Request timeout or upstream failure"}), 504
 
     except requests.exceptions.Timeout:

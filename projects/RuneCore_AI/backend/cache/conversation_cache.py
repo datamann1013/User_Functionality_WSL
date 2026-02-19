@@ -394,26 +394,17 @@ class ConversationCache:
 
     def format_context_for_ai(self, agent_id: str) -> List[Dict]:
         """
-        Format conversation context as structured list for AI model
+        Format conversation history as role-based pairs for AI model.
 
-        Returns conversation history in proper chat format using role-based structure
+        Returns only user/assistant history — callers are responsible for
+        prepending the system message with the agent's actual system prompt.
         """
         messages = self.get_conversation_context(agent_id)
 
         if not messages:
             return []
 
-        # Convert to proper chat format with role-based structure
         chat_history = []
-
-        # Add system message first
-        chat_history.append(
-            {
-                "role": "system",
-                "content": "You are a helpful AI assistant. Provide clear, conversational responses.",
-            }
-        )
-
         # Add conversation history in chronological order (oldest first)
         for msg in reversed(messages):  # Reverse because Redis stores newest-first
             chat_history.append({"role": "user", "content": msg["user_message"]})
