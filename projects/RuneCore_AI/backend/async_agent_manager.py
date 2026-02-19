@@ -161,6 +161,13 @@ class AgentWorker:
             max_tokens = self.agent_config.get("max_tokens", 2048)
             system_prompt = self.agent_config.get("system_prompt", "")
 
+            # Inject user profile context into system prompt
+            try:
+                import user_profile as _upm
+                system_prompt = _upm.inject_into_system_prompt(system_prompt)
+            except Exception:
+                pass
+
             # Build role-based messages array for Ollama /api/chat
             messages = []
             if system_prompt:

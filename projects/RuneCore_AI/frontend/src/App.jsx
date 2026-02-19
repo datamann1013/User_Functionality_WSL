@@ -10,6 +10,7 @@ import { logFrontendError } from "./utils/errorLogger";
 import CreateAgentModal from "./components/CreateAgentModal";
 import EditAgentModal from "./components/EditAgentModal";
 import ModelManager from "./components/ModelManager";
+import UserProfileModal from "./components/UserProfileModal";
 
 // API base URL
 const API_BASE = process.env.REACT_APP_API_URL || "";
@@ -113,6 +114,7 @@ function App() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [agentToEdit, setAgentToEdit] = useState(null);
   const [showModelManager, setShowModelManager] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const [cacheStatus, setCacheStatus] = useState(null);
 
   // Model retry/cancel helpers: when backend reports a model pull timeout we
@@ -256,26 +258,57 @@ function App() {
   // Optimized API calls with useCallback
   const loadAgents = useCallback(async () => {
     try {
-      setAgentsLoading(true);
+      setAgentsLoading((prev) => prev); // keep loading state on refresh without flash
       const response = await fetch(`${API_BASE}/api/agents`);
       if (response.ok) {
         const data = await response.json();
-        const validAgents = (data.agents || []).filter(
+        const incoming = (data.agents || []).filter(
           (agent) =>
             agent && typeof agent === "object" && agent.id && agent.name
         );
-        setAgents(validAgents);
+
+        // Smart merge: only update state if something actually changed.
+        // This prevents the full list from disappearing and reappearing on
+        // each polling tick.
+        setAgents((prev) => {
+          const prevMap = new Map(prev.map((a) => [a.id, a]));
+          const inMap = new Map(incoming.map((a) => [a.id, a]));
+
+          // Check for deletions or additions
+          const sameIds =
+            prev.length === incoming.length &&
+            incoming.every((a) => prevMap.has(a.id));
+
+          if (sameIds) {
+            // Same set of agents — only replace entries that actually changed
+            const merged = prev.map((a) => {
+              const fresh = inMap.get(a.id);
+              if (!fresh) return a;
+              // Shallow compare a few key fields to avoid unnecessary re-renders
+              if (
+                a.name === fresh.name &&
+                a.model_name === fresh.model_name &&
+                a.status === fresh.status &&
+                a.last_active === fresh.last_active
+              ) {
+                return a; // no change — return same reference
+              }
+              return fresh;
+            });
+            return merged;
+          }
+
+          // Agent list changed (add/remove) — use fresh list
+          return incoming;
+        });
 
         // Set first agent as selected if none selected
-        if (validAgents.length > 0 && !selectedAgent) {
-          setSelectedAgent(validAgents[0].id);
+        if (incoming.length > 0 && !selectedAgent) {
+          setSelectedAgent(incoming[0].id);
         }
-      } else {
-        setAgents([]);
       }
     } catch (error) {
       logFrontendError("AGENTS_LOAD_ERROR", "Failed to load agents", error);
-      setAgents([]);
     } finally {
       setAgentsLoading(false);
     }
@@ -754,38 +787,78 @@ function App() {
       {/* Top Bar */}
       <div className="top-bar">
         <div className="brand">
-          <h2>Rommesmo Informatics</h2>
+          <span className="brand-mark">▲</span>
+          <span className="brand-name">RuneCore Mind</span>
         </div>
-        <div className="top-bar-spacer"></div>
-        {cacheStatus && ((cacheStatus.cache && cacheStatus.cache.using_redis === false) || cacheStatus.using_redis === false) && (
-          <div className="fallback-status-banner" title="Running in standalone mode with fallback systems">
-            <div className="fallback-icon">⚠️</div>
-            <div className="fallback-text">
-              <strong>Standalone Mode:</strong> Using in-memory cache (last {cacheStatus.cache?.message_limit || 10} messages)
-              {cacheStatus.suggestion && (
-                <div className="fallback-hint">💡 {cacheStatus.suggestion}</div>
-              )}
-            </div>
-          </div>
-        )}
+        <div className="top-bar-spacer" />
+        <div className="top-bar-status">
+          {cacheStatus && (
+            <span
+              className={`status-dot ${
+                (cacheStatus.cache?.using_redis || cacheStatus.using_redis)
+                  ? "online"
+                  : "warn"
+              }`}
+            >
+              {(cacheStatus.cache?.using_redis || cacheStatus.using_redis)
+                ? "CACHE:REDIS"
+                : "CACHE:LOCAL"}
+            </span>
+          )}
+          {cacheStatus?.core_memory && (
+            <span
+              className={`status-dot ${cacheStatus.core_memory.available ? "online" : "warn"}`}
+            >
+              {cacheStatus.core_memory.available ? "MEM:ONLINE" : "MEM:OFFLINE"}
+            </span>
+          )}
+          <span className={`status-dot ${connecting ? "error" : "online"}`}>
+            {connecting ? "CORE:OFFLINE" : "CORE:ONLINE"}
+          </span>
+        </div>
+        <button
+          className="top-bar-btn"
+          onClick={() => setShowModelManager(true)}
+          title="Manage models"
+        >
+          MODELS
+        </button>
+        <button
+          className="top-bar-btn"
+          onClick={() => setShowProfileModal(true)}
+          title="User profile"
+        >
+          PROFILE
+        </button>
       </div>
 
       <div className="main-layout">
-        {/* Left Sidebar - Agents */}
+        {/* Left Sidebar */}
         <div className="agents-sidebar">
+          <div className="sidebar-header">
+            <span className="sidebar-title">Agents</span>
+            <button
+              className="sidebar-add-btn"
+              onClick={() => setShowCreateModal(true)}
+              title="New agent"
+            >
+              +
+            </button>
+          </div>
+
           <div className="agents-list">
             {agentsLoading ? (
               <div className="loading-agents">
-                <div className="loading-indicator">Loading agents...</div>
+                <div className="loading-indicator">Loading...</div>
               </div>
             ) : validAgents.length === 0 ? (
               <div className="no-agents">
-                <p>No agents available.</p>
+                <span>No agents yet</span>
                 <button
                   onClick={() => setShowCreateModal(true)}
                   className="create-first-agent-btn"
                 >
-                  Create your first agent
+                  + Create Agent
                 </button>
               </div>
             ) : (
@@ -795,7 +868,6 @@ function App() {
                   thinkingAgents.has(agent.id)
                 );
                 const avatarColor = getAvatarColor(agent.name);
-                const downtime = calculateDowntime(agent.last_active);
 
                 return (
                   <div
@@ -821,7 +893,7 @@ function App() {
                         agent.name.charAt(0).toUpperCase()
                       )}
                       {unreadCounts[agent.id] > 0 && selectedAgent !== agent.id && (
-                        <div className="unread-badge" title={`${unreadCounts[agent.id]} unread messages`}>
+                        <div className="unread-badge">
                           {unreadCounts[agent.id]}
                         </div>
                       )}
@@ -829,9 +901,12 @@ function App() {
                     <div className="agent-info">
                       <div className="agent-name">{agent.name}</div>
                       <div className="agent-meta">
-                        <span className="downtime">{downtime}</span>
-                        <span className={`status ${statusDisplay.class}`}>
-                          {statusDisplay.text}
+                        <div
+                          className={`status-pip ${statusDisplay.class}`}
+                          title={statusDisplay.text}
+                        />
+                        <span className="agent-model-label">
+                          {agent.model_name || "no model"}
                         </span>
                       </div>
                     </div>
@@ -840,29 +915,58 @@ function App() {
               })
             )}
 
-            {/* Create New Agent Button */}
-            <div
-              className="agent-item create-new"
-              onClick={() => setShowCreateModal(true)}
-            >
-              <div className="agent-avatar create-avatar">+</div>
-              <div className="agent-info">
-                <div className="agent-name">Create New Agent</div>
-                <div className="agent-meta">
-                  <span className="status">ready</span>
+            {/* Create new agent entry */}
+            {validAgents.length > 0 && (
+              <div
+                className="agent-item create-new"
+                onClick={() => setShowCreateModal(true)}
+              >
+                <div className="agent-avatar create-avatar">+</div>
+                <div className="agent-info">
+                  <div className="agent-name">New Agent</div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 
-        {/* Main Chat Area */}
+        {/* Chat Main */}
         <div className="chat-main">
-          {/* Connection Status */}
+          {/* Chat panel header */}
+          <div className="chat-header">
+            <div className="chat-header-agent">
+              {currentAgent ? (
+                <>
+                  <span className="chat-header-name">{currentAgent.name}</span>
+                  <span className="chat-header-sep">—</span>
+                  <span className="chat-header-model">
+                    {currentAgent.model_name || "no model"}
+                  </span>
+                </>
+              ) : (
+                <span className="chat-header-name" style={{ color: "var(--text-muted)" }}>
+                  Select an agent
+                </span>
+              )}
+            </div>
+            <div className="chat-header-actions">
+              {currentAgent && (
+                <button
+                  className="chat-header-btn"
+                  onClick={() => handleEditAgent(currentAgent)}
+                  title="Edit agent"
+                >
+                  Edit
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Connecting banner */}
           {connecting && (
             <div className="connection-status">
               <div className="connection-message">
-                <span className="loading-dots">⚡</span>
+                <span className="loading-dots">■</span>
                 Connecting to AI service...
               </div>
             </div>
@@ -879,54 +983,60 @@ function App() {
             {messages.length === 0 ? (
               <div className="empty-chat">
                 <div className="empty-message">
-                  <h3>Start a conversation</h3>
+                  <h3>No messages yet</h3>
                   <p>
-                    Type in the input box below to begin chatting with{" "}
-                    {currentAgent?.name || "your AI assistant"}
+                    Type a command below to begin with{" "}
+                    {currentAgent?.name || "your agent"}
                   </p>
                 </div>
               </div>
             ) : (
               messages.map((message) => (
-                <div key={message.id} className="message-wrapper">
+                <div key={message.id} className="message-wrapper group-start">
                   <div
-                    className={`message ${message.sender} ${message.error ? "error" : ""} ${message.isThinking ? "thinking" : ""}`}
+                    className={`message ${message.sender} ${message.error ? "error" : ""}`}
                   >
-                    <div
-                      className="message-avatar"
-                      style={{
-                        backgroundColor:
-                          message.sender === "user"
-                            ? "#6b46c1"
-                            : getAvatarColor(currentAgent?.name || "AI"),
-                      }}
-                      title={formatTime(message.timestamp)}
-                    >
-                      {message.sender === "user"
-                        ? "U"
-                        : currentAgent?.name?.charAt(0) || "A"}
+                    <div className="message-header">
+                      <span
+                        className={`message-sender ${message.sender}`}
+                      >
+                        {message.sender === "user"
+                          ? "YOU"
+                          : (currentAgent?.name || "AI").toUpperCase()}
+                      </span>
+                      <span className="message-time">
+                        {formatTime(message.timestamp)}
+                      </span>
                     </div>
-                    <div className="message-content">
-                      <div className="message-text">{message.text}</div>
-                      {message.files && (
-                        <div className="message-files">
-                          {message.files.map((file, i) => (
-                            <span key={i} className="file-tag">
-                              {file.name}
-                            </span>
-                          ))}
+
+                    {message.isThinking ? (
+                      <>
+                        <div className="thinking-bar">
+                          <div className="thinking-fill" />
                         </div>
-                      )}
-                    </div>
+                        <div className="thinking-label">Processing...</div>
+                      </>
+                    ) : (
+                      <div className="message-text">{message.text}</div>
+                    )}
+
+                    {message.files && (
+                      <div className="message-files">
+                        {message.files.map((file, i) => (
+                          <span key={i} className="file-tag">
+                            {file.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div className="message-separator"></div>
                 </div>
               ))
             )}
 
             {dragOver && (
               <div className="drop-overlay">
-                <div className="drop-message">Drop files here to upload</div>
+                <div className="drop-message">Drop files to attach</div>
               </div>
             )}
           </div>
@@ -951,8 +1061,8 @@ function App() {
                 onKeyPress={handleKeyPress}
                 placeholder={
                   connecting
-                    ? "Connecting..."
-                    : `Message ${currentAgent?.name || "AI"}...`
+                    ? "Offline..."
+                    : `> ${currentAgent?.name || "agent"}...`
                 }
                 disabled={connecting || thinkingAgents.has(selectedAgent)}
                 rows={1}
@@ -964,32 +1074,29 @@ function App() {
                   className="file-upload-btn"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={connecting || thinkingAgents.has(selectedAgent)}
-                  title="Upload files"
+                  title="Attach file"
                 >
-                  📎
+                  [+]
                 </button>
 
                 <div className="tools-dropdown">
                   <button
                     className={`tools-btn ${toolsOpen ? "open" : ""}`}
                     onClick={() => setToolsOpen(!toolsOpen)}
-                    disabled={connecting || thinkingAgents.has(selectedAgent)}
-                    title="Agent Management"
+                    title="Tools"
                   >
-                    ⚙️
+                    CFG
                   </button>
                   {toolsOpen && (
                     <div className="tools-menu">
                       <div className="tools-section">
-                        <div className="tools-section-title">
-                          Agent Management
-                        </div>
+                        <div className="tools-section-title">Agent</div>
                         {selectedAgent && (
                           <button
                             className="tool-item"
                             onClick={() => handleEditAgent(currentAgent)}
                           >
-                            ✏️ Edit Agent
+                            Edit Agent
                           </button>
                         )}
                         <button
@@ -999,10 +1106,9 @@ function App() {
                             setToolsOpen(false);
                           }}
                         >
-                          ➕ Create Agent
+                          New Agent
                         </button>
                       </div>
-
                       <div className="tools-section">
                         <div className="tools-section-title">Models</div>
                         <button
@@ -1012,9 +1118,8 @@ function App() {
                             setToolsOpen(false);
                           }}
                         >
-                          📥 Download Models
+                          Manage Models
                         </button>
-                        <button className="tool-item">📊 Model Status</button>
                       </div>
                     </div>
                   )}
@@ -1022,11 +1127,11 @@ function App() {
 
                 {modelRetryingAgent === selectedAgent ? (
                   <button
-                    className="cancel-btn"
+                    className="cancel-model-btn"
                     onClick={() => cancelModelRetry(selectedAgent)}
-                    title="Cancel model download attempts"
+                    title="Cancel model download"
                   >
-                    Cancel
+                    CANCEL
                   </button>
                 ) : (
                   <button
@@ -1038,7 +1143,7 @@ function App() {
                       !inputText.trim()
                     }
                   >
-                    {thinkingAgents.has(selectedAgent) ? "⏳" : "➤"}
+                    {thinkingAgents.has(selectedAgent) ? "..." : "SEND ▶"}
                   </button>
                 )}
               </div>
@@ -1077,6 +1182,11 @@ function App() {
       <ModelManager
         isOpen={showModelManager}
         onClose={() => setShowModelManager(false)}
+      />
+
+      <UserProfileModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
       />
     </div>
   );

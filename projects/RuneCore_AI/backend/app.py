@@ -50,6 +50,24 @@ model_manager = None
 rate_limiter = None
 input_sanitizer = None
 
+# User profile — always available (graceful fallback if import fails)
+try:
+    import user_profile as _user_profile_mod
+except ImportError:
+    _user_profile_mod = None
+
+# Profile curator — background fact extraction after each AI response
+try:
+    import profile_curator as _curator_mod
+except ImportError:
+    _curator_mod = None
+
+# CoreMemory bridge — retrieve/store long-term memories (graceful fallback)
+try:
+    import core_memory_bridge as _cmb
+except ImportError:
+    _cmb = None
+
 # Try multiple import paths and emit diagnostics if imports fail so
 # running containers don't silently fall back to the mock cache.
 import importlib
@@ -416,6 +434,30 @@ def log_frontend_error():
         return jsonify({"error": "Logging failed", "details": str(e)}), 500
 
 
+@app.route("/api/user/profile", methods=["GET"])
+def get_user_profile():
+    """Return the current user profile."""
+    if _user_profile_mod is None:
+        return jsonify({"error": "User profile module unavailable"}), 503
+    try:
+        return jsonify(_user_profile_mod.load())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/user/profile", methods=["PUT"])
+def update_user_profile():
+    """Merge partial fields into the user profile and save."""
+    if _user_profile_mod is None:
+        return jsonify({"error": "User profile module unavailable"}), 503
+    try:
+        data = request.get_json() or {}
+        updated = _user_profile_mod.update(data)
+        return jsonify(updated)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/api/agents", methods=["GET"])
 def get_agents():
     """Agent list retrieval. Prefer database-backed list when available."""
@@ -517,7 +559,18 @@ def get_cache_stats():
                 "deploy the Memory Core (Postgres + Redis) and point "
                 "the AI service at it."
             )
-        return jsonify({"status": "ok", "cache": stats, "suggestion": suggestion})
+        core_memory_status = None
+        if _cmb is not None:
+            core_memory_status = {
+                "available": _cmb.is_available(),
+                "url": os.environ.get("CORE_MEMORY_URL", "http://core_memory:5003/v1"),
+            }
+        return jsonify({
+            "status": "ok",
+            "cache": stats,
+            "suggestion": suggestion,
+            "core_memory": core_memory_status,
+        })
     except Exception as e:
         return jsonify({"error": f"Cache stats failed: {str(e)}"}), 500
 
@@ -1051,10 +1104,31 @@ def chat():
                 else ""
             )
 
+            # Inject user profile context into the system prompt
+            if _user_profile_mod is not None:
+                try:
+                    system_prompt = _user_profile_mod.inject_into_system_prompt(system_prompt)
+                except Exception:
+                    pass
+
+            # Retrieve relevant long-term memories from CoreMemory (if available)
+            memory_block = ""
+            if _cmb is not None:
+                try:
+                    memories = _cmb.get_context(agent_id, message)
+                    memory_block = _cmb.build_memory_block(memories)
+                except Exception:
+                    pass
+
+            # Combine: system prompt + memory block
+            final_system = system_prompt
+            if memory_block:
+                final_system = (memory_block + "\n" + system_prompt) if system_prompt else memory_block
+
             # Build proper role-based messages array for Ollama /api/chat
             messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
+            if final_system:
+                messages.append({"role": "system", "content": final_system})
             messages.extend(history_pairs)
             messages.append({"role": "user", "content": message})
 
@@ -1190,6 +1264,20 @@ def chat():
                     print(f"[LIMB] Stored conversation for agent {agent_id}")
             except Exception as limb_error:
                 log_error("EABB07", f"Failed to store in limb storage: {str(limb_error)}")
+
+        # Fire-and-forget profile curation (rate-limited, non-blocking)
+        if _curator_mod is not None:
+            try:
+                _curator_mod.curate_async(message, ai_response)
+            except Exception:
+                pass
+
+        # Store conversation turn in CoreMemory for long-term retrieval
+        if _cmb is not None:
+            try:
+                _cmb.store_turn(agent_id, message, ai_response)
+            except Exception:
+                pass
 
         # Return response
         return jsonify(
