@@ -6,6 +6,7 @@ import React, {
   useCallback,
 } from "react";
 import "./theme.css";
+import ReactMarkdown from "react-markdown";
 import { logFrontendError } from "./utils/errorLogger";
 import CreateAgentModal from "./components/CreateAgentModal";
 import EditAgentModal from "./components/EditAgentModal";
@@ -94,6 +95,8 @@ function App() {
   const [agents, setAgents] = useState([]);
   const [agentsLoading, setAgentsLoading] = useState(true);
   const [selectedAgent, setSelectedAgent] = useState(null);
+  // Ref that mirrors selectedAgent so async handlers can read the CURRENT value without stale closures
+  const selectedAgentRef = useRef(null);
   const [messages, setMessages] = useState([]);
   // Per-agent message store: { [agentId]: Message[] }
   const [messageStore, setMessageStore] = useState({});
@@ -158,9 +161,11 @@ function App() {
             };
             setMessageStore((prev) => {
               const list = (prev[agentId] || []).filter((m) => m.errorCode !== initialErrorCode).concat([successMsg]);
-              if (agentId === selectedAgent) setMessages(list);
               return trimMessageStore(prev, agentId, list);
             });
+            if (agentId === selectedAgentRef.current) {
+              setMessages((prev) => prev.filter((m) => m.errorCode !== initialErrorCode).concat([successMsg]));
+            }
             logFrontendError("FRONTEND_CHAT_SUCCESS_RETRY_BG", "Background retry succeeded", { attempt, agentId });
             // clear thinking and retrying state
             setThinkingAgents((prev) => {
@@ -183,9 +188,11 @@ function App() {
             };
             setMessageStore((prev) => {
               const list = (prev[agentId] || []).filter((m) => m.errorCode !== initialErrorCode).concat([interim]);
-              if (agentId === selectedAgent) setMessages(list);
               return trimMessageStore(prev, agentId, list);
             });
+            if (agentId === selectedAgentRef.current) {
+              setMessages((prev) => prev.filter((m) => m.errorCode !== initialErrorCode).concat([interim]));
+            }
           }
         } catch (err) {
           const netErr = {
@@ -198,9 +205,11 @@ function App() {
           };
           setMessageStore((prev) => {
             const list = (prev[agentId] || []).filter((m) => m.errorCode !== initialErrorCode).concat([netErr]);
-            if (agentId === selectedAgent) setMessages(list);
             return trimMessageStore(prev, agentId, list);
           });
+          if (agentId === selectedAgentRef.current) {
+            setMessages((prev) => prev.filter((m) => m.errorCode !== initialErrorCode).concat([netErr]));
+          }
         }
       }
 
@@ -217,9 +226,11 @@ function App() {
         };
         setMessageStore((prev) => {
           const list = (prev[agentId] || []).filter((m) => m.errorCode !== initialErrorCode).concat([cancelMsg]);
-          if (agentId === selectedAgent) setMessages(list);
           return trimMessageStore(prev, agentId, list);
         });
+        if (agentId === selectedAgentRef.current) {
+          setMessages((prev) => prev.filter((m) => m.errorCode !== initialErrorCode).concat([cancelMsg]));
+        }
         setThinkingAgents((prev) => {
           const newSet = new Set(prev);
           newSet.delete(agentId);
@@ -238,8 +249,22 @@ function App() {
     logFrontendError("FRONTEND_MODEL_PULL_CANCELED", "User canceled model pull retry", { agentId });
   };
 
+  // Keep selectedAgentRef in sync so async handlers can read the current value
+  useEffect(() => {
+    selectedAgentRef.current = selectedAgent;
+  }, [selectedAgent]);
+
+  // Auto-resize textarea to fit content (resets when inputText is cleared)
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+  }, [inputText]);
+
   const fileInputRef = useRef(null);
   const chatAreaRef = useRef(null);
+  const textareaRef = useRef(null);
 
   // Memoized values for performance
   const currentAgent = useMemo(
@@ -373,14 +398,15 @@ function App() {
 
       const stored = messageStore[agentId];
       if (stored && stored.length > 0) {
+        // Immediately show stored messages for this agent
         setMessages(stored);
       } else {
+        // Immediately clear so we don't show the previous agent's messages
+        setMessages([]);
         // Load from backend and populate store
         if (agentId) {
           const history = await loadConversationHistory(agentId);
           setMessages(history || []);
-        } else {
-          setMessages([]);
         }
       }
     },
@@ -479,27 +505,23 @@ function App() {
           agentId: agentIdNow,
         };
         
-        let shouldUpdateMessages = false;
         setMessageStore((prev) => {
           const list = (prev[agentIdNow] || []).filter((msg) => msg.id !== thinkingId).concat([aiMsg]);
-          // Don't update selectedAgent inside callback - check current value outside
           return trimMessageStore(prev, agentIdNow, list);
         });
-        
-        // Check current selectedAgent value and update accordingly
-        setSelectedAgent((currentAgent) => {
-          if (agentIdNow === currentAgent) {
-            // Still viewing the agent that received the response - update visible messages
-            setMessages((prev) => prev.filter((msg) => msg.id !== thinkingId).concat([aiMsg]));
-          } else {
-            // Viewing different agent - increment unread count
-            setUnreadCounts((counts) => ({
-              ...counts,
-              [agentIdNow]: (counts[agentIdNow] || 0) + 1,
-            }));
-          }
-          return currentAgent; // Don't change selected agent
-        });
+
+        // Use the ref to read the CURRENT selected agent — avoids stale closure and
+        // avoids calling setMessages inside setSelectedAgent which can cause extra renders
+        if (agentIdNow === selectedAgentRef.current) {
+          // Still viewing this agent — update visible messages
+          setMessages((prev) => prev.filter((msg) => msg.id !== thinkingId).concat([aiMsg]));
+        } else {
+          // User switched to a different agent — increment unread badge only
+          setUnreadCounts((counts) => ({
+            ...counts,
+            [agentIdNow]: (counts[agentIdNow] || 0) + 1,
+          }));
+        }
         
         logFrontendError(
           "FRONTEND_CHAT_SUCCESS",
@@ -511,11 +533,14 @@ function App() {
           "E_MODEL_MISSING",
           "E_MODEL_MISSING_PULL_TIMEOUT",
           "E_MODEL_MISSING_PULL_STARTED",
+          "E_MODEL_PULL_IN_PROGRESS",   // backend sends this when auto-pull times out
+          "MODEL_PULL_IN_PROGRESS",     // alternate form
         ]);
 
         if (data && data.error_code === "EABB5") {
-          // Keep the thinking indicator visible so the UI indicates the request is pending upstream.
-          const serverMsg = data.message || "Upstream AI service unavailable";
+          // Upstream AI unavailable — show error and let user retry manually.
+          // Do NOT keep thinking visible (no background retry is started for this case).
+          const serverMsg = data.message || "Upstream AI service unavailable. Please retry.";
           const eabbMsg = {
             id: Date.now() + Math.random(),
             sender: "ai",
@@ -526,11 +551,13 @@ function App() {
             errorCode: "EABB5",
           };
           setMessageStore((prev) => {
-            const list = (prev[agentIdNow] || []).concat([eabbMsg]);
-            if (agentIdNow === selectedAgent) setMessages(list);
+            const list = (prev[agentIdNow] || []).filter((m) => m.id !== thinkingId).concat([eabbMsg]);
             return trimMessageStore(prev, agentIdNow, list);
           });
-          keepThinkingVisible = true;
+          if (agentIdNow === selectedAgentRef.current) {
+            setMessages((prev) => prev.filter((m) => m.id !== thinkingId).concat([eabbMsg]));
+          }
+          // keepThinkingVisible stays false — this releases the textarea so user can retry
           logFrontendError("FRONTEND_CHAT_EABB5", "Received EABB5 from backend", data);
         } else if (data && modelMissingCodes.has(data.error_code)) {
           // Model missing: instead of immediately failing, start a background
@@ -546,9 +573,11 @@ function App() {
           };
           setMessageStore((prev) => {
             const list = (prev[agentIdNow] || []).concat([modelMissingMsg]);
-            if (agentIdNow === selectedAgent) setMessages(list);
             return trimMessageStore(prev, agentIdNow, list);
           });
+          if (agentIdNow === selectedAgentRef.current) {
+            setMessages((prev) => [...prev, modelMissingMsg]);
+          }
 
           // Keep the thinking indicator visible while background retries proceed
           keepThinkingVisible = true;
@@ -612,9 +641,11 @@ function App() {
       
       setMessageStore((prev) => {
         const list = (prev[agentIdNow] || []).filter((msg) => msg.id !== thinkingId).concat([errMsg]);
-        if (agentIdNow === selectedAgent) setMessages(list);
         return trimMessageStore(prev, agentIdNow, list);
       });
+      if (agentIdNow === selectedAgentRef.current) {
+        setMessages((prev) => prev.filter((msg) => msg.id !== thinkingId).concat([errMsg]));
+      }
       logFrontendError("FRONTEND_CHAT_ERROR", "Chat request failed", error);
     }
 
@@ -1016,6 +1047,10 @@ function App() {
                         </div>
                         <div className="thinking-label">Processing...</div>
                       </>
+                    ) : message.sender === "ai" && !message.error ? (
+                      <div className="message-text message-markdown">
+                        <ReactMarkdown>{message.text || ""}</ReactMarkdown>
+                      </div>
                     ) : (
                       <div className="message-text">{message.text}</div>
                     )}
@@ -1065,7 +1100,7 @@ function App() {
                     : `> ${currentAgent?.name || "agent"}...`
                 }
                 disabled={connecting || thinkingAgents.has(selectedAgent)}
-                rows={1}
+                ref={textareaRef}
                 className="message-input"
               />
 

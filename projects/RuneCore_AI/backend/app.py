@@ -929,12 +929,12 @@ def chat():
             except Exception:
                 pass
             message_length = len(message)
-            BASE_TIMEOUT = int(os.environ.get("OLLAMA_BASE_TIMEOUT", "20"))
+            BASE_TIMEOUT = int(os.environ.get("OLLAMA_BASE_TIMEOUT", "60"))
             COMPLEX_TIMEOUT = int(os.environ.get("OLLAMA_COMPLEX_TIMEOUT", "180"))
-            # Use complex timeout for longer messages, otherwise base timeout
+            # Use complex timeout for any non-trivial question (>8 words or >50 chars)
             complex_timeout = (
                 COMPLEX_TIMEOUT
-                if message_length > 100 or len(message.split()) > 40
+                if message_length > 50 or len(message.split()) > 8
                 else BASE_TIMEOUT
             )
 

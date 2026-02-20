@@ -49,7 +49,10 @@ const ModelManager = ({ isOpen, onClose }) => {
       const response = await fetch(`${API_BASE}/api/models`);
       if (response.ok) {
         const data = await response.json();
-        setAvailableModels(data.models || []);
+        // Backend may return objects {name, size, ...} or plain strings — normalize to strings
+        const raw = data.models || [];
+        const models = raw.map((m) => (typeof m === "string" ? m : m?.name || null)).filter(Boolean);
+        setAvailableModels(models);
       } else {
         const errorData = await response.json().catch(() => ({}));
         if (response.status === 503) {

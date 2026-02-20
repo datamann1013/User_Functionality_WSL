@@ -18,6 +18,9 @@ services:
       - LOCAL_CACHE_ENABLED=true
       - LOCAL_CACHE_MESSAGE_LIMIT=10
       - LOCAL_CACHE_CONTEXT_SIZE=5
+      - LOCAL_CACHE_FALLBACK_FILE=/app/backend/data/fallback_cache.json
+    volumes:
+      - backend_data:/app/backend/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -88,3 +91,5 @@ networks:
 volumes:
   ollama_data:
     name: runecore_ollama_data
+  backend_data:
+    name: runecore_ai_backend_data
