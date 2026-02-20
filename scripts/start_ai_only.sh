@@ -27,29 +27,34 @@ docker compose -f docker-compose.dev.yml down 2>/dev/null || true
 echo "Building and starting AI services (this may take a moment)..."
 docker compose -f docker-compose.dev.yml up -d --build
 
-# Wait for services to be healthy
+# Wait for services to spin up
 echo ""
-echo "Waiting for services to become healthy..."
+echo "Waiting for services to spin up..."
 sleep 5
 
-# Check health
+# Check container status
 echo ""
 echo "Service Status:"
 docker ps --filter "name=runecore_ai" --filter "name=runecore-ollama" --format "table {{.Names}}\t{{.Status}}"
 
-# Test backend connectivity
+# Test backend connectivity — retry for up to 40s (backend takes ~12s to load)
 echo ""
 echo "Testing backend connectivity..."
-if curl -s http://localhost:5000/health > /dev/null 2>&1; then
-    echo "✅ Backend is healthy"
-else
-    echo "❌ Backend is not responding"
-    echo "   Check logs: docker logs runecore_ai-backend-1"
-fi
+BACKEND_OK=0
+for i in $(seq 1 13); do
+    if curl -s --max-time 3 http://localhost:5000/health > /dev/null 2>&1; then
+        echo "✅ Backend is healthy"
+        BACKEND_OK=1
+        break
+    fi
+    printf "   Waiting for backend... (%ds)\r" "$((i * 3))"
+    sleep 3
+done
+[ $BACKEND_OK -eq 0 ] && echo "❌ Backend did not respond after 40s. Check logs: docker logs runecore_ai-backend-1"
 
 # Test frontend
 echo "Testing frontend..."
-if curl -s http://localhost:3000 > /dev/null 2>&1; then
+if curl -s --max-time 5 http://localhost:3000 > /dev/null 2>&1; then
     echo "✅ Frontend is accessible"
 else
     echo "❌ Frontend is not responding"
@@ -58,7 +63,7 @@ fi
 
 # Test Ollama
 echo "Testing Ollama wrapper..."
-if curl -s http://localhost:5002/health > /dev/null 2>&1; then
+if curl -s --max-time 5 http://localhost:5002/health > /dev/null 2>&1; then
     echo "✅ Ollama wrapper is healthy"
 else
     echo "❌ Ollama wrapper is not responding"
