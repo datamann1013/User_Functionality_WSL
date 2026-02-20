@@ -320,3 +320,6 @@ artifacts/dev-bases/*
 
 # Ollama model data (large, persistent model files)
 projects/RuneCore_AI/ollama_data/
+
+
+.claude/*
