@@ -723,6 +723,7 @@ def update_agent(agent_id):
                 if a.get("id") == agent_id:
                     agents[i] = {**a, **payload}
                     AGENTS_DATA["agents"] = agents
+                    save_agents_to_file()
                     return jsonify(agents[i])
 
             return jsonify({"error": "Agent not found"}), 404
@@ -747,6 +748,7 @@ def delete_agent(agent_id):
                 return jsonify({"error": "Agent not found"}), 404
             AGENTS_DATA["agents"] = new_agents
             AGENTS_DATA["count"] = len(new_agents)
+            save_agents_to_file()
             return jsonify({"status": "deleted"})
         except Exception as e:
             log_error("EAB#05", str(e))
@@ -936,6 +938,8 @@ def chat():
                 else BASE_TIMEOUT
             )
 
+            # Reload agents from disk so multi-worker gunicorn stays in sync
+            load_agents_from_file()
             # Lookup agent config from AGENTS_DATA
             agent_config = next(
                 (a for a in AGENTS_DATA["agents"] if a["id"] == agent_id), None
@@ -1286,8 +1290,8 @@ def chat():
                 "agent_id": agent_id,
                 "timestamp": datetime.now().isoformat(),
                 "mode": response_mode,
-                "context_used": len(chat_history)
-                > 2,  # More than just system + current message
+                "context_used": len(history_pairs)
+                > 0,  # True if there is prior conversation history
                 "cached_messages": len(
                     conversation_cache.get_conversation_context(agent_id)
                 ),
@@ -1300,6 +1304,11 @@ def chat():
             pass
 
     except Exception as e:
+        import traceback
+        try:
+            print(f"[CHAT_OUTER_EXCEPTION] {str(e)}\n{traceback.format_exc()}")
+        except Exception:
+            pass
         log_error("EABB05", str(e))
         return jsonify({"error": "Chat failed"}), 500
 
