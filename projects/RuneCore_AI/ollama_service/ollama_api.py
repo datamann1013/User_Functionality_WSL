@@ -21,6 +21,7 @@ except Exception:
     def CORS(app, *args, **kwargs):
         return None
 
+import json
 import subprocess
 import threading
 import re
@@ -154,43 +155,85 @@ def _spawn_ollama_pull(name):
 
 
 def download_model_via_ollama(name):
-    """Try multiple strategies to request Ollama to download/pull the model.
+    """Initiate a model pull via Ollama's REST API.
 
-    Returns True if a pull was initiated (not necessarily completed).
+    Uses stream=True so requests returns as soon as response headers arrive,
+    without waiting for the full download to complete. A background thread
+    reads the ndjson progress stream and updates _active_pulls.
+
+    Returns True if the pull was successfully initiated.
     """
-    candidates = [
-        (f"{OLLAMA_HOST}/api/models/download", {"name": name}),
-        (f"{OLLAMA_HOST}/api/pull", {"name": name}),
-        (f"{OLLAMA_HOST}/api/models/{name}/pull", None),
-        (f"{OLLAMA_HOST}/api/pull/{name}", None),
-    ]
+    pull_url = f"{OLLAMA_HOST}/api/pull"
 
-    for url, payload in candidates:
+    def _stream_reader(model_name, response):
+        """Read the streaming pull response and track progress."""
         try:
-            if payload is not None:
-                r = requests.post(url, json=payload, timeout=10)
-            else:
-                r = requests.post(url, timeout=10)
-            if r.status_code in (200, 202):
-                _ollama_cache["last_check"] = 0
-                with _active_pulls_lock:
-                    _active_pulls[name] = {
-                        "model": name,
-                        "status": "started",
-                        "progress": 0,
-                        "started_at": datetime.now().isoformat(),
-                        "last_update": datetime.now().isoformat(),
-                        "output": r.text[:0],
-                    }
-                return True
-        except Exception:
-            continue
+            for raw_line in response.iter_lines():
+                if not raw_line:
+                    continue
+                try:
+                    data = json.loads(raw_line)
+                    total = data.get("total", 0)
+                    completed = data.get("completed", 0)
+                    progress = int(completed / total * 100) if total > 0 else 0
 
-    # Fallback to local CLI
+                    with _active_pulls_lock:
+                        entry = _active_pulls.get(model_name)
+                        if entry is None:
+                            return
+                        entry["last_update"] = datetime.now().isoformat()
+                        entry["progress"] = max(entry.get("progress", 0), progress)
+                        if "error" in data:
+                            entry["status"] = "failed"
+                            entry["error"] = data["error"]
+                        elif data.get("status") == "success":
+                            entry["status"] = "completed"
+                            entry["progress"] = 100
+                        else:
+                            entry["status"] = "running"
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning("Stream reader error for %s: %s", model_name, e)
+            with _active_pulls_lock:
+                entry = _active_pulls.get(model_name)
+                if entry:
+                    entry["status"] = "failed"
+                    entry["error"] = str(e)
+        finally:
+            try:
+                response.close()
+            except Exception:
+                pass
+            _ollama_cache["last_check"] = 0  # Invalidate model cache on completion
+
     try:
-        _spawn_ollama_pull(name)
+        r = requests.post(
+            pull_url,
+            json={"name": name},
+            stream=True,
+            timeout=15,  # Only for connection + first byte; rest is read in thread
+        )
+        if r.status_code not in (200, 202):
+            logger.warning("Ollama /api/pull returned HTTP %s for %s", r.status_code, name)
+            return False
+
+        with _active_pulls_lock:
+            _active_pulls[name] = {
+                "model": name,
+                "status": "running",
+                "progress": 0,
+                "started_at": datetime.now().isoformat(),
+                "last_update": datetime.now().isoformat(),
+                "output": "",
+            }
+
+        th = threading.Thread(target=_stream_reader, args=(name, r), daemon=True)
+        th.start()
         return True
-    except Exception:
+
+    except Exception as e:
+        logger.warning("Failed to initiate pull for %s: %s", name, e)
         return False
 
 
