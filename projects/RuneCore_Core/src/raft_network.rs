@@ -2,6 +2,7 @@
 use crate::raft_consensus::RaftManager;
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
+use protobuf::Message as ProtobufMessage; // needed for write_to_bytes / parse_from_bytes
 use raft::eraftpb::Message as RaftMessage;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,8 +24,9 @@ impl RaftTransport {
     ///
     /// # Arguments
     /// * `node_id` - Current node's ID
-    /// * `peer_urls` - Comma-separated list of peer URLs in format "node_id=url,node_id=url"
-    ///   Example: "1=http://core_primary:11440,2=http://core_secondary:11441,3=http://runecore_ha:11442"
+    /// * `peer_urls_str` - Comma-separated list of peer URLs in format
+    ///   "node_id=url,node_id=url"
+    ///   Example: "1=http://core_primary:11440,2=http://core_secondary:11441"
     pub fn new(node_id: u64, peer_urls_str: &str) -> Result<Self> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(5))
@@ -63,16 +65,17 @@ impl RaftTransport {
             Some(url) => format!("{}/api/v1/raft/message", url),
             None => {
                 tracing::warn!("No URL found for node {}", to);
-                return Ok(()); // Not an error - peer might not be configured yet
+                return Ok(()); // Not an error — peer may not be configured yet
             }
         };
 
-        // Serialize message with bincode
-        let payload = bincode::serialize(msg)
-            .context("Failed to serialize Raft message")?;
+        // Encode with protobuf (RaftMessage is a protobuf type; serde is not available)
+        let payload = msg
+            .write_to_bytes()
+            .map_err(|e| anyhow::anyhow!("Failed to serialize Raft message: {:?}", e))?;
 
-        // Send with timeout
-        let send_future = self.client
+        let send_future = self
+            .client
             .post(&url)
             .header("Content-Type", "application/octet-stream")
             .body(payload)
@@ -84,28 +87,31 @@ impl RaftTransport {
                     tracing::trace!("Sent Raft message to node {}", to);
                     Ok(())
                 } else {
-                    tracing::warn!("Failed to send to node {}: HTTP {}", to, response.status());
-                    Ok(()) // Don't fail - Raft handles unreachable peers
+                    tracing::warn!(
+                        "Failed to send to node {}: HTTP {}",
+                        to,
+                        response.status()
+                    );
+                    Ok(()) // Don't fail — Raft handles unreachable peers
                 }
             }
             Ok(Err(e)) => {
                 tracing::warn!("Network error sending to node {}: {}", to, e);
-                Ok(()) // Don't fail - Raft handles unreachable peers
+                Ok(())
             }
             Err(_) => {
                 tracing::warn!("Timeout sending message to node {}", to);
-                Ok(()) // Don't fail - Raft handles timeouts
+                Ok(())
             }
         }
     }
 
-    /// Send multiple Raft messages to various peers
+    /// Send multiple Raft messages to various peers concurrently
     pub async fn send_messages(&self, messages: Vec<RaftMessage>) -> Result<()> {
         if messages.is_empty() {
             return Ok(());
         }
 
-        // Send all messages concurrently
         let mut tasks = Vec::new();
         for msg in messages {
             let to = msg.to;
@@ -115,7 +121,6 @@ impl RaftTransport {
             }));
         }
 
-        // Wait for all sends to complete (ignore individual failures)
         for task in tasks {
             let _ = task.await;
         }
@@ -124,18 +129,17 @@ impl RaftTransport {
     }
 }
 
-/// Handle incoming Raft message from a peer node
+/// Handle an incoming Raft message from a peer node
 pub async fn handle_raft_message(
     raft_manager: Arc<Mutex<RaftManager>>,
     payload: Vec<u8>,
 ) -> Result<()> {
-    // Deserialize message
-    let msg: RaftMessage = bincode::deserialize(&payload)
-        .context("Failed to deserialize Raft message")?;
+    // Decode protobuf (same encoding used in send_message)
+    let msg = RaftMessage::parse_from_bytes(&payload)
+        .map_err(|e| anyhow::anyhow!("Failed to deserialize Raft message: {:?}", e))?;
 
     tracing::trace!("Received Raft message from node {}", msg.from);
 
-    // Step the Raft state machine with this message
     {
         let mut manager = raft_manager.lock();
         manager.step(msg)?;
@@ -144,7 +148,7 @@ pub async fn handle_raft_message(
     Ok(())
 }
 
-/// Background task to process Raft ready state and send messages
+/// Background task: tick Raft, process ready state, send messages to peers
 pub async fn raft_network_task(
     raft_manager: Arc<Mutex<RaftManager>>,
     transport: RaftTransport,
@@ -155,17 +159,15 @@ pub async fn raft_network_task(
     loop {
         interval.tick().await;
 
-        // Process Raft state machine
+        // Advance Raft state machine
         let messages = {
             let mut manager = raft_manager.lock();
-            
-            // Advance Raft tick
+
             if let Err(e) = manager.tick() {
                 tracing::error!("Raft tick error: {}", e);
                 continue;
             }
 
-            // Get ready state and extract messages
             match manager.process_ready() {
                 Ok(messages) => messages,
                 Err(e) => {
@@ -175,27 +177,20 @@ pub async fn raft_network_task(
             }
         };
 
-        // Send messages to peers
         if !messages.is_empty() {
             tracing::trace!("Sending {} Raft messages to peers", messages.len());
             if let Err(e) = transport.send_messages(messages).await {
                 tracing::error!("Failed to send Raft messages: {}", e);
             }
         }
-        
-        // Check for snapshot creation every 10 seconds (100 ticks)
+
+        // Check for snapshot creation every 10 seconds (~100 ticks at 100 ms each)
         snapshot_check_counter += 1;
         if snapshot_check_counter >= 100 {
             snapshot_check_counter = 0;
-            
             let mut manager = raft_manager.lock();
             if let Err(e) = manager.maybe_create_snapshot() {
                 tracing::error!("Failed to create snapshot: {}", e);
-            }
-        }
-    }
-}
-                tracing::error!("Failed to send Raft messages: {}", e);
             }
         }
     }

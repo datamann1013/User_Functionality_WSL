@@ -2,7 +2,6 @@ use sqlx::{SqlitePool, sqlite::SqlitePoolOptions, FromRow};
 use std::path::Path;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
 
 #[derive(Serialize, Deserialize, Debug, Clone, FromRow)]
 pub struct ServiceRow {
@@ -41,7 +40,6 @@ pub async fn init_db(data_dir: &str) -> Result<SqlitePool> {
     let db_url = format!("sqlite://{}", db_path.to_string_lossy());
     let pool = SqlitePoolOptions::new().max_connections(5).connect(&db_url).await?;
 
-    // Create services table with extended schema
     sqlx::query(
         r#"CREATE TABLE IF NOT EXISTS services (
             id TEXT PRIMARY KEY,
@@ -61,12 +59,10 @@ pub async fn init_db(data_dir: &str) -> Result<SqlitePool> {
     .execute(&pool)
     .await?;
 
-    // Create index on name for faster lookups
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_services_name ON services(name)")
         .execute(&pool)
         .await?;
 
-    // Create index on status for offline detection queries
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_services_status ON services(status)")
         .execute(&pool)
         .await?;
@@ -77,7 +73,7 @@ pub async fn init_db(data_dir: &str) -> Result<SqlitePool> {
 pub async fn insert_service(pool: &SqlitePool, svc: &ServiceRow) -> Result<()> {
     let now = chrono::Utc::now().timestamp();
     sqlx::query(
-        r#"INSERT OR REPLACE INTO services 
+        r#"INSERT OR REPLACE INTO services
            (id, name, version, ws_url, rest_url, public_key_pem, dependencies, wishlist, container_name, status, last_seen)
            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)"#,
     )
@@ -92,13 +88,9 @@ pub async fn insert_service(pool: &SqlitePool, svc: &ServiceRow) -> Result<()> {
     .bind(&svc.container_name)
     .bind(&svc.status)
     .bind(now)
-    .execute(pool), 
-                  dependencies, wishlist, container_name, status, last_seen, offline_since
-           FROM services"#,
-    )
-    .fetch_all(pool)
+    .execute(pool)
     .await?;
-    Ok(rows)
+    Ok(())
 }
 
 pub async fn get_service_by_name(pool: &SqlitePool, name: &str) -> Result<Option<ServiceRow>> {
@@ -136,10 +128,14 @@ pub async fn mark_service_offline(pool: &SqlitePool, name: &str, offline_type: &
     .bind(name)
     .execute(pool)
     .await?;
-    Ok(()
+    Ok(())
+}
+
 pub async fn list_services(pool: &SqlitePool) -> Result<Vec<ServiceRow>> {
     let rows = sqlx::query_as::<_, ServiceRow>(
-        r#"SELECT id, name, version, ws_url, rest_url, public_key_pem FROM services"#,
+        r#"SELECT id, name, version, ws_url, rest_url, public_key_pem,
+                  dependencies, wishlist, container_name, status, last_seen, offline_since
+           FROM services"#,
     )
     .fetch_all(pool)
     .await?;

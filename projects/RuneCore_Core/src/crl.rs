@@ -1,15 +1,13 @@
 use anyhow::Result;
 use std::{path::Path, fs};
-use openssl::x509::{X509, X509Crl};
-use openssl::pkey::PKey;
-use openssl::bn::BigNum;
-use openssl::asn1::Asn1Time;
-use std::collections::HashSet;
 
 /// Certificate Revocation List management
-/// 
-/// This module manages a CRL (Certificate Revocation List) for the RuneCore CA.
-/// Services must check the CRL before accepting certificates.
+///
+/// openssl-rs 0.10.x does not expose an X509CrlBuilder API, so full PEM-CRL
+/// generation is not yet implemented here.  Revocation state is tracked in
+/// `cert_registry.json` via `CertificateRegistry`.  The `/api/v1/pki/crl`
+/// endpoint serves the CRL PEM file if one already exists on disk (e.g.
+/// generated externally), and returns an error otherwise.
 
 pub struct CrlManager {
     data_dir: String,
@@ -21,153 +19,78 @@ impl CrlManager {
             data_dir: data_dir.to_string(),
         }
     }
-    
-    /// Initialize empty CRL if it doesn't exist
-    pub fn init_crl(&self, passphrase: &str) -> Result<()> {
-        let crl_path = Path::new(&self.data_dir).join("ca_crl.pem");
-        
-        if crl_path.exists() {
-            println!("CRL exists - skipping initialization");
-            return Ok(());
-        }
-        
-        println!("Initializing empty CRL...");
-        
-        // Load CA cert and key
-        let ca_cert_path = Path::new(&self.data_dir).join("ca_cert.pem");
-        let ca_cert_pem = fs::read(&ca_cert_path)?;
-        let ca_cert = X509::from_pem(&ca_cert_pem)?;
-        
-        let key_pem = crate::ca::load_encrypted_key(&self.data_dir, passphrase)?;
-        let ca_priv = PKey::private_key_from_pem(&key_pem)?;
-        
-        // Create empty CRL
-        let mut crl = X509Crl::builder()?;
-        crl.set_issuer_name(ca_cert.subject_name())?;
-        
-        let now = Asn1Time::days_from_now(0)?;
-        let next_update = Asn1Time::days_from_now(7)?; // Update weekly
-        
-        crl.set_last_update(&now)?;
-        crl.set_next_update(&next_update)?;
-        
-        // Sign the CRL
-        crl.sign(&ca_priv, openssl::hash::MessageDigest::sha256())?;
-        
-        let crl_pem = crl.build().to_pem()?;
-        fs::write(crl_path, crl_pem)?;
-        
-        println!("CRL initialized at {:?}", crl_path);
+
+    /// No-op: CRL PEM generation requires openssl-rs builder APIs not yet
+    /// available.  Revocation is tracked via `CertificateRegistry`.
+    pub fn init_crl(&self, _passphrase: &str) -> Result<()> {
+        tracing::warn!(
+            "CRL PEM builder not available in this build; \
+             revocation tracked via cert_registry.json"
+        );
         Ok(())
     }
-    
-    /// Add a certificate serial number to the CRL
-    pub fn revoke_certificate(&self, passphrase: &str, serial: &str, reason: &str) -> Result<()> {
-        let crl_path = Path::new(&self.data_dir).join("ca_crl.pem");
-        
-        // Load existing CRL
-        let existing_crl_pem = fs::read(&crl_path)?;
-        let existing_crl = X509Crl::from_pem(&existing_crl_pem)?;
-        
-        // Load CA cert and key
-        let ca_cert_path = Path::new(&self.data_dir).join("ca_cert.pem");
-        let ca_cert_pem = fs::read(&ca_cert_path)?;
-        let ca_cert = X509::from_pem(&ca_cert_pem)?;
-        
-        let key_pem = crate::ca::load_encrypted_key(&self.data_dir, passphrase)?;
-        let ca_priv = PKey::private_key_from_pem(&key_pem)?;
-        
-        // Create new CRL with all existing entries plus the new one
-        let mut new_crl = X509Crl::builder()?;
-        new_crl.set_issuer_name(ca_cert.subject_name())?;
-        
-        let now = Asn1Time::days_from_now(0)?;
-        let next_update = Asn1Time::days_from_now(7)?;
-        
-        new_crl.set_last_update(&now)?;
-        new_crl.set_next_update(&next_update)?;
-        
-        // Copy existing revoked entries
-        for revoked in existing_crl.get_revoked() {
-            for entry in revoked {
-                new_crl.add_revoked(entry.clone())?;
-            }
-        }
-        
-        // Add new revoked certificate
-        let serial_bn = BigNum::from_hex_str(serial)?;
-        let mut revoked = openssl::x509::X509Revoked::new()?;
-        revoked.set_serial_number(serial_bn.to_asn1_integer()?.as_ref())?;
-        revoked.set_revocation_date(&now)?;
-        
-        new_crl.add_revoked(revoked)?;
-        
-        // Sign the updated CRL
-        new_crl.sign(&ca_priv, openssl::hash::MessageDigest::sha256())?;
-        
-        let crl_pem = new_crl.build().to_pem()?;
-        fs::write(crl_path, crl_pem)?;
-        
-        println!("Certificate {} revoked: {}", serial, reason);
+
+    /// Record a revocation.  Updates `cert_registry.json`; does not
+    /// regenerate the CRL PEM file (see `init_crl` note above).
+    pub fn revoke_certificate(&self, _passphrase: &str, serial: &str, reason: &str) -> Result<()> {
+        // Actual JSON tracking is done by the caller via CertificateRegistry.
+        // This method exists so that main.rs can call crl_manager.revoke_certificate()
+        // without needing to know about the implementation limitation.
+        tracing::info!(
+            "Certificate {} marked for revocation (reason: {}); \
+             update cert_registry.json for persistent record",
+            serial,
+            reason
+        );
         Ok(())
     }
-    
-    /// Check if a certificate serial is revoked
+
+    /// Check whether a certificate serial is revoked by consulting the JSON
+    /// registry (not the PEM CRL, which may not exist).
     pub fn is_revoked(&self, serial: &str) -> Result<bool> {
-        let crl_path = Path::new(&self.data_dir).join("ca_crl.pem");
-        
-        if !crl_path.exists() {
+        let registry_path = Path::new(&self.data_dir).join("cert_registry.json");
+        if !registry_path.exists() {
             return Ok(false);
         }
-        
-        let crl_pem = fs::read(&crl_path)?;
-        let crl = X509Crl::from_pem(&crl_pem)?;
-        
-        let serial_bn = BigNum::from_hex_str(serial)?;
-        let serial_check = serial_bn.to_asn1_integer()?;
-        
-        if let Some(revoked) = crl.get_revoked() {
-            for entry in revoked {
-                if entry.serial_number() == serial_check.as_ref() {
-                    return Ok(true);
+        let content = fs::read_to_string(&registry_path)?;
+        let registry: serde_json::Value = serde_json::from_str(&content)?;
+        if let Some(cert_info) = registry["certificates"].get(serial) {
+            return Ok(cert_info["status"].as_str() == Some("revoked"));
+        }
+        Ok(false)
+    }
+
+    /// Return all revoked serials from the JSON registry.
+    pub fn get_revoked_list(&self) -> Result<Vec<String>> {
+        let registry_path = Path::new(&self.data_dir).join("cert_registry.json");
+        if !registry_path.exists() {
+            return Ok(Vec::new());
+        }
+        let content = fs::read_to_string(&registry_path)?;
+        let registry: serde_json::Value = serde_json::from_str(&content)?;
+        let mut revoked = Vec::new();
+        if let Some(certs) = registry["certificates"].as_object() {
+            for (serial, info) in certs {
+                if info["status"].as_str() == Some("revoked") {
+                    revoked.push(serial.clone());
                 }
             }
         }
-        
-        Ok(false)
+        Ok(revoked)
     }
-    
-    /// Get list of all revoked serials
-    pub fn get_revoked_list(&self) -> Result<Vec<String>> {
-        let crl_path = Path::new(&self.data_dir).join("ca_crl.pem");
-        
-        if !crl_path.exists() {
-            return Ok(Vec::new());
-        }
-        
-        let crl_pem = fs::read(&crl_path)?;
-        let crl = X509Crl::from_pem(&crl_pem)?;
-        
-        let mut revoked_list = Vec::new();
-        
-        if let Some(revoked) = crl.get_revoked() {
-            for entry in revoked {
-                let serial = entry.serial_number().to_bn()?.to_hex_str()?;
-                revoked_list.push(serial.to_string());
-            }
-        }
-        
-        Ok(revoked_list)
-    }
-    
-    /// Get CRL PEM content for distribution
+
+    /// Serve the CRL PEM file from disk, if it exists.
     pub fn get_crl_pem(&self) -> Result<Vec<u8>> {
         let crl_path = Path::new(&self.data_dir).join("ca_crl.pem");
-        Ok(fs::read(&crl_path)?)
+        if crl_path.exists() {
+            Ok(fs::read(&crl_path)?)
+        } else {
+            anyhow::bail!("CRL file not found; revocation tracked via cert_registry.json")
+        }
     }
 }
 
-/// Track issued certificates for renewal validation
+/// Track issued certificates for renewal validation and revocation state.
 pub struct CertificateRegistry {
     data_dir: String,
 }
@@ -178,74 +101,62 @@ impl CertificateRegistry {
             data_dir: data_dir.to_string(),
         }
     }
-    
-    /// Record an issued certificate
-    pub fn register_certificate(&self, serial: &str, container_name: &str, service_name: &str, issued_at: i64) -> Result<()> {
+
+    /// Record an issued certificate.
+    pub fn register_certificate(
+        &self,
+        serial: &str,
+        container_name: &str,
+        service_name: &str,
+        issued_at: i64,
+    ) -> Result<()> {
         let registry_path = Path::new(&self.data_dir).join("cert_registry.json");
-        
-        // Load existing registry
         let mut registry: serde_json::Value = if registry_path.exists() {
             let content = fs::read_to_string(&registry_path)?;
             serde_json::from_str(&content)?
         } else {
-            serde_json::json!({
-                "certificates": {}
-            })
+            serde_json::json!({ "certificates": {} })
         };
-        
-        // Add new certificate entry
+
         registry["certificates"][serial] = serde_json::json!({
             "container_name": container_name,
             "service_name": service_name,
             "issued_at": issued_at,
             "status": "active"
         });
-        
-        // Write back
-        let json_str = serde_json::to_string_pretty(&registry)?;
-        fs::write(registry_path, json_str)?;
-        
+
+        fs::write(registry_path, serde_json::to_string_pretty(&registry)?)?;
         Ok(())
     }
-    
-    /// Verify container name matches certificate on renewal
+
+    /// Verify that the container name matches the recorded certificate.
     pub fn verify_renewal(&self, serial: &str, container_name: &str) -> Result<bool> {
         let registry_path = Path::new(&self.data_dir).join("cert_registry.json");
-        
         if !registry_path.exists() {
             return Ok(false);
         }
-        
         let content = fs::read_to_string(&registry_path)?;
         let registry: serde_json::Value = serde_json::from_str(&content)?;
-        
         if let Some(cert_info) = registry["certificates"].get(serial) {
             if let Some(registered_container) = cert_info["container_name"].as_str() {
                 return Ok(registered_container == container_name);
             }
         }
-        
         Ok(false)
     }
-    
-    /// Mark certificate as revoked in registry
+
+    /// Mark a certificate as revoked in the registry.
     pub fn mark_revoked(&self, serial: &str) -> Result<()> {
         let registry_path = Path::new(&self.data_dir).join("cert_registry.json");
-        
         if !registry_path.exists() {
             return Ok(());
         }
-        
         let content = fs::read_to_string(&registry_path)?;
         let mut registry: serde_json::Value = serde_json::from_str(&content)?;
-        
         if let Some(cert_info) = registry["certificates"].get_mut(serial) {
             cert_info["status"] = serde_json::json!("revoked");
         }
-        
-        let json_str = serde_json::to_string_pretty(&registry)?;
-        fs::write(registry_path, json_str)?;
-        
+        fs::write(registry_path, serde_json::to_string_pretty(&registry)?)?;
         Ok(())
     }
 }

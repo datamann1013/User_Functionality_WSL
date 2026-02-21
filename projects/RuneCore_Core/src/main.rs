@@ -1,4 +1,4 @@
-use axum::{extract::State, response::Json, routing::{get, post}, Router, body::Bytes, extract::Path as AxumPath};
+use axum::{extract::State, response::{Json, IntoResponse}, routing::{get, post}, Router, body::Bytes, extract::Path as AxumPath};
 use axum::http::HeaderMap;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,9 @@ struct AppState {
     ca_passphrase: String,
     raft_manager: Option<Arc<parking_lot::Mutex<raft_consensus::RaftManager>>>,
     enable_raft: bool,
+    /// mTLS-capable reqwest client for outbound proxy calls.
+    /// Built once at startup (PBKDF2 key derivation is expensive).
+    proxy_client: reqwest::Client,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -120,12 +123,26 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    let state = AppState { 
-        db: pool, 
-        data_dir: data_dir.clone(), 
+    // Build the mTLS proxy client once — avoids re-running PBKDF2 on every request.
+    // Falls back to a plain client if cert loading fails (e.g. during first-boot before init).
+    let proxy_client = match proxy::build_proxy_client(&data_dir, &passphrase) {
+        Ok(client) => {
+            tracing::info!("Proxy mTLS client ready");
+            client
+        }
+        Err(e) => {
+            tracing::warn!("Could not build mTLS proxy client: {} — falling back to plain HTTP", e);
+            reqwest::Client::new()
+        }
+    };
+
+    let state = AppState {
+        db: pool,
+        data_dir: data_dir.clone(),
         ca_passphrase: passphrase.clone(),
         raft_manager,
         enable_raft,
+        proxy_client,
     };
 
     let app = Router::new()
@@ -342,17 +359,20 @@ async fn register_service(State(state): State<AppState>, headers: HeaderMap, bod
         offline_since: None,
     };
 
-    // If Raft is enabled, propose registration through consensus
-    if state.enable_raft {
-        if let Some(ref raft_mgr) = state.raft_manager {
-            let manager = raft_mgr.lock();
-            
-            // Check if we're the leader
-            if !manager.is_leader() {
-                let leader_id = manager.leader_id();
+    // ─── Raft consensus or direct DB write ───────────────────────────────────
+    // All raft-related operations (mutex locks, propose) are contained inside a
+    // synchronous block expression. No reference to raft_mgr escapes this block,
+    // so no !Send type is alive at the .await points below.
+    let raft_result: Option<Result<(), anyhow::Error>> = if state.enable_raft {
+        if let Some(raft_mgr) = &state.raft_manager {
+            // Check leadership; lock is acquired and released within this inner block.
+            let (is_leader, leader_id) = {
+                let manager = raft_mgr.lock();
+                (manager.is_leader(), manager.leader_id())
+            };
+
+            if !is_leader {
                 tracing::debug!("Not leader, current leader is node {}", leader_id);
-                
-                // Return redirect to leader (in production, include leader URL)
                 return Json(serde_json::json!({
                     "ok": false,
                     "error": "not_leader",
@@ -360,8 +380,7 @@ async fn register_service(State(state): State<AppState>, headers: HeaderMap, bod
                     "message": "Please retry request with the leader node"
                 }));
             }
-            
-            // Propose registration via Raft
+
             let cmd = raft_consensus::RegistryCommand::RegisterService {
                 name: info.name.clone(),
                 version: info.version.clone(),
@@ -371,33 +390,40 @@ async fn register_service(State(state): State<AppState>, headers: HeaderMap, bod
                 wishlist: info.wishlist.clone(),
                 container_name: info.container_name.clone(),
             };
-            
-            drop(manager); // Release lock before async operation
-            
-            match raft_mgr.lock().propose(cmd).await {
-                Ok(_) => {
-                    tracing::info!("Service registration proposed via Raft: {}", info.name);
-                    
-                    // Also write to local DB for now (dual-write pattern during migration)
-                    // TODO: Remove once Raft is fully operational
-                    if let Err(e) = db::insert_service(&state.db, &row).await {
-                        tracing::warn!("Local DB write failed: {}", e);
-                    }
-                },
-                Err(e) => {
-                    tracing::error!("Raft propose failed: {}", e);
-                    return Json(serde_json::json!({
-                        "ok": false,
-                        "error": format!("raft error: {}", e)
-                    }));
-                }
-            }
+
+            // Lock is held only for propose(); guard dropped at end of statement.
+            // raft_mgr borrow ends at the closing `}` of this block — nothing
+            // non-Send escapes into the async continuation below.
+            Some(raft_mgr.lock().propose(cmd).map(|_| ()))
+        } else {
+            None
         }
     } else {
-        // Direct database write (legacy mode)
-        if let Err(e) = db::insert_service(&state.db, &row).await {
-            let _ = diag::report_error_sync(&format!("db insert error: {}", e), None);
-            return Json(serde_json::json!({"ok": false, "error": format!("db error: {}", e)}));
+        None
+    };
+
+    // Handle raft outcome; .await points below are safe — raft_mgr is out of scope.
+    match raft_result {
+        Some(Ok(())) => {
+            tracing::info!("Service registration proposed via Raft: {}", info.name);
+            // Dual-write to local DB during migration to full Raft
+            if let Err(e) = db::insert_service(&state.db, &row).await {
+                tracing::warn!("Local DB write failed: {}", e);
+            }
+        }
+        Some(Err(e)) => {
+            tracing::error!("Raft propose failed: {}", e);
+            return Json(serde_json::json!({
+                "ok": false,
+                "error": format!("raft error: {}", e)
+            }));
+        }
+        None => {
+            // Direct database write (Raft disabled)
+            if let Err(e) = db::insert_service(&state.db, &row).await {
+                let _ = diag::report_error_sync(&format!("db insert error: {}", e), None);
+                return Json(serde_json::json!({"ok": false, "error": format!("db error: {}", e)}));
+            }
         }
     }
 
@@ -595,14 +621,16 @@ async fn proxy_route_handler(
     
     tracing::debug!("proxy route: service={}, path={}", service_name, remaining_path);
     
-    // Extract headers and body
+    // Decompose request into method, headers, and body
     let (parts, body) = req.into_parts();
+    let method = parts.method;
     let headers = parts.headers;
-    
+
     // Call proxy handler
     match proxy::proxy_handler(
         state,
-        AxumPath((service_name.clone(), remaining_path.clone())),
+        AxumPath((service_name, remaining_path)),
+        method,
         headers,
         body,
     ).await {
