@@ -495,7 +495,21 @@ function App() {
         throw new Error(`Failed to parse server response: ${parseError.message}`);
       }
 
-      if (response.ok) {
+      // Model-missing codes that require the CANCEL/retry flow.
+      // Checked both inside response.ok (HTTP 202 "accepted") and the error branch.
+      const modelMissingCodes = new Set([
+        "E_MODEL_MISSING",
+        "E_MODEL_MISSING_PULL_TIMEOUT",
+        "E_MODEL_MISSING_PULL_STARTED",
+        "E_MODEL_PULL_IN_PROGRESS",   // backend returns HTTP 202 for this
+        "MODEL_PULL_IN_PROGRESS",     // alternate form
+      ]);
+
+      // HTTP 202 is response.ok===true but means "model pull started, retry later".
+      // Detect it by checking error_code in the body before treating as success.
+      const isModelPull202 = response.status === 202 && data && modelMissingCodes.has(data.error_code);
+
+      if (response.ok && !isModelPull202) {
         // Remove thinking message and add AI response
         const aiMsg = {
           id: Date.now() + Math.random(),
@@ -504,7 +518,7 @@ function App() {
           timestamp: new Date().toISOString(),
           agentId: agentIdNow,
         };
-        
+
         setMessageStore((prev) => {
           const list = (prev[agentIdNow] || []).filter((msg) => msg.id !== thinkingId).concat([aiMsg]);
           return trimMessageStore(prev, agentIdNow, list);
@@ -522,21 +536,14 @@ function App() {
             [agentIdNow]: (counts[agentIdNow] || 0) + 1,
           }));
         }
-        
+
         logFrontendError(
           "FRONTEND_CHAT_SUCCESS",
           "Chat message sent successfully"
         );
       } else {
         // Handle specific backend error codes for model-missing and upstream failures.
-        const modelMissingCodes = new Set([
-          "E_MODEL_MISSING",
-          "E_MODEL_MISSING_PULL_TIMEOUT",
-          "E_MODEL_MISSING_PULL_STARTED",
-          "E_MODEL_PULL_IN_PROGRESS",   // backend sends this when auto-pull times out
-          "MODEL_PULL_IN_PROGRESS",     // alternate form
-        ]);
-
+        // modelMissingCodes is defined above and shared with the 202 check.
         if (data && data.error_code === "EABB5") {
           // Upstream AI unavailable — show error and let user retry manually.
           // Do NOT keep thinking visible (no background retry is started for this case).
@@ -1160,7 +1167,7 @@ function App() {
                   )}
                 </div>
 
-                {modelRetryingAgent === selectedAgent ? (
+                {modelRetryingAgent !== null && modelRetryingAgent === selectedAgent ? (
                   <button
                     className="cancel-model-btn"
                     onClick={() => cancelModelRetry(selectedAgent)}

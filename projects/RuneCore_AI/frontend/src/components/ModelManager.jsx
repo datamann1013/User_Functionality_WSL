@@ -144,11 +144,16 @@ const ModelManager = ({ isOpen, onClose }) => {
       if (pollAbortRef.current[modelName]) return;
 
       try {
-        // Check if model now appears in the available list
+        // Check if model now appears in the available list.
+        // The /api/models endpoint may return objects {name, size, ...} or strings
+        // depending on whether model_manager is active — normalize to strings.
         const modelsResp = await fetch(`${API_BASE}/api/models`);
         if (modelsResp.ok) {
           const mdata = await modelsResp.json().catch(() => ({}));
-          if ((mdata.models || []).includes(modelName)) {
+          const availableNames = (mdata.models || []).map((m) =>
+            typeof m === "string" ? m : m?.name || null
+          ).filter(Boolean);
+          if (availableNames.includes(modelName)) {
             setDownloadingModels((prev) => {
               const copy = { ...prev };
               delete copy[modelName];
