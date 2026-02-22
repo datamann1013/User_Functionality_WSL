@@ -6,8 +6,16 @@ services:
       - '5001:5001'
     environment:
       - LOG_LEVEL=DEBUG
+    networks:
+      runecore_dev:
+        aliases:
+          - runeguard
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
       interval: 10s
       timeout: 3s
       retries: 3
+
+networks:
+  runecore_dev:
+    external: true

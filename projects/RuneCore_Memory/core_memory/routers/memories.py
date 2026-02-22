@@ -202,6 +202,7 @@ def query_memories(req: QueryRequest):
                 results.append({
                     "id": str(m.id),
                     "score": sc,
+                    "text": m.text,
                     "snippet": m.text[:200],
                     "metadata": getattr(m, "metadata_json", {}) or {},
                 })
@@ -216,13 +217,14 @@ def query_memories(req: QueryRequest):
                     results.append({
                         "id": str(r.id),
                         "score": 0.0,
+                        "text": r.text,
                         "snippet": r.text[:200],
                         "metadata": getattr(r, "metadata_json", {}) or {},
                     })
             else:
                 for _, r in _STORE.items():
                     if r["namespace"] == req.namespace:
-                        results.append({"id": r["id"], "score": 0.0, "snippet": r["text"][:200], "metadata": r["metadata"]})
+                        results.append({"id": r["id"], "score": 0.0, "text": r["text"], "snippet": r["text"][:200], "metadata": r["metadata"]})
         return {"results": results}
     except Exception as e:
         log_exception("ECM5", e, extra={"request": req.dict()})

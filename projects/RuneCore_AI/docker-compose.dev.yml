@@ -13,6 +13,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - ERRORLOGGER_URL=http://runeguard:5001
+      - CORE_MEMORY_URL=http://core_memory:5010/v1
       - OLLAMA_SERVICE_URL=http://ollama_wrapper:5002
       - OLLAMA_AUTO_PULL=1
       - OLLAMA_AUTO_PULL_WAIT=30

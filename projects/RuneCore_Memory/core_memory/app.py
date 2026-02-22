@@ -1,11 +1,13 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import memories
+from .routers import telemetry
 from .utils import log_exception
 import traceback
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
 from . import service_discovery
+from sqlalchemy import text
 import os
 
 
@@ -20,6 +22,7 @@ app.add_middleware(
 )
 
 app.include_router(memories.router, prefix="/v1")
+app.include_router(telemetry.router, prefix="/v1")
 
 
 @app.on_event("startup")
@@ -46,7 +49,7 @@ async def startup_event():
     try:
         from .db import engine
         with engine.connect() as conn:
-            conn.execute("SELECT 1")
+            conn.execute(text("SELECT 1"))
         print("✅ PostgreSQL connected")
     except Exception as e:
         print(f"⚠️  PostgreSQL connection failed: {e}")
@@ -61,6 +64,16 @@ async def startup_event():
             print("✅ Redis connected")
         except Exception as e:
             print(f"⚠️  Redis connection failed: {e}")
+
+    # Check InfluxDB connection
+    try:
+        from .influx import is_available as influx_available, INFLUX_URL
+        if influx_available():
+            print(f"✅ InfluxDB connected: {INFLUX_URL}")
+        else:
+            print(f"⚠️  InfluxDB not available at {INFLUX_URL}")
+    except Exception as e:
+        print(f"⚠️  InfluxDB startup check failed: {e}")
 
 
 @app.on_event("shutdown")

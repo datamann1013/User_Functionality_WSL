@@ -1,10 +1,9 @@
 # RuneGuard Security Service Dockerfile
-FROM runecore/python-alpine-dev:latest
+FROM python:3.11-alpine
 
 WORKDIR /app
 
 # Install minimal runtime dependencies
-USER root
 RUN apk add --no-cache curl
 
 # Install Python dependencies (copy requirements first to leverage Docker layer caching)

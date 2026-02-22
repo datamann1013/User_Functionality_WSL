@@ -1,5 +1,6 @@
-FROM runecore/python-slim-dev:latest
+FROM python:3.11-slim
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libpq-dev curl && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt
 # Copy project files
@@ -12,11 +13,10 @@ COPY migrate.py /app/migrate.py
 # Small wrapper to run migrations or start the server
 COPY start_core_memory.sh /app/start_core_memory.sh
 COPY manage_migrations.sh /app/manage_migrations.sh
-USER root
 RUN chmod +x /app/start_core_memory.sh
 RUN chmod +x /app/manage_migrations.sh
-# Ensure files owned by non-root dev user if base image provides one
-RUN if id dev >/dev/null 2>&1; then chown -R dev:dev /app || true; fi
-USER dev
+RUN groupadd -g 1001 appuser && useradd -u 1001 -g appuser -s /bin/bash -m appuser \
+    && chown -R appuser:appuser /app
+USER appuser
 ENV PYTHONUNBUFFERED=1
 CMD ["/app/start_core_memory.sh"]

@@ -6,6 +6,10 @@ services:
       - '8080:8080'
     environment:
       - RUNECORE_MODE=development
+    networks:
+      runecore_dev:
+        aliases:
+          - runecore_core
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 10s
@@ -19,7 +23,9 @@ services:
     ports:
       - '80:80'
     networks:
-      - runecore_dev
+      runecore_dev:
+        aliases:
+          - runecore_router
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/health || true"]
       interval: 15s
