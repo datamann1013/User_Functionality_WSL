@@ -1,0 +1,229 @@
+/* RuneGuard Dashboard — Steel Blue Minimalist Theme */
+/* Matches RuneCore_Mind palette */
+
+:root {
+  --bg-primary: #111827;
+  --bg-secondary: #1f2937;
+  --bg-card: #1a2332;
+  --border: #2d3748;
+  --accent: #3b82f6;
+  --accent-dim: #1d4ed8;
+  --text-primary: #e5e7eb;
+  --text-secondary: #9ca3af;
+  --text-dim: #6b7280;
+  --online: #10b981;
+  --offline: #ef4444;
+  --warning: #f59e0b;
+  --info: #60a5fa;
+  --font: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+/* ── Layout ── */
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.dashboard-header {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dashboard-header h1 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.header-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 20px;
+  flex: 1;
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Panel ── */
+.panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-header {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.panel-updated {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.panel-body {
+  padding: 14px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* ── Status badges ── */
+.badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.badge-online  { background: #064e3b; color: var(--online); }
+.badge-offline { background: #450a0a; color: var(--offline); }
+.badge-unknown { background: #1c1917; color: var(--text-dim); }
+
+/* ── Tables ── */
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding: 4px 8px 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+td {
+  padding: 6px 8px 6px 0;
+  border-bottom: 1px solid #1a2030;
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+/* ── Stat rows (for memory / error panels) ── */
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid #1a2030;
+}
+
+.stat-row:last-child {
+  border-bottom: none;
+}
+
+.stat-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.stat-value {
+  color: var(--text-primary);
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.stat-value.accent { color: var(--accent); }
+.stat-value.online { color: var(--online); }
+.stat-value.offline { color: var(--offline); }
+.stat-value.warning { color: var(--warning); }
+
+/* ── Loading / error states ── */
+.state-msg {
+  color: var(--text-dim);
+  font-size: 12px;
+  text-align: center;
+  padding: 24px 0;
+}
+
+.state-msg.error {
+  color: var(--offline);
+}
+
+/* ── Availability dots ── */
+.avail-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.avail-dot.yes { background: var(--online); }
+.avail-dot.no  { background: var(--offline); }
+
+/* ── CPU bar ── */
+.cpu-bar-bg {
+  background: var(--bg-secondary);
+  border-radius: 2px;
+  height: 6px;
+  width: 80px;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.cpu-bar-fill {
+  background: var(--accent);
+  border-radius: 2px;
+  height: 6px;
+  transition: width 0.3s;
+}

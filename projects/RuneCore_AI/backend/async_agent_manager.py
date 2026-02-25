@@ -27,6 +27,11 @@ from collections import defaultdict
 from queue import PriorityQueue
 import heapq
 
+try:
+    import core_memory_bridge as _cmb
+except ImportError:
+    _cmb = None
+
 
 class RequestStatus(Enum):
     """Status states for async requests"""
@@ -225,6 +230,19 @@ class AgentWorker:
 
                 # Store in the manager's response store
                 await async_agent_manager._store_response(request.request_id, result)
+
+                # Persist conversation turn to CoreMemory (non-blocking)
+                if _cmb and ai_response:
+                    try:
+                        loop = asyncio.get_event_loop()
+                        await loop.run_in_executor(
+                            None,
+                            lambda: _cmb.store_turn(
+                                request.agent_id, request.message, ai_response
+                            ),
+                        )
+                    except Exception:
+                        pass
 
             else:
                 # Non-200 response

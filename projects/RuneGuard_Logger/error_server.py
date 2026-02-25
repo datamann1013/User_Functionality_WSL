@@ -1,8 +1,11 @@
 import os
+import csv
+import glob as _glob
 import threading
 import time
 import socket
 import requests
+from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 
@@ -42,6 +45,82 @@ def _register_with_core():
 
 
 threading.Thread(target=_register_with_core, daemon=True).start()
+
+
+# ---------------------------------------------------------------------------
+# Error stats — background push to CoreMemory + local /stats endpoint
+# ---------------------------------------------------------------------------
+_LOG_DIRECTORY = os.environ.get("LOG_DIRECTORY", "/app/logs")
+_CORE_PROXY_URL = os.environ.get(
+    "CORE_PROXY_URL", "http://runecore_core:11441/api/proxy/CoreMemoryAPI"
+)
+_STATS_PUSH_INTERVAL = int(os.environ.get("STATS_PUSH_INTERVAL", "300"))  # 5 minutes
+
+
+def _compute_error_stats():
+    """Read all CSV log files and return aggregate counts."""
+    total = 0
+    errors_last_hour = 0
+    by_type = {"E": 0, "W": 0, "I": 0}
+    cutoff = datetime.utcnow() - timedelta(hours=1)
+
+    if not os.path.isdir(_LOG_DIRECTORY):
+        return total, errors_last_hour, by_type
+
+    for path in _glob.glob(os.path.join(_LOG_DIRECTORY, "errorlog_*.csv")):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                reader = csv.reader(f, delimiter=";")
+                next(reader, None)  # skip header
+                for row in reader:
+                    if len(row) < 2:
+                        continue
+                    total += 1
+                    code = row[1] if len(row) > 1 else ""
+                    prefix = code[0].upper() if code else ""
+                    if prefix in by_type:
+                        by_type[prefix] += 1
+                    try:
+                        ts = datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
+                        if ts >= cutoff:
+                            errors_last_hour += 1
+                    except ValueError:
+                        pass
+        except Exception:
+            pass
+
+    return total, errors_last_hour, by_type
+
+
+def _push_stats_loop():
+    """Push error stats to CoreMemory every STATS_PUSH_INTERVAL seconds."""
+    time.sleep(30)  # initial delay — let Core registration settle
+    while True:
+        try:
+            total, last_hour, by_type = _compute_error_stats()
+            payload = {
+                "measurement": "error_stats",
+                "tags": {"service": "RuneGuardLogger"},
+                "fields": {
+                    "total_errors": float(total),
+                    "errors_last_hour": float(last_hour),
+                    "error_count": float(by_type.get("E", 0)),
+                    "warning_count": float(by_type.get("W", 0)),
+                    "info_count": float(by_type.get("I", 0)),
+                },
+            }
+            requests.post(
+                f"{_CORE_PROXY_URL}/telemetry",
+                json=payload,
+                timeout=5,
+            )
+        except Exception as e:
+            print(f"[RuneGuard] Stats push failed: {e}")
+        time.sleep(_STATS_PUSH_INTERVAL)
+
+
+threading.Thread(target=_push_stats_loop, daemon=True).start()
+
 app.config["WTF_CSRF_ENABLED"] = False
 
 # Pre-compile response templates for faster responses
@@ -78,6 +157,19 @@ def log_endpoint():
 def health_check():
     """Fast health check"""
     return jsonify(HEALTH_RESPONSE), 200
+
+
+@app.route("/stats", methods=["GET"])
+def stats():
+    """Return aggregate error counts from local log files."""
+    total, last_hour, by_type = _compute_error_stats()
+    return jsonify({
+        "total_errors": total,
+        "errors_last_hour": last_hour,
+        "error_count": by_type.get("E", 0),
+        "warning_count": by_type.get("W", 0),
+        "info_count": by_type.get("I", 0),
+    }), 200
 
 
 if __name__ == "__main__":

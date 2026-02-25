@@ -8,6 +8,7 @@ services:
       - LOG_LEVEL=DEBUG
       - LOG_DIRECTORY=/app/logs
       - RUNECORE_CORE_URL=http://runecore_core:11441
+      - CORE_PROXY_URL=http://runecore_core:11441/api/proxy/CoreMemoryAPI
     networks:
       # RuneGuard must be reachable from all three VLANs for error logging
       runecore_dev:

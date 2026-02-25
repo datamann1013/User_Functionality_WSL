@@ -1,0 +1,47 @@
+version: '3.8'
+services:
+  dashboard_backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: dashboard_backend
+    ports:
+      - '5004:5004'
+    environment:
+      - RUNECORE_CORE_URL=http://runecore_core:11441
+      - CORE_PROXY_URL=http://runecore_core:11441/api/proxy/CoreMemoryAPI
+    networks:
+      runecore_dev:
+        aliases:
+          - dashboard_backend
+      # Also on dashboard_net so the frontend Vite proxy can reach us
+      runecore_dashboard_net:
+        aliases:
+          - dashboard_backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5004/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  dashboard_frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: dashboard_frontend
+    ports:
+      - '3001:3001'
+    networks:
+      runecore_dashboard_net:
+        aliases:
+          - dashboard_frontend
+    depends_on:
+      - dashboard_backend
+    restart: unless-stopped
+
+networks:
+  runecore_dev:
+    external: true
+  runecore_dashboard_net:
+    external: true

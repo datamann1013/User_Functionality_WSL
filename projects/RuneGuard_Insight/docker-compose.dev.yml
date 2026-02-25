@@ -1,0 +1,20 @@
+version: '3.8'
+services:
+  insight:
+    build: .
+    container_name: runeguard_insight
+    volumes:
+      # Read-only Docker socket access for container stats
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - CORE_PROXY_URL=http://runecore_core:11441/api/proxy/CoreMemoryAPI
+      - COLLECT_INTERVAL=30
+    networks:
+      runecore_dev:
+        aliases:
+          - runeguard_insight
+    restart: unless-stopped
+
+networks:
+  runecore_dev:
+    external: true
