@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RuneGuard Dashboard</title>
+  <style>
+    :root {
+      --bg: #111827; --bg2: #1f2937; --card: #1a2332;
+      --border: #2d3748; --accent: #3b82f6;
+      --text: #e5e7eb; --dim: #9ca3af; --dimmer: #6b7280;
+      --online: #10b981; --offline: #ef4444; --warn: #f59e0b;
+      --font: 'JetBrains Mono','Fira Code',Consolas,monospace;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:var(--bg); color:var(--text); font-family:var(--font);
+           font-size:13px; line-height:1.5; min-height:100vh; }
+
+    /* Layout */
+    .header { background:var(--bg2); border-bottom:1px solid var(--border);
+              padding:14px 24px; display:flex; align-items:center;
+              justify-content:space-between; }
+    .header h1 { font-size:15px; font-weight:700; color:var(--accent);
+                 letter-spacing:.05em; text-transform:uppercase; }
+    .header-meta { font-size:11px; color:var(--dimmer); }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px;
+            padding:20px; }
+    @media(max-width:900px) { .grid { grid-template-columns:1fr; } }
+
+    /* Panel */
+    .panel { background:var(--card); border:1px solid var(--border);
+             border-radius:4px; display:flex; flex-direction:column; }
+    .panel-header { background:var(--bg2); border-bottom:1px solid var(--border);
+                    padding:10px 14px; display:flex; align-items:center;
+                    justify-content:space-between; }
+    .panel-title { font-size:11px; font-weight:700; letter-spacing:.08em;
+                   text-transform:uppercase; color:var(--accent); }
+    .panel-updated { font-size:10px; color:var(--dimmer); }
+    .panel-body { padding:14px; flex:1; overflow-y:auto; }
+
+    /* Tables */
+    table { width:100%; border-collapse:collapse; }
+    th { text-align:left; font-size:10px; font-weight:700; letter-spacing:.07em;
+         text-transform:uppercase; color:var(--dimmer);
+         padding:4px 8px 8px 0; border-bottom:1px solid var(--border); }
+    td { padding:6px 8px 6px 0; border-bottom:1px solid #1a2030;
+         vertical-align:middle; }
+    tr:last-child td { border-bottom:none; }
+
+    /* Badges */
+    .badge { display:inline-block; padding:1px 7px; border-radius:2px;
+             font-size:10px; font-weight:700; letter-spacing:.06em;
+             text-transform:uppercase; }
+    .badge-online  { background:#064e3b; color:var(--online); }
+    .badge-offline { background:#450a0a; color:var(--offline); }
+    .badge-unknown { background:#1c1917; color:var(--dimmer); }
+
+    /* Stat rows */
+    .stat-row { display:flex; justify-content:space-between; align-items:center;
+                padding:6px 0; border-bottom:1px solid #1a2030; }
+    .stat-row:last-child { border-bottom:none; }
+    .stat-label { color:var(--dim); font-size:12px; }
+    .stat-value { font-weight:700; }
+    .val-accent { color:var(--accent); }
+    .val-online { color:var(--online); }
+    .val-offline { color:var(--offline); }
+    .val-warn { color:var(--warn); }
+
+    /* CPU bar */
+    .cpu-bg { background:var(--bg2); border-radius:2px; height:6px;
+              width:80px; display:inline-block; vertical-align:middle; }
+    .cpu-fill { border-radius:2px; height:6px; transition:width .3s; }
+
+    /* Avail dot */
+    .dot { display:inline-block; width:8px; height:8px; border-radius:50%;
+           margin-right:6px; vertical-align:middle; }
+    .dot-yes { background:var(--online); }
+    .dot-no  { background:var(--offline); }
+
+    .state-msg { color:var(--dimmer); font-size:12px; text-align:center; padding:24px 0; }
+    .state-err  { color:var(--offline); }
+
+    /* Namespace sub-rows */
+    .ns-row { display:flex; justify-content:space-between;
+              margin-top:4px; font-size:11px; }
+    .ns-key { color:var(--dim); }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>RuneGuard Dashboard</h1>
+  <span class="header-meta" id="refresh-note">auto-refresh every 30s</span>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Service Health</span>
+      <span class="panel-updated" id="upd-services">—</span>
+    </div>
+    <div class="panel-body" id="body-services"><p class="state-msg">Loading…</p></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Error Stats</span>
+      <span class="panel-updated" id="upd-errors">—</span>
+    </div>
+    <div class="panel-body" id="body-errors"><p class="state-msg">Loading…</p></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Memory / AI</span>
+      <span class="panel-updated" id="upd-memory">—</span>
+    </div>
+    <div class="panel-body" id="body-memory"><p class="state-msg">Loading…</p></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Container Load</span>
+      <span class="panel-updated" id="upd-containers">—</span>
+    </div>
+    <div class="panel-body" id="body-containers"><p class="state-msg">Loading…</p></div>
+  </div>
+</div>
+
+<script>
+const REFRESH_MS = 30_000;
+
+function ts() {
+  return new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+
+async function apiFetch(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+// ── Service Health ──────────────────────────────────────────────────────────
+async function renderServices() {
+  const el = document.getElementById('body-services');
+  try {
+    const data = await apiFetch('/api/services');
+    const svcs = data.services || [];
+    if (!svcs.length) { el.innerHTML = '<p class="state-msg">No data yet — waiting for first snapshot</p>'; return; }
+    let rows = '';
+    for (const s of svcs) {
+      const online = s.is_online === 1 || s.is_online === true;
+      const secs = s.seconds_since_heartbeat;
+      let seen = '—';
+      if (secs != null) {
+        if (secs < 60)   seen = Math.round(secs) + 's ago';
+        else if (secs < 3600) seen = Math.round(secs/60) + 'm ago';
+        else              seen = Math.round(secs/3600) + 'h ago';
+      }
+      const badge = online ? 'badge-online' : 'badge-offline';
+      const label = online ? 'online' : 'offline';
+      rows += `<tr>
+        <td>${esc(s.name)}</td>
+        <td><span class="badge ${badge}">${label}</span></td>
+        <td style="color:var(--dim);font-size:11px">${seen}</td>
+      </tr>`;
+    }
+    el.innerHTML = `<table><thead><tr><th>Service</th><th>Status</th><th>Last Seen</th></tr></thead><tbody>${rows}</tbody></table>`;
+    document.getElementById('upd-services').textContent = 'updated ' + ts();
+  } catch { el.innerHTML = '<p class="state-msg state-err">Failed to load</p>'; }
+}
+
+// ── Error Stats ─────────────────────────────────────────────────────────────
+async function renderErrors() {
+  const el = document.getElementById('body-errors');
+  try {
+    const d = await apiFetch('/api/errors');
+    const lh = d.errors_last_hour || 0;
+    const ec = d.error_count || 0;
+    const wc = d.warning_count || 0;
+    el.innerHTML = `
+      <div class="stat-row"><span class="stat-label">Total logged</span>
+        <span class="stat-value val-accent">${(d.total_errors||0).toLocaleString()}</span></div>
+      <div class="stat-row"><span class="stat-label">Last hour</span>
+        <span class="stat-value ${lh>0?'val-warn':'val-online'}">${lh}</span></div>
+      <div class="stat-row"><span class="stat-label">Errors (E)</span>
+        <span class="stat-value ${ec>0?'val-offline':'val-online'}">${ec}</span></div>
+      <div class="stat-row"><span class="stat-label">Warnings (W)</span>
+        <span class="stat-value ${wc>0?'val-warn':'val-online'}">${wc}</span></div>
+      <div class="stat-row"><span class="stat-label">Info (I)</span>
+        <span class="stat-value">${d.info_count||0}</span></div>`;
+    document.getElementById('upd-errors').textContent = 'updated ' + ts();
+  } catch { el.innerHTML = '<p class="state-msg state-err">Failed to load</p>'; }
+}
+
+// ── Memory / AI ─────────────────────────────────────────────────────────────
+async function renderMemory() {
+  const el = document.getElementById('body-memory');
+  try {
+    const d = await apiFetch('/api/memory');
+    const byNs = d.memories?.by_namespace || {};
+    const nsKeys = Object.keys(byNs);
+    let nsHtml = nsKeys.length === 0
+      ? '<span style="color:var(--dimmer);font-size:11px">none</span>'
+      : nsKeys.map(k => `<div class="ns-row"><span class="ns-key">${esc(k)}</span><span>${byNs[k]}</span></div>`).join('');
+    const influx = d.influx_available;
+    const redis  = d.redis_available;
+    el.innerHTML = `
+      <div class="stat-row"><span class="stat-label">Total memories</span>
+        <span class="stat-value val-accent">${(d.memories?.total||0).toLocaleString()}</span></div>
+      <div class="stat-row"><span class="stat-label">Added last 24 h</span>
+        <span class="stat-value">${d.recent_24h||0}</span></div>
+      <div class="stat-row" style="flex-direction:column;align-items:flex-start;gap:4px">
+        <span class="stat-label">By namespace</span>${nsHtml}</div>
+      <div class="stat-row"><span class="stat-label">InfluxDB</span>
+        <span><span class="dot ${influx?'dot-yes':'dot-no'}"></span>
+        <span class="stat-value ${influx?'val-online':'val-offline'}">${influx?'available':'unavailable'}</span></span></div>
+      <div class="stat-row"><span class="stat-label">Redis</span>
+        <span><span class="dot ${redis?'dot-yes':'dot-no'}"></span>
+        <span class="stat-value ${redis?'val-online':'val-offline'}">${redis?'available':'unavailable'}</span></span></div>`;
+    document.getElementById('upd-memory').textContent = 'updated ' + ts();
+  } catch { el.innerHTML = '<p class="state-msg state-err">Failed to load</p>'; }
+}
+
+// ── Container Load ──────────────────────────────────────────────────────────
+async function renderContainers() {
+  const el = document.getElementById('body-containers');
+  try {
+    const data = await apiFetch('/api/containers');
+    const ctrs = (data.containers || []).sort((a,b)=>b.cpu_percent-a.cpu_percent);
+    if (!ctrs.length) { el.innerHTML = '<p class="state-msg">No data yet — waiting for Insight collector</p>'; return; }
+    let rows = '';
+    for (const c of ctrs) {
+      const cpu = Math.min(100, Math.max(0, c.cpu_percent || 0));
+      const color = cpu > 80 ? 'var(--offline)' : cpu > 50 ? 'var(--warn)' : 'var(--accent)';
+      rows += `<tr>
+        <td style="font-size:11px">${esc(c.service_name||c.container_name)}</td>
+        <td>
+          <span class="cpu-bg"><span class="cpu-fill" style="width:${cpu}%;background:${color}"></span></span>
+          <span style="margin-left:6px;min-width:38px;display:inline-block;text-align:right">${cpu.toFixed(1)}%</span>
+        </td>
+        <td style="font-size:11px">${(c.mem_usage_mb||0).toFixed(0)} / ${(c.mem_limit_mb||0).toFixed(0)} MB</td>
+        <td style="font-size:11px;color:var(--dim)">${(c.net_rx_mb||0).toFixed(1)} / ${(c.net_tx_mb||0).toFixed(1)} MB</td>
+      </tr>`;
+    }
+    el.innerHTML = `<table><thead><tr><th>Container</th><th>CPU</th><th>RAM (MB)</th><th>Net RX/TX (MB)</th></tr></thead><tbody>${rows}</tbody></table>`;
+    document.getElementById('upd-containers').textContent = 'updated ' + ts();
+  } catch { el.innerHTML = '<p class="state-msg state-err">Failed to load</p>'; }
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function refresh() {
+  renderServices();
+  renderErrors();
+  renderMemory();
+  renderContainers();
+}
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>

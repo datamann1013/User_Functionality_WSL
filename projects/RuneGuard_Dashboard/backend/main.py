@@ -25,7 +25,8 @@ import time
 import requests
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 
 CORE_PROXY_URL = os.environ.get(
     "CORE_PROXY_URL", "http://runecore_core:11441/api/proxy/CoreMemoryAPI"
@@ -42,6 +43,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(_STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+
+@app.get("/", include_in_schema=False)
+def serve_index():
+    return FileResponse(os.path.join(_STATIC_DIR, "index.html"))
 
 
 # ---------------------------------------------------------------------------
