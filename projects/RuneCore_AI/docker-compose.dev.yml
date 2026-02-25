@@ -7,11 +7,8 @@ services:
     ports:
       - '5000:5000'
     networks:
-      # Backend is on both AI net (talks to ollama_wrapper) and infra net (reaches Core, RuneGuard)
+      # Backend is on AI net only — reaches Core and RuneGuard via runecore_ai_net (both are on it)
       runecore_ai_net:
-        aliases:
-          - ai_backend
-      runecore_dev:
         aliases:
           - ai_backend
     environment:
@@ -100,8 +97,6 @@ services:
 
 networks:
   runecore_ai_net:
-    external: true
-  runecore_dev:
     external: true
 
 volumes:

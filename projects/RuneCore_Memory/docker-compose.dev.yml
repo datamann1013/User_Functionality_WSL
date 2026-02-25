@@ -82,11 +82,8 @@ services:
       influx:
         condition: service_healthy
     networks:
-      # core_memory is on memory net (talks to DBs) AND infra net (registers with Core/HA)
+      # core_memory is on memory net only — reaches Core and RuneGuard via runecore_memory_net
       runecore_memory_net:
-        aliases:
-          - core_memory
-      runecore_dev:
         aliases:
           - core_memory
     healthcheck:
@@ -101,6 +98,4 @@ volumes:
 
 networks:
   runecore_memory_net:
-    external: true
-  runecore_dev:
     external: true

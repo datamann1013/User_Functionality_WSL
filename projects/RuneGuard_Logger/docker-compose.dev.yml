@@ -9,7 +9,14 @@ services:
       - LOG_DIRECTORY=/app/logs
       - RUNECORE_CORE_URL=http://runecore_core:11441
     networks:
+      # RuneGuard must be reachable from all three VLANs for error logging
       runecore_dev:
+        aliases:
+          - runeguard
+      runecore_ai_net:
+        aliases:
+          - runeguard
+      runecore_memory_net:
         aliases:
           - runeguard
     healthcheck:
@@ -20,4 +27,8 @@ services:
 
 networks:
   runecore_dev:
+    external: true
+  runecore_ai_net:
+    external: true
+  runecore_memory_net:
     external: true
