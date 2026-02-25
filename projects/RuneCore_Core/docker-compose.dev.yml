@@ -3,35 +3,28 @@ services:
   core:
     build: .
     ports:
-      - '8080:8080'
+      - '11440:11440'
     environment:
       - RUNECORE_MODE=development
+      - RUNECORE_CA_PASSPHRASE=runecore-dev
+      - RUNECORE_DISABLE_MTLS=1
+      - RUST_LOG=info
     networks:
       runecore_dev:
         aliases:
           - runecore_core
+    volumes:
+      - runecore_core_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-
-  frontend-router:
-    build:
-      context: ./docker/router
-      dockerfile: Dockerfile
-    ports:
-      - '80:80'
-    networks:
-      runecore_dev:
-        aliases:
-          - runecore_router
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/health || true"]
+      test: ["CMD", "curl", "-fsk", "https://localhost:11440/health"]
       interval: 15s
-      timeout: 3s
-      retries: 3
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 networks:
   runecore_dev:
     external: true
+
+volumes:
+  runecore_core_data:

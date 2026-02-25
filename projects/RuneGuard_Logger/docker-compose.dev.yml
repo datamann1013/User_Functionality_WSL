@@ -6,6 +6,7 @@ services:
       - '5001:5001'
     environment:
       - LOG_LEVEL=DEBUG
+      - LOG_DIRECTORY=/app/logs
     networks:
       runecore_dev:
         aliases:

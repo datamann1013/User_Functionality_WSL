@@ -65,7 +65,8 @@ async fn main() -> anyhow::Result<()> {
     };
 
     ca::init_ca(&data_dir, &passphrase).expect("Failed to initialize CA");
-    
+    ca::ensure_server_cert(&data_dir, &passphrase).expect("Failed to ensure server cert/key");
+
     // Initialize CRL
     let crl_manager = crl::CrlManager::new(&data_dir);
     crl_manager.init_crl(&passphrase).expect("Failed to initialize CRL");
@@ -158,7 +159,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/v1/pki/crl", get(get_crl))
         .route("/api/v1/raft/message", post(raft_message_handler))
         .route("/api/proxy/*path", axum::routing::any(proxy_route_handler))
-        .with_state(state);
+        .with_state(state.clone());
 
     // Load server cert & key and start TLS server
     let (cert_pem, key_pem) = ca::get_server_cert_and_key_pem(&data_dir, &passphrase).expect("Failed to load server cert/key");

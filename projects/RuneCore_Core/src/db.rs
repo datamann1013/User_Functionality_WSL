@@ -1,4 +1,5 @@
-use sqlx::{SqlitePool, sqlite::SqlitePoolOptions, FromRow};
+use sqlx::{SqlitePool, sqlite::{SqlitePoolOptions, SqliteConnectOptions}, FromRow};
+use std::str::FromStr;
 use std::path::Path;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -37,8 +38,9 @@ impl ServiceRow {
 
 pub async fn init_db(data_dir: &str) -> Result<SqlitePool> {
     let db_path = Path::new(data_dir).join("runecore.db");
-    let db_url = format!("sqlite://{}", db_path.to_string_lossy());
-    let pool = SqlitePoolOptions::new().max_connections(5).connect(&db_url).await?;
+    let connect_opts = SqliteConnectOptions::from_str(&format!("sqlite://{}", db_path.to_string_lossy()))?
+        .create_if_missing(true);
+    let pool = SqlitePoolOptions::new().max_connections(5).connect_with(connect_opts).await?;
 
     sqlx::query(
         r#"CREATE TABLE IF NOT EXISTS services (

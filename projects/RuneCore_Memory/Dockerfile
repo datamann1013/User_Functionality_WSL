@@ -13,6 +13,8 @@ COPY migrate.py /app/migrate.py
 # Small wrapper to run migrations or start the server
 COPY start_core_memory.sh /app/start_core_memory.sh
 COPY manage_migrations.sh /app/manage_migrations.sh
+# Strip Windows CRLF line endings from shell scripts
+RUN sed -i 's/\r//' /app/start_core_memory.sh /app/manage_migrations.sh
 RUN chmod +x /app/start_core_memory.sh
 RUN chmod +x /app/manage_migrations.sh
 RUN groupadd -g 1001 appuser && useradd -u 1001 -g appuser -s /bin/bash -m appuser \

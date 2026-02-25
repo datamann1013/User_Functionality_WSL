@@ -1,10 +1,10 @@
 # RuneGuard Security Service Dockerfile
-FROM python:3.11-alpine
+FROM python:3.11-slim
 
 WORKDIR /app
 
 # Install minimal runtime dependencies
-RUN apk add --no-cache curl
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies (copy requirements first to leverage Docker layer caching)
 # The build context is the project root (this directory), so use relative paths
@@ -18,7 +18,7 @@ COPY . /app/
 RUN mkdir -p /app/logs && chmod 777 /app/logs
 
 # Create non-root user and set ownership
-RUN addgroup -g 1001 -S appuser && adduser -S -u 1001 -G appuser appuser \
+RUN groupadd -g 1001 appuser && useradd -u 1001 -g appuser -s /bin/bash -M appuser \
     && chown -R appuser:appuser /app
 USER appuser
 
