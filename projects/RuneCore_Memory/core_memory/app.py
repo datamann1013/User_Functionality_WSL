@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import memories
 from .routers import telemetry
+from .routers import stats
 from .utils import log_exception
 import traceback
 from fastapi.requests import Request
@@ -23,6 +24,7 @@ app.add_middleware(
 
 app.include_router(memories.router, prefix="/v1")
 app.include_router(telemetry.router, prefix="/v1")
+app.include_router(stats.router, prefix="/v1")
 
 
 @app.on_event("startup")
@@ -74,6 +76,13 @@ async def startup_event():
             print(f"⚠️  InfluxDB not available at {INFLUX_URL}")
     except Exception as e:
         print(f"⚠️  InfluxDB startup check failed: {e}")
+
+    # Start background collectors
+    try:
+        from .collectors.service_health import start_service_health_collector
+        start_service_health_collector()
+    except Exception as e:
+        print(f"⚠️  Service health collector failed to start: {e}")
 
 
 @app.on_event("shutdown")
