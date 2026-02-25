@@ -1,4 +1,8 @@
 import os
+import threading
+import time
+import socket
+import requests
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 
@@ -12,6 +16,32 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from logger import log_error
 
 app = Flask(__name__)
+
+
+def _register_with_core():
+    core_url = os.environ.get("RUNECORE_CORE_URL")
+    if not core_url:
+        return
+    payload = {
+        "name": "RuneGuardLogger",
+        "version": "1.0.0",
+        "rest_url": "http://runeguard:5001",
+        "dependencies": [],
+        "container_name": socket.gethostname(),
+    }
+    for attempt in range(5):
+        try:
+            r = requests.post(f"{core_url}/api/v1/services/register", json=payload, timeout=5)
+            if r.ok:
+                print("[RuneGuard] Registered with Core")
+                return
+        except Exception as e:
+            print(f"[RuneGuard] Registration attempt {attempt + 1} failed: {e}")
+        time.sleep(3 * (attempt + 1))
+    print("[RuneGuard] Could not register with Core after 5 attempts")
+
+
+threading.Thread(target=_register_with_core, daemon=True).start()
 app.config["WTF_CSRF_ENABLED"] = False
 
 # Pre-compile response templates for faster responses

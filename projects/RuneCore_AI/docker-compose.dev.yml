@@ -7,13 +7,18 @@ services:
     ports:
       - '5000:5000'
     networks:
+      # Backend is on both AI net (talks to ollama_wrapper) and infra net (reaches Core, RuneGuard)
+      runecore_ai_net:
+        aliases:
+          - ai_backend
       runecore_dev:
         aliases:
           - ai_backend
     environment:
       - PYTHONUNBUFFERED=1
       - ERRORLOGGER_URL=http://runeguard:5001
-      - CORE_MEMORY_URL=http://core_memory:5010/v1
+      # Cross-VLAN: CoreMemory access goes through Core's internal HTTP proxy
+      - CORE_MEMORY_URL=http://runecore_core:11441/api/proxy/CoreMemoryAPI
       - OLLAMA_SERVICE_URL=http://ollama_wrapper:5002
       - OLLAMA_AUTO_PULL=1
       - OLLAMA_AUTO_PULL_WAIT=30
@@ -21,6 +26,9 @@ services:
       - LOCAL_CACHE_MESSAGE_LIMIT=10
       - LOCAL_CACHE_CONTEXT_SIZE=5
       - LOCAL_CACHE_FALLBACK_FILE=/app/backend/data/fallback_cache.json
+      # Register with Core for service discovery
+      - RUNECORE_CORE_URL=http://runecore_core:11441
+      - RUNECORE_REGISTER_WITH_CORE=true
     volumes:
       - backend_data:/app/backend/data
     extra_hosts:
@@ -39,7 +47,8 @@ services:
     ports:
       - '3000:3000'
     networks:
-      runecore_dev:
+      # Frontend only needs AI net — talks to backend within the VLAN
+      runecore_ai_net:
         aliases:
           - ai_frontend
     environment:
@@ -59,7 +68,8 @@ services:
     container_name: runecore-ollama
     restart: unless-stopped
     networks:
-      runecore_dev:
+      # Ollama stays within AI net — only accessible to AI components
+      runecore_ai_net:
         aliases:
           - ollama
     volumes:
@@ -78,7 +88,8 @@ services:
     ports:
       - "5002:5002"
     networks:
-      runecore_dev:
+      # Wrapper stays within AI net — only accessible to AI components
+      runecore_ai_net:
         aliases:
           - ollama_wrapper
     healthcheck:
@@ -88,6 +99,8 @@ services:
       retries: 3
 
 networks:
+  runecore_ai_net:
+    external: true
   runecore_dev:
     external: true
 

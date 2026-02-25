@@ -18,6 +18,13 @@ REGISTERED = False
 CORE_URL = os.environ.get("RUNECORE_CORE_URL", "")
 SERVICE_NAME = "CoreMemoryAPI"
 SERVICE_PORT = int(os.environ.get("PORT", "8000"))
+# Configurable URLs: REST URL must include /v1 so Core proxy routes correctly;
+# heartbeat URL points to HA node to offload health processing from Core.
+_REST_URL_OVERRIDE = os.environ.get("RUNECORE_REST_URL", "")
+HEARTBEAT_URL = os.environ.get(
+    "RUNECORE_HEARTBEAT_URL",
+    f"{CORE_URL}/api/v1/services/heartbeat" if CORE_URL else ""
+)
 
 # Certificate paths for mTLS
 CERT_PATH = os.environ.get("CERT_PATH", "/certs/core_memory_api.pem")
@@ -65,7 +72,7 @@ def register_with_core() -> Dict:
     
     # Build registration payload
     container_name = get_container_name()
-    rest_url = f"http://{container_name}:{SERVICE_PORT}"
+    rest_url = _REST_URL_OVERRIDE or f"http://{container_name}:{SERVICE_PORT}"
     
     payload = {
         "name": SERVICE_NAME,
@@ -136,10 +143,11 @@ def send_heartbeat():
     try:
         # Get database status
         from .db import SessionLocal, engine
+        from sqlalchemy import text
         db_status = "healthy"
         try:
             with engine.connect() as conn:
-                conn.execute("SELECT 1")
+                conn.execute(text("SELECT 1"))
         except Exception:
             db_status = "database_unreachable"
         
@@ -157,7 +165,7 @@ def send_heartbeat():
         if mtls_config:
             cert, verify = mtls_config
             response = requests.post(
-                f"{CORE_URL}/api/v1/services/heartbeat",
+                HEARTBEAT_URL,
                 json=payload,
                 cert=cert,
                 verify=verify if verify else False,
@@ -165,7 +173,7 @@ def send_heartbeat():
             )
         else:
             response = requests.post(
-                f"{CORE_URL}/api/v1/services/heartbeat",
+                HEARTBEAT_URL,
                 json=payload,
                 timeout=5
             )

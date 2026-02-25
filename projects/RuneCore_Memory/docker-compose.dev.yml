@@ -11,7 +11,8 @@ services:
     volumes:
       - core_pgdata:/var/lib/postgresql/data
     networks:
-      - runecore_dev
+      # Postgres stays within memory net — only accessible to memory components
+      - runecore_memory_net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U core -d corememory"]
       interval: 10s
@@ -23,7 +24,8 @@ services:
     ports:
       - '16379:6379'
     networks:
-      - runecore_dev
+      # Redis stays within memory net
+      - runecore_memory_net
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -44,7 +46,8 @@ services:
     volumes:
       - influx_data:/var/lib/influxdb2
     networks:
-      - runecore_dev
+      # InfluxDB stays within memory net
+      - runecore_memory_net
     healthcheck:
       test: ["CMD", "influx", "ping"]
       interval: 15s
@@ -64,6 +67,13 @@ services:
       - INFLUX_BUCKET=telemetry
       - ERRORLOGGER_SERVICE_URL=http://runeguard:5001/log
       - RUN_MIGRATIONS=true
+      # Service discovery: register with Core so it can be proxied
+      - RUNECORE_CORE_URL=http://runecore_core:11441
+      # rest_url includes /v1 so Core proxy forwards to correct path
+      - RUNECORE_REST_URL=http://core_memory:5010/v1
+      # Heartbeats go to HA node (offloads health processing from Core)
+      - RUNECORE_HEARTBEAT_URL=http://runecore_core:11441/api/v1/services/heartbeat
+      - PORT=5010
     depends_on:
       postgres:
         condition: service_healthy
@@ -72,6 +82,10 @@ services:
       influx:
         condition: service_healthy
     networks:
+      # core_memory is on memory net (talks to DBs) AND infra net (registers with Core/HA)
+      runecore_memory_net:
+        aliases:
+          - core_memory
       runecore_dev:
         aliases:
           - core_memory
@@ -86,5 +100,7 @@ volumes:
   influx_data:
 
 networks:
+  runecore_memory_net:
+    external: true
   runecore_dev:
     external: true

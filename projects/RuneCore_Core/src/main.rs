@@ -146,20 +146,31 @@ async fn main() -> anyhow::Result<()> {
         proxy_client,
     };
 
-    let app = Router::new()
-        .route("/", get(root))
-        .route("/health", get(health))
-        .route("/api/v1/services/register", post(register_service))
-        .route("/api/v1/services", get(get_services))
-        .route("/api/v1/services/query", get(proxy::query_service))
-        .route("/api/v1/services/heartbeat", post(heartbeat_service))
-        .route("/api/v1/pki/sign", post(sign_csr))
-        .route("/api/v1/pki/renew", post(renew_certificate))
-        .route("/api/v1/pki/revoke", post(revoke_certificate))
-        .route("/api/v1/pki/crl", get(get_crl))
-        .route("/api/v1/raft/message", post(raft_message_handler))
-        .route("/api/proxy/*path", axum::routing::any(proxy_route_handler))
-        .with_state(state.clone());
+    // HA mode: expose only heartbeat + raft/message + health (offloads health pings from Core)
+    let is_ha_mode = env::var("RUNECORE_HA_MODE").unwrap_or_default() == "1";
+    let app = if is_ha_mode {
+        tracing::info!("Running in HA mode — limited routes (heartbeat + raft + health)");
+        Router::new()
+            .route("/health", get(health))
+            .route("/api/v1/services/heartbeat", post(heartbeat_service))
+            .route("/api/v1/raft/message", post(raft_message_handler))
+            .with_state(state.clone())
+    } else {
+        Router::new()
+            .route("/", get(root))
+            .route("/health", get(health))
+            .route("/api/v1/services/register", post(register_service))
+            .route("/api/v1/services", get(get_services))
+            .route("/api/v1/services/query", get(proxy::query_service))
+            .route("/api/v1/services/heartbeat", post(heartbeat_service))
+            .route("/api/v1/pki/sign", post(sign_csr))
+            .route("/api/v1/pki/renew", post(renew_certificate))
+            .route("/api/v1/pki/revoke", post(revoke_certificate))
+            .route("/api/v1/pki/crl", get(get_crl))
+            .route("/api/v1/raft/message", post(raft_message_handler))
+            .route("/api/proxy/*path", axum::routing::any(proxy_route_handler))
+            .with_state(state.clone())
+    };
 
     // Load server cert & key and start TLS server
     let (cert_pem, key_pem) = ca::get_server_cert_and_key_pem(&data_dir, &passphrase).expect("Failed to load server cert/key");
@@ -243,7 +254,9 @@ async fn main() -> anyhow::Result<()> {
     let tls_cfg = std::sync::Arc::new(config);
     // axum_server expects its RustlsConfig type
     let rustls_cfg: axum_server::tls_rustls::RustlsConfig = axum_server::tls_rustls::RustlsConfig::from_config(tls_cfg);
-    let addr = SocketAddr::from(([0, 0, 0, 0], 11440));
+    let port: u16 = env::var("RUNECORE_PORT")
+        .ok().and_then(|s| s.parse().ok()).unwrap_or(11440);
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     println!("RuneCore core listening on https://{}", addr);
     
     // Start Raft network task if enabled
@@ -272,6 +285,19 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     
+    // Spawn plain HTTP listener for internal container-to-container proxy calls (no TLS)
+    if let Ok(p) = env::var("RUNECORE_HTTP_INTERNAL_PORT") {
+        if let Ok(http_port) = p.parse::<u16>() {
+            let http_app = app.clone();
+            tokio::spawn(async move {
+                let listener = tokio::net::TcpListener::bind(("0.0.0.0", http_port)).await
+                    .expect("HTTP internal bind failed");
+                tracing::info!("HTTP internal proxy listener on :{}", http_port);
+                axum::serve(listener, http_app).await.unwrap();
+            });
+        }
+    }
+
     axum_server::bind_rustls(addr, rustls_cfg)
         .serve(app.into_make_service())
         .await
@@ -476,7 +502,23 @@ fn default_status() -> String {
 
 async fn heartbeat_service(State(state): State<AppState>, Json(payload): Json<HeartbeatRequest>) -> Json<serde_json::Value> {
     tracing::debug!("heartbeat from service: {}, status: {}", payload.name, payload.status);
-    
+
+    // When Raft is enabled, propose heartbeat via consensus (replicates to all nodes).
+    // This is fire-and-forget — we don't wait for commit to avoid blocking health pings.
+    if state.enable_raft {
+        if let Some(ref raft_mgr) = state.raft_manager {
+            let cmd = raft_consensus::RegistryCommand::UpdateHeartbeat {
+                name: payload.name.clone(),
+                status: payload.status.clone(),
+                metadata: payload.metadata.clone(),
+            };
+            let _ = raft_mgr.lock().propose(cmd);
+            tracing::debug!("heartbeat for {} proposed via Raft", payload.name);
+            return Json(serde_json::json!({"ok": true, "via": "raft"}));
+        }
+    }
+
+    // Direct DB write fallback (Raft disabled or propose failed)
     match db::update_service_heartbeat(&state.db, &payload.name, &payload.status).await {
         Ok(_) => Json(serde_json::json!({"ok": true})),
         Err(e) => {

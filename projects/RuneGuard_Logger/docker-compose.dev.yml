@@ -7,6 +7,7 @@ services:
     environment:
       - LOG_LEVEL=DEBUG
       - LOG_DIRECTORY=/app/logs
+      - RUNECORE_CORE_URL=http://runecore_core:11441
     networks:
       runecore_dev:
         aliases:
