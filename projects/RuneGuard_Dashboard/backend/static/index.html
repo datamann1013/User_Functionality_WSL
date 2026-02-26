@@ -411,7 +411,9 @@ function loadColor(pct) {
 }
 
 function barHtml(pct, color) {
-  return `<span class="bar-bg"><span class="bar-fill" style="width:${Math.max(0,Math.min(100,pct)).toFixed(1)}%;background:${color}"></span></span>`;
+  // Always show a tiny sliver when pct > 0 so even 0.1% is visible
+  const w = pct > 0 ? Math.max(pct, 2.5) : 0;
+  return `<span class="bar-bg"><span class="bar-fill" style="width:${Math.min(100,w).toFixed(1)}%;background:${color}"></span></span>`;
 }
 
 async function renderContainers() {
@@ -425,9 +427,9 @@ async function renderContainers() {
     }
 
     // Memory bar: if no per-container limit (Docker default = host RAM > 4 GB),
-    // scale relative to the most memory-hungry container instead
+    // scale relative to max(200 MB, highest usage) so 200 MB is always full-scale minimum
     const hasRealLimit = ctrs.some(c => (c.mem_limit_mb||0) > 0 && (c.mem_limit_mb||0) < 4000);
-    const maxMem = Math.max(1, ...ctrs.map(c => c.mem_usage_mb||0));
+    const maxMem = Math.max(200, ...ctrs.map(c => c.mem_usage_mb||0));
 
     const groups = {};
     for (const c of ctrs) {
