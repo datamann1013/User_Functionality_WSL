@@ -264,3 +264,70 @@ def get_containers():
             containers[name][field] = row.get("value", 0.0)
 
     return {"containers": list(containers.values()), "count": len(containers)}
+
+
+# ---------------------------------------------------------------------------
+# History endpoints (time-series for sparklines)
+# ---------------------------------------------------------------------------
+
+def _build_series(results: list, group_by_tag: str | None = None) -> dict:
+    """
+    Convert flat InfluxDB result rows into {field: [{time, value}]} or
+    {tag_value: {field: [{time, value}]}} when group_by_tag is provided.
+    """
+    if group_by_tag:
+        series: dict = {}
+        for row in results:
+            tag_val = row.get("tags", {}).get(group_by_tag, "unknown")
+            field = row.get("field")
+            t = row.get("time")
+            if not field or not t:
+                continue
+            series.setdefault(tag_val, {}).setdefault(field, []).append(
+                {"time": t, "value": row.get("value", 0)}
+            )
+        return series
+    else:
+        series = {}
+        for row in results:
+            field = row.get("field")
+            t = row.get("time")
+            if not field or not t:
+                continue
+            series.setdefault(field, []).append(
+                {"time": t, "value": row.get("value", 0)}
+            )
+        return series
+
+
+@app.get("/api/errors/history")
+def get_errors_history():
+    """Time-series error stats for sparklines (last 30 minutes)."""
+    data = _proxy_post(
+        "telemetry/query",
+        {"measurement": "error_stats", "start": "-30m", "limit": 120},
+        {"results": []},
+    )
+    return {"series": _build_series(data.get("results", []))}
+
+
+@app.get("/api/containers/history")
+def get_containers_history():
+    """Time-series container metrics for sparklines (last 30 minutes)."""
+    data = _proxy_post(
+        "telemetry/query",
+        {"measurement": "container_metrics", "start": "-30m", "limit": 2000},
+        {"results": []},
+    )
+    return {"series": _build_series(data.get("results", []), group_by_tag="container_name")}
+
+
+@app.get("/api/services/history")
+def get_services_history():
+    """Time-series service health for sparklines (last 30 minutes)."""
+    data = _proxy_post(
+        "telemetry/query",
+        {"measurement": "service_health", "start": "-30m", "limit": 500},
+        {"results": []},
+    )
+    return {"series": _build_series(data.get("results", []), group_by_tag="service_name")}

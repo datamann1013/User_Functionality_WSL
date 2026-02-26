@@ -835,11 +835,15 @@ function App() {
               className={`status-dot ${
                 (cacheStatus.cache?.using_redis || cacheStatus.using_redis)
                   ? "online"
+                  : cacheStatus.core_memory?.available
+                  ? "online"
                   : "warn"
               }`}
             >
               {(cacheStatus.cache?.using_redis || cacheStatus.using_redis)
                 ? "CACHE:REDIS"
+                : cacheStatus.core_memory?.available
+                ? "CACHE:CORE"
                 : "CACHE:LOCAL"}
             </span>
           )}

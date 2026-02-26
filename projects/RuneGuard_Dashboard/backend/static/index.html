@@ -16,18 +16,15 @@
     body { background:var(--bg); color:var(--text); font-family:var(--font);
            font-size:13px; line-height:1.5; min-height:100vh; }
 
-    /* Layout */
     .header { background:var(--bg2); border-bottom:1px solid var(--border);
               padding:14px 24px; display:flex; align-items:center;
               justify-content:space-between; }
     .header h1 { font-size:15px; font-weight:700; color:var(--accent);
                  letter-spacing:.05em; text-transform:uppercase; }
     .header-meta { font-size:11px; color:var(--dimmer); }
-    .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px;
-            padding:20px; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:20px; }
     @media(max-width:900px) { .grid { grid-template-columns:1fr; } }
 
-    /* Panel */
     .panel { background:var(--card); border:1px solid var(--border);
              border-radius:4px; display:flex; flex-direction:column; }
     .panel-header { background:var(--bg2); border-bottom:1px solid var(--border);
@@ -38,58 +35,67 @@
     .panel-updated { font-size:10px; color:var(--dimmer); }
     .panel-body { padding:14px; flex:1; overflow-y:auto; }
 
-    /* Tables */
     table { width:100%; border-collapse:collapse; }
     th { text-align:left; font-size:10px; font-weight:700; letter-spacing:.07em;
          text-transform:uppercase; color:var(--dimmer);
          padding:4px 8px 8px 0; border-bottom:1px solid var(--border); }
-    td { padding:6px 8px 6px 0; border-bottom:1px solid #1a2030;
-         vertical-align:middle; }
+    td { padding:6px 8px 6px 0; border-bottom:1px solid #1a2030; vertical-align:middle; }
     tr:last-child td { border-bottom:none; }
+    tr.hoverable:hover td { background:#1a2540; cursor:default; }
 
-    /* Badges */
     .badge { display:inline-block; padding:1px 7px; border-radius:2px;
-             font-size:10px; font-weight:700; letter-spacing:.06em;
-             text-transform:uppercase; }
+             font-size:10px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; }
     .badge-online  { background:#064e3b; color:var(--online); }
     .badge-offline { background:#450a0a; color:var(--offline); }
-    .badge-unknown { background:#1c1917; color:var(--dimmer); }
 
-    /* Stat rows */
     .stat-row { display:flex; justify-content:space-between; align-items:center;
-                padding:6px 0; border-bottom:1px solid #1a2030; }
+                padding:6px 0; border-bottom:1px solid #1a2030; cursor:default; border-radius:2px; }
     .stat-row:last-child { border-bottom:none; }
+    .stat-row:hover { background:#1f2d3d; }
     .stat-label { color:var(--dim); font-size:12px; }
     .stat-value { font-weight:700; }
-    .val-accent { color:var(--accent); }
-    .val-online { color:var(--online); }
+    .val-accent  { color:var(--accent); }
+    .val-online  { color:var(--online); }
     .val-offline { color:var(--offline); }
-    .val-warn { color:var(--warn); }
+    .val-warn    { color:var(--warn); }
 
-    /* CPU bar */
-    .cpu-bg { background:var(--bg2); border-radius:2px; height:6px;
-              width:80px; display:inline-block; vertical-align:middle; }
-    .cpu-fill { border-radius:2px; height:6px; transition:width .3s; }
+    .bar-bg   { background:var(--bg2); border-radius:2px; height:6px;
+                width:72px; display:inline-block; vertical-align:middle;
+                overflow:hidden; }
+    .bar-fill { display:block; height:100%; transition:width .3s; }
 
-    /* Avail dot */
     .dot { display:inline-block; width:8px; height:8px; border-radius:50%;
            margin-right:6px; vertical-align:middle; }
     .dot-yes { background:var(--online); }
     .dot-no  { background:var(--offline); }
 
     .state-msg { color:var(--dimmer); font-size:12px; text-align:center; padding:24px 0; }
-    .state-err  { color:var(--offline); }
+    .state-err { color:var(--offline); }
 
-    /* Namespace sub-rows */
-    .ns-row { display:flex; justify-content:space-between;
-              margin-top:4px; font-size:11px; }
+    .ns-row { display:flex; justify-content:space-between; margin-top:4px; font-size:11px; }
     .ns-key { color:var(--dim); }
 
-    /* Container group header */
     .group-header { font-size:10px; font-weight:700; letter-spacing:.08em;
                     text-transform:uppercase; color:var(--accent);
                     padding:10px 0 4px; border-top:1px solid var(--border); }
     .group-header:first-of-type { border-top:none; padding-top:0; }
+
+    /* ── Tooltip ───────────────────────────────────────────────────────── */
+    #spark-tip {
+      position:fixed; display:none; z-index:9999;
+      background:#0c1521; border:1px solid var(--border);
+      border-radius:4px; padding:10px 12px; pointer-events:none;
+      min-width:230px; box-shadow:0 6px 20px #00000099;
+    }
+    .tip-title { font-size:11px; font-weight:700; color:var(--text);
+                 letter-spacing:.04em; margin-bottom:8px; }
+    .tip-row { display:flex; align-items:center; gap:8px; padding:3px 0; }
+    .tip-row + .tip-row { border-top:1px solid #1a2030; }
+    .tip-lbl { font-size:10px; color:var(--dimmer); text-transform:uppercase;
+               letter-spacing:.05em; width:44px; flex-shrink:0; }
+    .tip-row canvas { display:block; flex-shrink:0; }
+    .tip-val { font-size:11px; font-weight:700; color:var(--text);
+               min-width:48px; text-align:right; }
   </style>
 </head>
 <body>
@@ -133,84 +139,244 @@
   </div>
 </div>
 
+<!-- Tooltip (multi-metric sparklines) -->
+<div id="spark-tip">
+  <div class="tip-title" id="tip-title">—</div>
+  <div id="tip-metrics"></div>
+</div>
+
 <script>
 const REFRESH_MS = 30_000;
+
+let _histErrors     = {};
+let _histContainers = {};
+let _histServices   = {};
 
 function ts() {
   return new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
 }
-
 async function apiFetch(url) {
   const r = await fetch(url);
   if (!r.ok) throw new Error(r.status);
   return r.json();
 }
 
-// ── Service Health ──────────────────────────────────────────────────────────
+// ── Sparkline ─────────────────────────────────────────────────────────────────
+const HEX = {
+  'var(--accent)':  '#3b82f6',
+  'var(--online)':  '#10b981',
+  'var(--offline)': '#ef4444',
+  'var(--warn)':    '#f59e0b',
+};
+function resolveColor(c) { return HEX[c] || c || '#3b82f6'; }
+
+function drawSparkline(canvas, points) {
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height, pad = 3;
+  ctx.clearRect(0, 0, w, h);
+
+  const color = resolveColor(canvas.dataset.color);
+
+  if (!points || points.length < 2) {
+    ctx.strokeStyle = '#2d3748';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, h/2); ctx.lineTo(w, h/2); ctx.stroke();
+    return;
+  }
+
+  const min = Math.min(...points), max = Math.max(...points);
+  const range = max - min;
+
+  // When all values identical, draw a centred line — not a bottom-hugging one
+  const yOf = v => range > 0
+    ? h - pad - ((v - min) / range) * (h - 2*pad)
+    : h / 2;
+
+  const xs = points.map((_, i) => pad + (i / (points.length - 1)) * (w - 2*pad));
+  const ys = points.map(yOf);
+
+  // Gradient fill
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, color + '55');
+  grad.addColorStop(1, color + '00');
+  ctx.beginPath();
+  ctx.moveTo(xs[0], ys[0]);
+  for (let i = 1; i < xs.length; i++) ctx.lineTo(xs[i], ys[i]);
+  ctx.lineTo(xs[xs.length-1], h); ctx.lineTo(xs[0], h);
+  ctx.closePath();
+  ctx.fillStyle = grad; ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  ctx.moveTo(xs[0], ys[0]);
+  for (let i = 1; i < xs.length; i++) ctx.lineTo(xs[i], ys[i]);
+  ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
+
+  // End dot
+  ctx.beginPath();
+  ctx.arc(xs[xs.length-1], ys[ys.length-1], 2, 0, Math.PI*2);
+  ctx.fillStyle = color; ctx.fill();
+}
+
+function fmtVal(v, unit) {
+  if (v == null || isNaN(+v)) return '—';
+  const n = +v;
+  if (unit === '%') return n.toFixed(1) + '%';
+  if (unit === 'MB') return n.toFixed(0) + ' MB';
+  return n.toFixed(1) + (unit ? ' ' + unit : '');
+}
+
+function seriesVals(arr) {
+  if (!arr || !arr.length) return [];
+  return arr.slice().sort((a,b)=>a.time>b.time?1:-1).map(p=>+(p.value??0));
+}
+
+// ── Tooltip ───────────────────────────────────────────────────────────────────
+const tip = document.getElementById('spark-tip');
+let _tipHide;
+
+function posTip(evt) {
+  const mg = 16, tw = tip.offsetWidth||240, th = tip.offsetHeight||120;
+  let x = evt.clientX + mg, y = evt.clientY + mg;
+  if (x + tw > window.innerWidth)  x = evt.clientX - tw - mg;
+  if (y + th > window.innerHeight) y = evt.clientY - th - mg;
+  tip.style.left = x + 'px'; tip.style.top = y + 'px';
+}
+
+/**
+ * metrics = [{label, points, color, unit}]
+ */
+function showTip(evt, title, metrics) {
+  clearTimeout(_tipHide);
+  document.getElementById('tip-title').textContent = title;
+
+  const box = document.getElementById('tip-metrics');
+  box.innerHTML = '';
+
+  for (const m of metrics) {
+    const pts = m.points || [];
+    const now = pts.length ? pts[pts.length-1] : null;
+
+    const row = document.createElement('div');
+    row.className = 'tip-row';
+
+    const lbl = document.createElement('span');
+    lbl.className = 'tip-lbl';
+    lbl.textContent = m.label;
+
+    const cvs = document.createElement('canvas');
+    cvs.width = 140; cvs.height = 32;
+    cvs.dataset.color = m.color || 'var(--accent)';
+    drawSparkline(cvs, pts);
+
+    const val = document.createElement('span');
+    val.className = 'tip-val';
+    val.textContent = fmtVal(now, m.unit);
+    val.style.color = resolveColor(m.color || 'var(--accent)');
+
+    row.appendChild(lbl); row.appendChild(cvs); row.appendChild(val);
+    box.appendChild(row);
+  }
+
+  tip.style.display = 'block';
+  posTip(evt);
+}
+
+function hideTip() {
+  _tipHide = setTimeout(() => { tip.style.display = 'none'; }, 120);
+}
+
+document.addEventListener('mousemove', e => {
+  if (tip.style.display === 'block') posTip(e);
+});
+
+function addHover(el, title, getMetrics) {
+  el.addEventListener('mouseenter', e => showTip(e, title, getMetrics()));
+  el.addEventListener('mousemove', posTip);
+  el.addEventListener('mouseleave', hideTip);
+}
+
+// ── Service Health ─────────────────────────────────────────────────────────────
 async function renderServices() {
   const el = document.getElementById('body-services');
   try {
     const data = await apiFetch('/api/services');
     const svcs = data.services || [];
-    if (!svcs.length) { el.innerHTML = '<p class="state-msg">No data yet — waiting for first snapshot</p>'; return; }
+    if (!svcs.length) {
+      el.innerHTML = '<p class="state-msg">No data yet — waiting for first snapshot</p>';
+      return;
+    }
     let rows = '';
     for (const s of svcs) {
       const online = s.is_online === 1 || s.is_online === true;
       const secs = s.seconds_since_heartbeat;
       let seen = '—';
       if (secs != null) {
-        if (secs < 60)   seen = Math.round(secs) + 's ago';
+        if (secs < 60)        seen = Math.round(secs) + 's ago';
         else if (secs < 3600) seen = Math.round(secs/60) + 'm ago';
-        else              seen = Math.round(secs/3600) + 'h ago';
+        else                  seen = Math.round(secs/3600) + 'h ago';
       }
-      const badge = online ? 'badge-online' : 'badge-offline';
-      const label = online ? 'online' : 'offline';
-      rows += `<tr>
+      rows += `<tr class="hoverable" data-svc="${esc(s.name)}">
         <td>${esc(s.name)}</td>
-        <td><span class="badge ${badge}">${label}</span></td>
+        <td><span class="badge ${online?'badge-online':'badge-offline'}">${online?'online':'offline'}</span></td>
         <td style="color:var(--dim);font-size:11px">${seen}</td>
       </tr>`;
     }
-    el.innerHTML = `<table><thead><tr><th>Service</th><th>Status</th><th>Last Seen</th></tr></thead><tbody>${rows}</tbody></table>`;
+    el.innerHTML = `<table><thead><tr>
+      <th>Service</th><th>Status</th><th>Last Seen</th>
+    </tr></thead><tbody>${rows}</tbody></table>`;
+    el.querySelectorAll('tr[data-svc]').forEach(row => {
+      const name = row.dataset.svc;
+      addHover(row, name, () => [{
+        label: 'Online',
+        points: seriesVals((_histServices[name]||{})['is_online']),
+        color: 'var(--online)', unit: '',
+      }]);
+    });
     document.getElementById('upd-services').textContent = 'updated ' + ts();
   } catch { el.innerHTML = '<p class="state-msg state-err">Failed to load</p>'; }
 }
 
-// ── Error Stats ─────────────────────────────────────────────────────────────
+// ── Error Stats ────────────────────────────────────────────────────────────────
 async function renderErrors() {
   const el = document.getElementById('body-errors');
   try {
     const d = await apiFetch('/api/errors');
-    const lh = d.errors_last_hour || 0;
-    const ec = d.error_count || 0;
-    const wc = d.warning_count || 0;
-    el.innerHTML = `
-      <div class="stat-row"><span class="stat-label">Total logged</span>
-        <span class="stat-value val-accent">${(d.total_errors||0).toLocaleString()}</span></div>
-      <div class="stat-row"><span class="stat-label">Last hour</span>
-        <span class="stat-value ${lh>0?'val-warn':'val-online'}">${lh}</span></div>
-      <div class="stat-row"><span class="stat-label">Errors (E)</span>
-        <span class="stat-value ${ec>0?'val-offline':'val-online'}">${ec}</span></div>
-      <div class="stat-row"><span class="stat-label">Warnings (W)</span>
-        <span class="stat-value ${wc>0?'val-warn':'val-online'}">${wc}</span></div>
-      <div class="stat-row"><span class="stat-label">Info (I)</span>
-        <span class="stat-value">${d.info_count||0}</span></div>`;
+    const lh = d.errors_last_hour||0, ec = d.error_count||0, wc = d.warning_count||0;
+    const ROWS = [
+      { label:'Total logged',  val:(d.total_errors||0).toLocaleString(), cls:'val-accent',                 field:'total_errors',    color:'var(--accent)',  unit:'' },
+      { label:'Last hour',     val:lh,                                   cls:lh>0?'val-warn':'val-online', field:'errors_last_hour', color:'var(--warn)',    unit:'' },
+      { label:'Errors (E)',    val:ec,                                   cls:ec>0?'val-offline':'val-online',field:'error_count',    color:'var(--offline)', unit:'' },
+      { label:'Warnings (W)', val:wc,                                   cls:wc>0?'val-warn':'val-online',  field:'warning_count',   color:'var(--warn)',    unit:'' },
+      { label:'Info (I)',      val:d.info_count||0,                      cls:'',                           field:'info_count',      color:'var(--accent)',  unit:'' },
+    ];
+    el.innerHTML = ROWS.map((r,i)=>`
+      <div class="stat-row" data-ei="${i}">
+        <span class="stat-label">${r.label}</span>
+        <span class="stat-value ${r.cls}">${r.val}</span>
+      </div>`).join('');
+    ROWS.forEach((r,i)=>{
+      addHover(el.querySelector(`[data-ei="${i}"]`), r.label, () => [{
+        label: r.label.split(' ')[0],
+        points: seriesVals((_histErrors||{})[r.field]),
+        color: r.color, unit: r.unit,
+      }]);
+    });
     document.getElementById('upd-errors').textContent = 'updated ' + ts();
   } catch { el.innerHTML = '<p class="state-msg state-err">Failed to load</p>'; }
 }
 
-// ── Memory / AI ─────────────────────────────────────────────────────────────
+// ── Memory / AI ────────────────────────────────────────────────────────────────
 async function renderMemory() {
   const el = document.getElementById('body-memory');
   try {
     const d = await apiFetch('/api/memory');
     const byNs = d.memories?.by_namespace || {};
     const nsKeys = Object.keys(byNs);
-    let nsHtml = nsKeys.length === 0
+    const nsHtml = nsKeys.length === 0
       ? '<span style="color:var(--dimmer);font-size:11px">none</span>'
-      : nsKeys.map(k => `<div class="ns-row"><span class="ns-key">${esc(k)}</span><span>${byNs[k]}</span></div>`).join('');
-    const influx = d.influx_available;
-    const redis  = d.redis_available;
+      : nsKeys.map(k=>`<div class="ns-row"><span class="ns-key">${esc(k)}</span><span>${byNs[k]}</span></div>`).join('');
+    const influx = d.influx_available, redis = d.redis_available;
     el.innerHTML = `
       <div class="stat-row"><span class="stat-label">Total memories</span>
         <span class="stat-value val-accent">${(d.memories?.total||0).toLocaleString()}</span></div>
@@ -228,7 +394,7 @@ async function renderMemory() {
   } catch { el.innerHTML = '<p class="state-msg state-err">Failed to load</p>'; }
 }
 
-// ── Container Load ──────────────────────────────────────────────────────────
+// ── Container Load ─────────────────────────────────────────────────────────────
 const PROJECT_LABELS = {
   runecore_ai:        'RuneCore Mind',
   runecore_memory:    'CoreMemory',
@@ -238,23 +404,14 @@ const PROJECT_LABELS = {
   runeguard_insight:  'RuneGuard',
   runeguard_dashboard:'RuneGuard',
 };
+function projectLabel(p) { return PROJECT_LABELS[p] || (p ? p : 'Other'); }
 
-function projectLabel(project) {
-  return PROJECT_LABELS[project] || (project ? project : 'Other');
+function loadColor(pct) {
+  return pct >= 90 ? 'var(--offline)' : pct >= 80 ? 'var(--warn)' : 'var(--online)';
 }
 
-function cpuRow(c) {
-  const cpu = Math.min(100, Math.max(0, c.cpu_percent || 0));
-  const color = cpu > 80 ? 'var(--offline)' : cpu > 50 ? 'var(--warn)' : 'var(--accent)';
-  return `<tr>
-    <td style="font-size:11px;padding-left:10px">${esc(c.service_name||c.container_name)}</td>
-    <td>
-      <span class="cpu-bg"><span class="cpu-fill" style="width:${cpu}%;background:${color}"></span></span>
-      <span style="margin-left:6px;min-width:38px;display:inline-block;text-align:right">${cpu.toFixed(1)}%</span>
-    </td>
-    <td style="font-size:11px">${(c.mem_usage_mb||0).toFixed(0)} / ${(c.mem_limit_mb||0).toFixed(0)} MB</td>
-    <td style="font-size:11px;color:var(--dim)">${(c.net_rx_mb||0).toFixed(1)} / ${(c.net_tx_mb||0).toFixed(1)} MB</td>
-  </tr>`;
+function barHtml(pct, color) {
+  return `<span class="bar-bg"><span class="bar-fill" style="width:${Math.max(0,Math.min(100,pct)).toFixed(1)}%;background:${color}"></span></span>`;
 }
 
 async function renderContainers() {
@@ -262,34 +419,64 @@ async function renderContainers() {
   try {
     const data = await apiFetch('/api/containers');
     const ctrs = data.containers || [];
-    if (!ctrs.length) { el.innerHTML = '<p class="state-msg">No data yet — waiting for Insight collector</p>'; return; }
+    if (!ctrs.length) {
+      el.innerHTML = '<p class="state-msg">No data yet — waiting for Insight collector</p>';
+      return;
+    }
 
-    // Group by readable component label, sort within group by cpu desc
+    // Memory bar: if no per-container limit (Docker default = host RAM > 4 GB),
+    // scale relative to the most memory-hungry container instead
+    const hasRealLimit = ctrs.some(c => (c.mem_limit_mb||0) > 0 && (c.mem_limit_mb||0) < 4000);
+    const maxMem = Math.max(1, ...ctrs.map(c => c.mem_usage_mb||0));
+
     const groups = {};
     for (const c of ctrs) {
-      const label = projectLabel(c.project || '');
-      if (!groups[label]) groups[label] = [];
-      groups[label].push(c);
+      const lbl = projectLabel(c.project || '');
+      (groups[lbl] = groups[lbl]||[]).push(c);
     }
-    for (const g of Object.values(groups)) g.sort((a,b) => b.cpu_percent - a.cpu_percent);
+    for (const g of Object.values(groups)) g.sort((a,b)=>b.cpu_percent-a.cpu_percent);
 
-    // Preferred display order
-    const ORDER = ['Core', 'HA Node', 'RuneCore Mind', 'CoreMemory', 'RuneGuard', 'Other'];
-    const sortedKeys = Object.keys(groups).sort((a, b) => {
-      const ia = ORDER.indexOf(a), ib = ORDER.indexOf(b);
-      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    const ORDER = ['Core','HA Node','RuneCore Mind','CoreMemory','RuneGuard','Other'];
+    const keys = Object.keys(groups).sort((a,b)=>{
+      const ia=ORDER.indexOf(a), ib=ORDER.indexOf(b);
+      return (ia<0?99:ia)-(ib<0?99:ib);
     });
 
     let html = `<table><thead><tr>
-      <th>Service</th><th>CPU</th><th>RAM (MB)</th><th>Net RX/TX (MB)</th>
+      <th>Service</th><th>CPU</th><th>RAM</th><th>Net RX/TX</th>
     </tr></thead><tbody>`;
+    for (const lbl of keys) {
+      html += `<tr><td colspan="4" class="group-header">${esc(lbl)}</td></tr>`;
+      for (const c of groups[lbl]) {
+        const cpu    = Math.min(100, Math.max(0, c.cpu_percent||0));
+        const memMB  = c.mem_usage_mb||0;
+        const limMB  = c.mem_limit_mb||0;
+        const memPct = hasRealLimit
+          ? (limMB>0 ? Math.min(100,(memMB/limMB)*100) : 0)
+          : (memMB/maxMem)*100;
 
-    for (const label of sortedKeys) {
-      html += `<tr><td colspan="4" class="group-header">${esc(label)}</td></tr>`;
-      for (const c of groups[label]) html += cpuRow(c);
+        html += `<tr class="hoverable" data-ctr="${esc(c.container_name)}">
+          <td style="font-size:11px;padding-left:10px">${esc(c.service_name||c.container_name)}</td>
+          <td>${barHtml(cpu,loadColor(cpu))}<span style="margin-left:5px;min-width:36px;display:inline-block;text-align:right">${cpu.toFixed(1)}%</span></td>
+          <td>${barHtml(memPct,loadColor(memPct))}<span style="margin-left:5px;font-size:11px">${memMB.toFixed(0)} MB</span></td>
+          <td style="font-size:11px;color:var(--dim)">${(c.net_rx_mb||0).toFixed(1)}/${(c.net_tx_mb||0).toFixed(1)} MB</td>
+        </tr>`;
+      }
     }
     html += '</tbody></table>';
     el.innerHTML = html;
+
+    el.querySelectorAll('tr[data-ctr]').forEach(row => {
+      const name = row.dataset.ctr;
+      addHover(row, name, () => {
+        const h = _histContainers[name] || {};
+        return [
+          { label:'CPU',   points: seriesVals(h['cpu_percent']),  color:'var(--accent)', unit:'%'  },
+          { label:'RAM',   points: seriesVals(h['mem_usage_mb']), color:'var(--online)', unit:'MB' },
+          { label:'Net TX',points: seriesVals(h['net_tx_mb']),    color:'var(--warn)',   unit:'MB' },
+        ];
+      });
+    });
     document.getElementById('upd-containers').textContent = 'updated ' + ts();
   } catch { el.innerHTML = '<p class="state-msg state-err">Failed to load</p>'; }
 }
@@ -298,13 +485,25 @@ function esc(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-function refresh() {
-  renderServices();
-  renderErrors();
-  renderMemory();
-  renderContainers();
+// ── History refresh ────────────────────────────────────────────────────────────
+async function refreshHistory() {
+  const [e,c,s] = await Promise.allSettled([
+    apiFetch('/api/errors/history'),
+    apiFetch('/api/containers/history'),
+    apiFetch('/api/services/history'),
+  ]);
+  if (e.status==='fulfilled') _histErrors     = e.value.series || {};
+  if (c.status==='fulfilled') _histContainers = c.value.series || {};
+  if (s.status==='fulfilled') _histServices   = s.value.series || {};
 }
 
+// ── Main cycle ─────────────────────────────────────────────────────────────────
+async function refresh() {
+  await Promise.allSettled([
+    renderServices(), renderErrors(), renderMemory(), renderContainers(),
+    refreshHistory(),
+  ]);
+}
 refresh();
 setInterval(refresh, REFRESH_MS);
 </script>

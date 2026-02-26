@@ -16,6 +16,7 @@ import asyncio
 import threading
 import time
 import uuid
+import socket
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -226,6 +227,37 @@ print(f"[RuneCore] Using conversation cache: {cache_type}")
 # Configuration
 ERRORLOGGER_URL = os.environ.get("ERRORLOGGER_SERVICE_URL", "http://127.0.0.1:5001/log")
 OLLAMA_SERVICE_URL = os.environ.get("OLLAMA_SERVICE_URL", "http://127.0.0.1:5002")
+
+# ---------------------------------------------------------------------------
+# Core registration — runs at module load (works with gunicorn)
+# ---------------------------------------------------------------------------
+
+def _register_with_core():
+    core_url = os.environ.get("RUNECORE_CORE_URL")
+    if not core_url or not os.environ.get("RUNECORE_REGISTER_WITH_CORE"):
+        return
+    payload = {
+        "name": "RuneCoreMind",
+        "version": "0.1.0",
+        "rest_url": "http://ai_backend:5000",
+        "dependencies": [],
+        "container_name": socket.gethostname(),
+    }
+    for attempt in range(5):
+        try:
+            r = requests.post(
+                f"{core_url}/api/v1/services/register", json=payload, timeout=5
+            )
+            if r.ok:
+                print("[RuneCoreMind] Registered with Core")
+                return
+        except Exception as e:
+            print(f"[RuneCoreMind] Registration attempt {attempt + 1} failed: {e}")
+        time.sleep(3 * (attempt + 1))
+    print("[RuneCoreMind] Could not register with Core after 5 attempts")
+
+
+threading.Thread(target=_register_with_core, daemon=True).start()
 
 # Track background model-pull operations so callers can poll/cancel
 # operation_id -> {model, status, started_at, last_checked, error, stop_flag}
