@@ -95,6 +95,7 @@ def _collect_and_ship():
         name = container.name
         labels = container.labels or {}
         service = labels.get("com.docker.compose.service", name)
+        project = labels.get("com.docker.compose.project", "")
 
         cpu = _compute_cpu_percent(stats)
         mem_usage, mem_limit = _compute_mem(stats)
@@ -105,6 +106,7 @@ def _collect_and_ship():
             "tags": {
                 "container_name": name,
                 "service_name": service,
+                "project": project,
             },
             "fields": {
                 "cpu_percent": cpu,
@@ -133,7 +135,7 @@ def main():
     print(f"[Insight] RuneGuard_Insight started (interval={COLLECT_INTERVAL}s)")
     print(f"[Insight] Shipping to: {CORE_PROXY_URL}")
     # Initial delay to let CoreMemory come up
-    time.sleep(15)
+    time.sleep(5)
     while True:
         _collect_and_ship()
         time.sleep(COLLECT_INTERVAL)

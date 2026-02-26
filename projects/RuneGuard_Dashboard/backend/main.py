@@ -252,6 +252,7 @@ def get_containers():
             containers[name] = {
                 "container_name": name,
                 "service_name": tags.get("service_name", name),
+                "project": tags.get("project", ""),
                 "cpu_percent": 0.0,
                 "mem_usage_mb": 0.0,
                 "mem_limit_mb": 0.0,

@@ -84,6 +84,12 @@
     .ns-row { display:flex; justify-content:space-between;
               margin-top:4px; font-size:11px; }
     .ns-key { color:var(--dim); }
+
+    /* Container group header */
+    .group-header { font-size:10px; font-weight:700; letter-spacing:.08em;
+                    text-transform:uppercase; color:var(--accent);
+                    padding:10px 0 4px; border-top:1px solid var(--border); }
+    .group-header:first-of-type { border-top:none; padding-top:0; }
   </style>
 </head>
 <body>
@@ -223,27 +229,67 @@ async function renderMemory() {
 }
 
 // ── Container Load ──────────────────────────────────────────────────────────
+const PROJECT_LABELS = {
+  runecore_ai:        'RuneCore Mind',
+  runecore_memory:    'CoreMemory',
+  runecore_core:      'Core',
+  runecore_ha:        'HA Node',
+  runeguard_logger:   'RuneGuard',
+  runeguard_insight:  'RuneGuard',
+  runeguard_dashboard:'RuneGuard',
+};
+
+function projectLabel(project) {
+  return PROJECT_LABELS[project] || (project ? project : 'Other');
+}
+
+function cpuRow(c) {
+  const cpu = Math.min(100, Math.max(0, c.cpu_percent || 0));
+  const color = cpu > 80 ? 'var(--offline)' : cpu > 50 ? 'var(--warn)' : 'var(--accent)';
+  return `<tr>
+    <td style="font-size:11px;padding-left:10px">${esc(c.service_name||c.container_name)}</td>
+    <td>
+      <span class="cpu-bg"><span class="cpu-fill" style="width:${cpu}%;background:${color}"></span></span>
+      <span style="margin-left:6px;min-width:38px;display:inline-block;text-align:right">${cpu.toFixed(1)}%</span>
+    </td>
+    <td style="font-size:11px">${(c.mem_usage_mb||0).toFixed(0)} / ${(c.mem_limit_mb||0).toFixed(0)} MB</td>
+    <td style="font-size:11px;color:var(--dim)">${(c.net_rx_mb||0).toFixed(1)} / ${(c.net_tx_mb||0).toFixed(1)} MB</td>
+  </tr>`;
+}
+
 async function renderContainers() {
   const el = document.getElementById('body-containers');
   try {
     const data = await apiFetch('/api/containers');
-    const ctrs = (data.containers || []).sort((a,b)=>b.cpu_percent-a.cpu_percent);
+    const ctrs = data.containers || [];
     if (!ctrs.length) { el.innerHTML = '<p class="state-msg">No data yet — waiting for Insight collector</p>'; return; }
-    let rows = '';
+
+    // Group by readable component label, sort within group by cpu desc
+    const groups = {};
     for (const c of ctrs) {
-      const cpu = Math.min(100, Math.max(0, c.cpu_percent || 0));
-      const color = cpu > 80 ? 'var(--offline)' : cpu > 50 ? 'var(--warn)' : 'var(--accent)';
-      rows += `<tr>
-        <td style="font-size:11px">${esc(c.service_name||c.container_name)}</td>
-        <td>
-          <span class="cpu-bg"><span class="cpu-fill" style="width:${cpu}%;background:${color}"></span></span>
-          <span style="margin-left:6px;min-width:38px;display:inline-block;text-align:right">${cpu.toFixed(1)}%</span>
-        </td>
-        <td style="font-size:11px">${(c.mem_usage_mb||0).toFixed(0)} / ${(c.mem_limit_mb||0).toFixed(0)} MB</td>
-        <td style="font-size:11px;color:var(--dim)">${(c.net_rx_mb||0).toFixed(1)} / ${(c.net_tx_mb||0).toFixed(1)} MB</td>
-      </tr>`;
+      const label = projectLabel(c.project || '');
+      if (!groups[label]) groups[label] = [];
+      groups[label].push(c);
     }
-    el.innerHTML = `<table><thead><tr><th>Container</th><th>CPU</th><th>RAM (MB)</th><th>Net RX/TX (MB)</th></tr></thead><tbody>${rows}</tbody></table>`;
+    for (const g of Object.values(groups)) g.sort((a,b) => b.cpu_percent - a.cpu_percent);
+
+    // Preferred display order
+    const ORDER = ['Core', 'HA Node', 'RuneCore Mind', 'CoreMemory', 'RuneGuard', 'Other'];
+    const sortedKeys = Object.keys(groups).sort((a, b) => {
+      const ia = ORDER.indexOf(a), ib = ORDER.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+
+    let html = `<table><thead><tr>
+      <th>Service</th><th>CPU</th><th>RAM (MB)</th><th>Net RX/TX (MB)</th>
+    </tr></thead><tbody>`;
+
+    for (const label of sortedKeys) {
+      html += `<tr><td colspan="4" class="group-header">${esc(label)}</td></tr>`;
+      for (const c of groups[label]) html += cpuRow(c);
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
     document.getElementById('upd-containers').textContent = 'updated ' + ts();
   } catch { el.innerHTML = '<p class="state-msg state-err">Failed to load</p>'; }
 }

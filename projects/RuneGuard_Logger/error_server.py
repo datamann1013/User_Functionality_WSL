@@ -94,7 +94,7 @@ def _compute_error_stats():
 
 def _push_stats_loop():
     """Push error stats to CoreMemory every STATS_PUSH_INTERVAL seconds."""
-    time.sleep(30)  # initial delay — let Core registration settle
+    time.sleep(10)  # initial delay — let Core registration settle
     while True:
         try:
             total, last_hour, by_type = _compute_error_stats()
