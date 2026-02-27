@@ -32,6 +32,10 @@ pub struct AgentResponse {
     pub content: Option<String>,
     pub tool_calls: Option<Vec<ToolCall>>,
     pub done: bool,
+    /// True when tool calls were promoted from plain-text JSON (no native tool support).
+    /// The agent uses this to send tool results as `role:"user"` so the model sees them.
+    #[serde(default)]
+    pub promoted: bool,
 }
 
 #[derive(Debug, Deserialize)]

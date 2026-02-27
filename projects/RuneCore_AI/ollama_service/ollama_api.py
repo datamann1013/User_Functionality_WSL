@@ -477,14 +477,29 @@ def agent():
         # Fallback: models without native tool-call support (e.g. qwen2.5-coder, codellama)
         # emit the tool call as raw JSON text in `content` instead of using `tool_calls`.
         # Detect and promote these so the agent loop can execute them properly.
+        # Handles both raw JSON and JSON wrapped in markdown code fences (```json ... ```).
+        #
+        # IMPORTANT: we keep `content` intact (the original JSON text) so the Rust agent
+        # can include it verbatim in the assistant message. The model needs to see its own
+        # tool-call text in history to continue the conversation correctly. We also set
+        # `promoted: true` so the Rust agent knows to feed results back as `role: "user"`
+        # instead of `role: "tool"` (which text-format models don't understand).
+        promoted = False
         if not raw_tool_calls and ollama_tools and content:
             stripped = content.strip()
+
+            # Strip markdown code fence if the entire content is one fenced block
+            import re as _re
+            fence_m = _re.match(r"^```(?:json)?\s*\n([\s\S]+?)\n```\s*$", stripped)
+            if fence_m:
+                stripped = fence_m.group(1).strip()
+
             try:
                 if stripped.startswith("{") and stripped.endswith("}"):
                     parsed = json.loads(stripped)
                     if isinstance(parsed, dict) and "name" in parsed and "arguments" in parsed:
                         raw_tool_calls = [{"function": {"name": parsed["name"], "arguments": parsed["arguments"]}}]
-                        content = ""
+                        promoted = True
                         logger.debug("/api/agent: promoted text-format tool call: %s", parsed["name"])
                 elif stripped.startswith("[") and stripped.endswith("]"):
                     parsed_list = json.loads(stripped)
@@ -495,7 +510,7 @@ def agent():
                             {"function": {"name": item["name"], "arguments": item.get("arguments", {})}}
                             for item in parsed_list
                         ]
-                        content = ""
+                        promoted = True
                         logger.debug("/api/agent: promoted %d text-format tool calls", len(raw_tool_calls))
             except (json.JSONDecodeError, TypeError):
                 pass
@@ -511,9 +526,10 @@ def agent():
                 })
             return jsonify({
                 "role": "assistant",
-                "content": content or None,
+                "content": content or None,  # kept for promoted; None for native
                 "tool_calls": tool_calls,
                 "done": False,
+                "promoted": promoted,
             })
 
         if stream:

@@ -261,26 +261,45 @@ async fn run_turn(
         // Handle tool calls
         if let Some(tool_calls) = &response.tool_calls {
             if !tool_calls.is_empty() {
-                messages.push(serde_json::json!({
-                    "role": "assistant",
-                    "content": response.content.clone().unwrap_or_default(),
-                    "tool_calls": tool_calls.iter().map(|tc| serde_json::json!({
-                        "id": tc.id,
-                        "type": "function",
-                        "function": { "name": tc.name, "arguments": tc.arguments }
-                    })).collect::<Vec<_>>()
-                }));
+                if response.promoted {
+                    // Model emitted the tool call as plain-text JSON (no native tool support).
+                    // Keep the original JSON as the assistant message so the model recognises
+                    // its own output in history. Tool results go back as `role: "user"` because
+                    // text-format models don't understand `role: "tool"`.
+                    messages.push(serde_json::json!({
+                        "role": "assistant",
+                        "content": response.content.clone().unwrap_or_default(),
+                    }));
+                } else {
+                    // Native tool calling — use the structured format Ollama expects.
+                    messages.push(serde_json::json!({
+                        "role": "assistant",
+                        "content": response.content.clone().unwrap_or_default(),
+                        "tool_calls": tool_calls.iter().map(|tc| serde_json::json!({
+                            "id": tc.id,
+                            "type": "function",
+                            "function": { "name": tc.name, "arguments": tc.arguments }
+                        })).collect::<Vec<_>>()
+                    }));
+                }
 
                 for tc in tool_calls {
                     let args_display = ApprovalGate::format_args(&tc.arguments);
 
                     if !gate.check(&tc.name, &args_display) {
                         display::print_tool_denied(&tc.name);
-                        messages.push(serde_json::json!({
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "content": "Tool call denied by user"
-                        }));
+                        if response.promoted {
+                            messages.push(serde_json::json!({
+                                "role": "user",
+                                "content": format!("Tool '{}' was denied by the user.", tc.name)
+                            }));
+                        } else {
+                            messages.push(serde_json::json!({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": "Tool call denied by user"
+                            }));
+                        }
                         continue;
                     }
 
@@ -298,11 +317,19 @@ async fn run_turn(
                     let preview: String = result.lines().next().unwrap_or("").chars().take(80).collect();
                     display::print_tool_result(&tc.name, &preview, is_error);
 
-                    messages.push(serde_json::json!({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result
-                    }));
+                    if response.promoted {
+                        // Inject result as a user message so the model sees it in history.
+                        messages.push(serde_json::json!({
+                            "role": "user",
+                            "content": format!("Tool result for {}:\n{}", tc.name, result)
+                        }));
+                    } else {
+                        messages.push(serde_json::json!({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": result
+                        }));
+                    }
                 }
 
                 continue; // Get the next LLM response
