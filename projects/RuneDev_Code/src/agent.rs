@@ -1,4 +1,4 @@
-use std::io::{self, BufRead};
+use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -41,9 +41,9 @@ pub async fn run(cli: Cli) -> Result<()> {
     if config.runecore.register {
         let registered = register_and_confirm(&config.runecore.core_url).await;
         if !registered {
-            println!(
-                "  \x1b[33m⚠\x1b[0m  Core unreachable — continuing offline"
-            );
+            println!("  \x1b[31m✗\x1b[0m  RuneCore Core unreachable at {}", config.runecore.core_url);
+            println!("      Is the ecosystem running? (docker compose up -d)");
+            return Ok(());
         }
     }
 
@@ -54,15 +54,65 @@ pub async fn run(cli: Cli) -> Result<()> {
             if models.contains(&model) {
                 println!("  \x1b[32m✓\x1b[0m  AI service ready  ({})", model);
             } else {
-                println!("  \x1b[31m✗\x1b[0m  Model '{}' not found in Ollama.", model);
-                if models.is_empty() {
-                    println!("      No models are downloaded yet.");
-                } else {
+                println!("  \x1b[33m?\x1b[0m  Model '{}' not found in Ollama.", model);
+                if !models.is_empty() {
                     println!("      Available: {}", models.join(", "));
                 }
-                println!("      Download via RuneCore_Mind (http://localhost:3000)");
-                println!("      or override: runecode -m {}", models.first().map(|s| s.as_str()).unwrap_or("<model>"));
-                return Ok(());
+
+                print!("\n  Download '{}' now? [y/N] ", model);
+                io::stdout().flush().ok();
+
+                let mut answer = String::new();
+                let do_download = match io::stdin().lock().read_line(&mut answer) {
+                    Ok(_) => answer.trim().eq_ignore_ascii_case("y"),
+                    Err(_) => false,
+                };
+
+                if !do_download {
+                    if !models.is_empty() {
+                        println!("  Tip: override model with  runecode -m {}", models[0]);
+                    }
+                    return Ok(());
+                }
+
+                println!("\n  Starting download...");
+                if let Err(e) = client.pull_model(&model).await {
+                    println!("  \x1b[31m✗\x1b[0m  Could not start download: {e}");
+                    return Ok(());
+                }
+
+                // Live progress bar — polls /api/pulls/<model> every 600 ms
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+                    match client.poll_pull(&model).await {
+                        Ok((status, progress)) => {
+                            let filled = (progress as usize * 20) / 100;
+                            let bar = format!(
+                                "[{}{}] {:>3}%",
+                                "\u{2588}".repeat(filled),
+                                "\u{2591}".repeat(20 - filled),
+                                progress,
+                            );
+                            print!("\r  \x1b[34m⬇\x1b[0m  {bar}  ");
+                            io::stdout().flush().ok();
+
+                            match status.as_str() {
+                                "completed" => {
+                                    println!("\n  \x1b[32m✓\x1b[0m  Download complete");
+                                    break;
+                                }
+                                "failed" => {
+                                    println!("\n  \x1b[31m✗\x1b[0m  Download failed");
+                                    return Ok(());
+                                }
+                                _ => {} // "running" / "starting" — keep polling
+                            }
+                        }
+                        Err(_) => {
+                            // Briefly unavailable right after start — keep polling
+                        }
+                    }
+                }
             }
         }
         Err(e) => {

@@ -104,6 +104,67 @@ impl OllamaClient {
         Ok(models)
     }
 
+    /// Trigger a model download via the wrapper's /api/pull endpoint.
+    /// Returns immediately once the download is initiated (background on the wrapper side).
+    pub async fn pull_model(&self, name: &str) -> Result<()> {
+        let url = format!("{}/api/pull", self.base_url);
+
+        let resp = Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()?
+            .post(&url)
+            .json(&serde_json::json!({ "name": name }))
+            .send()
+            .await
+            .map_err(|e| anyhow!("Failed to start download: {e}"))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Download initiation failed {status}: {body}"));
+        }
+
+        Ok(())
+    }
+
+    /// Poll the progress of an active model download.
+    /// Returns `(status, percent)` where status is "running" | "completed" | "failed".
+    /// Returns `("starting", 0)` if the entry isn't visible yet (brief window after kick-off).
+    pub async fn poll_pull(&self, name: &str) -> Result<(String, u8)> {
+        // Colons are valid in URL path segments; Flask <path:model> handles them fine.
+        let url = format!("{}/api/pulls/{}", self.base_url, name);
+
+        let resp = Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()?
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| anyhow!("Poll error: {e}"))?;
+
+        if resp.status().as_u16() == 404 {
+            return Ok(("starting".to_string(), 0));
+        }
+
+        if !resp.status().is_success() {
+            return Err(anyhow!("Poll returned {}", resp.status()));
+        }
+
+        let data: Value = resp.json().await.map_err(|e| anyhow!("Poll parse error: {e}"))?;
+        let status = data
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let progress = data
+            .get("progress")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+            .min(100) as u8;
+
+        Ok((status, progress))
+    }
+
     /// Single-step agent call (non-streaming). Returns a normalized AgentResponse.
     pub async fn agent(&self, req: AgentRequest) -> Result<AgentResponse> {
         let url = format!("{}/api/agent", self.base_url);
