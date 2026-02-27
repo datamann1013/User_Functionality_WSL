@@ -8,6 +8,9 @@ pub struct Config {
     pub windows_pipe_name: String,
     pub core_url: String,
     pub service_name: String,
+    /// CoreMemory base URL for publishing profiles and telemetry.
+    /// Defaults to Core's internal HTTP proxy which forwards to CoreMemory.
+    pub core_memory_url: String,
 }
 
 impl Config {
@@ -26,12 +29,16 @@ impl Config {
 
         let service_name = env::var("SENTINEL_SERVICE_NAME").unwrap_or_else(|_| "RuneCore_Sentinel".to_string());
 
+        let core_memory_url = env::var("SENTINEL_CORE_MEMORY_URL")
+            .unwrap_or_else(|_| "http://127.0.0.1:11441/api/proxy/CoreMemoryAPI".to_string());
+
         Config {
             sampling_interval,
             unix_socket_path,
             windows_pipe_name,
             core_url,
             service_name,
+            core_memory_url,
         }
     }
 }

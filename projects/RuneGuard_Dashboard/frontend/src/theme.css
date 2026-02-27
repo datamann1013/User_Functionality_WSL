@@ -70,8 +70,19 @@ body {
   flex: 1;
 }
 
+/* Row 2: full-width 2-col row (HostLoad + ContainerLoad) */
+.grid-full-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 0 20px 20px;
+}
+
 @media (max-width: 900px) {
   .grid {
+    grid-template-columns: 1fr;
+  }
+  .grid-full-2 {
     grid-template-columns: 1fr;
   }
 }
