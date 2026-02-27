@@ -121,6 +121,13 @@ do_install() {
         mkdir -p "$INSTALL_DIR"
     fi
 
+    if [[ -f "$INSTALL_BIN" ]]; then
+        local old_ver
+        old_ver=$("$INSTALL_BIN" --version 2>&1 || echo "unknown")
+        yellow "  Previous install found ($old_ver) — replacing..."
+        rm "$INSTALL_BIN"
+    fi
+
     cp "$BUILD_BIN" "$INSTALL_BIN"
 
     echo ""
