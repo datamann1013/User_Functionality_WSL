@@ -317,6 +317,178 @@ def get_pull(model):
         return jsonify(entry), 200
 
 
+def _mcp_to_ollama_tools(mcp_tools):
+    """Convert MCP-format tool definitions to Ollama/OpenAI-compat format.
+
+    MCP format:  {"name": "...", "description": "...", "inputSchema": {...}}
+    Ollama format: {"type": "function", "function": {"name": "...", "description": "...", "parameters": {...}}}
+    """
+    result = []
+    for tool in (mcp_tools or []):
+        result.append({
+            "type": "function",
+            "function": {
+                "name": tool.get("name", ""),
+                "description": tool.get("description", ""),
+                "parameters": (
+                    tool.get("inputSchema")
+                    or tool.get("parameters")
+                    or {"type": "object", "properties": {}}
+                ),
+            },
+        })
+    return result
+
+
+@app.route("/api/agent", methods=["POST"])
+def agent():
+    """Single-step agent endpoint for RuneDev_Code and MCP-compatible clients.
+
+    Accepts MCP-format tool definitions, translates to Ollama format internally,
+    and returns a normalized response containing either tool_calls or content.
+    The existing /api/chat endpoint is unchanged.
+
+    Request body:
+        {model, messages, tools (MCP format, optional), stream (bool), temperature}
+
+    Response — tool calls:
+        {"role": "assistant", "content": null, "tool_calls": [...], "done": false}
+
+    Response — text, stream=false:
+        {"role": "assistant", "content": "...", "tool_calls": null, "done": true}
+
+    Response — text, stream=true:
+        NDJSON stream: {"delta": "chunk", "done": false} ... {"delta": "", "done": true}
+    """
+    from flask import Response as FlaskResponse
+
+    try:
+        data = request.get_json() or {}
+        model_name = data.get("model", DEFAULT_MODEL)
+        messages = data.get("messages", [])
+        mcp_tools = data.get("tools")
+        stream = bool(data.get("stream", False))
+        temperature = float(data.get("temperature", 0.2))
+
+        if not messages:
+            return jsonify({"error": "messages required"}), 400
+
+        # Translate MCP tools → Ollama format
+        ollama_tools = _mcp_to_ollama_tools(mcp_tools) if mcp_tools else None
+
+        request_timeout = int(os.environ.get("OLLAMA_REQUEST_TIMEOUT", "180"))
+
+        # Streaming path: no tools, stream=true
+        if stream and not ollama_tools:
+            payload = {
+                "model": model_name,
+                "messages": messages,
+                "stream": True,
+                "options": {"temperature": temperature},
+            }
+
+            def _stream_gen():
+                try:
+                    r = requests.post(
+                        f"{OLLAMA_HOST}/api/chat",
+                        json=payload,
+                        stream=True,
+                        timeout=request_timeout,
+                    )
+                    for raw_line in r.iter_lines():
+                        if not raw_line:
+                            continue
+                        try:
+                            chunk = json.loads(raw_line)
+                            delta = chunk.get("message", {}).get("content", "")
+                            done = chunk.get("done", False)
+                            yield json.dumps({"delta": delta, "done": done}) + "\n"
+                            if done:
+                                break
+                        except Exception:
+                            pass
+                except Exception as e:
+                    yield json.dumps({"delta": "", "done": True, "error": str(e)}) + "\n"
+
+            return FlaskResponse(
+                _stream_gen(),
+                mimetype="application/x-ndjson",
+                headers={"X-Accel-Buffering": "no"},
+            )
+
+        # Non-streaming path (always used when tools are present)
+        ollama_payload = {
+            "model": model_name,
+            "messages": messages,
+            "stream": False,
+            "options": {"temperature": temperature},
+        }
+        if ollama_tools:
+            ollama_payload["tools"] = ollama_tools
+
+        try:
+            r = requests.post(
+                f"{OLLAMA_HOST}/api/chat",
+                json=ollama_payload,
+                timeout=request_timeout,
+            )
+        except requests.exceptions.Timeout:
+            return jsonify({"error": "Request timeout"}), 504
+
+        if r.status_code != 200:
+            logger.error("/api/agent: Ollama returned %s: %s", r.status_code, r.text[:200])
+            return jsonify({"error": f"Ollama error: {r.status_code}"}), 502
+
+        result = r.json()
+        msg = result.get("message", {})
+
+        # Check for tool calls in the response
+        raw_tool_calls = msg.get("tool_calls")
+        if raw_tool_calls:
+            tool_calls = []
+            for i, tc in enumerate(raw_tool_calls):
+                fn = tc.get("function", {})
+                tool_calls.append({
+                    "id": f"call_{i}",
+                    "name": fn.get("name", ""),
+                    "arguments": fn.get("arguments", {}),
+                })
+            return jsonify({
+                "role": "assistant",
+                "content": msg.get("content") or None,
+                "tool_calls": tool_calls,
+                "done": False,
+            })
+
+        # Pure text response
+        content = msg.get("content", "")
+
+        if stream:
+            # stream=true was requested but tools were provided — emit as single NDJSON chunk
+            def _single_chunk():
+                yield json.dumps({"delta": content, "done": False}) + "\n"
+                yield json.dumps({"delta": "", "done": True}) + "\n"
+
+            return FlaskResponse(
+                _single_chunk(),
+                mimetype="application/x-ndjson",
+                headers={"X-Accel-Buffering": "no"},
+            )
+
+        return jsonify({
+            "role": "assistant",
+            "content": content,
+            "tool_calls": None,
+            "done": True,
+        })
+
+    except requests.exceptions.Timeout:
+        return jsonify({"error": "Request timeout"}), 504
+    except Exception as e:
+        logger.exception("/api/agent failed: %s", e)
+        return jsonify({"error": f"Agent call failed: {str(e)}"}), 500
+
+
 @app.route("/api/chat", methods=["POST"])
 def chat():
     """Chat endpoint using Ollama /api/chat with role-based messages array."""

@@ -1,0 +1,61 @@
+# RuneDev_Code configuration
+# Copy to .runecode.toml in your project root, or to
+# ~/.config/runecode/config.toml for a global default.
+
+[model]
+name        = "qwen2.5-coder:7b"   # Ollama model to use
+wrapper_url = "http://localhost:5002"  # RuneCore_Mind Ollama wrapper
+temperature = 0.2
+
+[approval]
+# Tools in auto_allow run silently without prompting
+auto_allow = [
+    "read_file",
+    "list_directory",
+    "search_files",
+    "search_in_files",
+    "git_status",
+    "git_diff",
+    "git_log",
+]
+# Tools in always_approve always show a [y/n/a/q] prompt
+always_approve = [
+    "write_file",
+    "create_file",
+    "delete_file",
+    "run_bash",
+    "git_commit",
+]
+
+[context]
+max_file_size_kb = 100
+project_context_files = [
+    "README.md",
+    "CLAUDE.md",
+    "Cargo.toml",
+    "package.json",
+    "pyproject.toml",
+    ".runecode.toml",
+]
+respect_gitignore = true
+
+[runecore]
+register = true
+core_url = "http://localhost:11441"
+
+# ---------------------------------------------------------------------------
+# External MCP servers (optional)
+# Connect to any MCP server that works with Claude Code CLI.
+# runecode spawns these as subprocesses and uses their tools alongside
+# its built-in file/shell/git tools.
+# ---------------------------------------------------------------------------
+
+# [[mcp_servers]]
+# name    = "playwright"
+# command = "npx"
+# args    = ["-y", "@playwright/mcp"]
+
+# [[mcp_servers]]
+# name    = "filesystem"
+# command = "npx"
+# args    = ["-y", "@modelcontextprotocol/server-filesystem", "."]
