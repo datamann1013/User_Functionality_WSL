@@ -1,0 +1,35 @@
+version: '3.8'
+services:
+  runeguard:
+    build: .
+    ports:
+      - '5001:5001'
+    environment:
+      - LOG_LEVEL=DEBUG
+      - LOG_DIRECTORY=/app/logs
+      - RUNECORE_CORE_URL=http://runecore_core:11441
+      - CORE_PROXY_URL=http://runecore_core:11441/api/proxy/CoreMemoryAPI
+    networks:
+      # RuneGuard must be reachable from all three VLANs for error logging
+      runecore_dev:
+        aliases:
+          - runeguard
+      runecore_ai_net:
+        aliases:
+          - runeguard
+      runecore_memory_net:
+        aliases:
+          - runeguard
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+networks:
+  runecore_dev:
+    external: true
+  runecore_ai_net:
+    external: true
+  runecore_memory_net:
+    external: true

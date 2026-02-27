@@ -1,0 +1,358 @@
+version: '3.8'
+
+# RuneCore Ecosystem - Unified Deployment with Isolated Bridge Networks
+# This compose file implements the Core-centric architecture with separate bridge networks
+# for each service group, ensuring all inter-service communication goes through Core.
+
+networks:
+  # External network for public access
+  core_public:
+    driver: bridge
+    
+  # Internal bridge networks (no external access)
+  core_ai_bridge:
+    driver: bridge
+    internal: true
+  
+  core_memory_bridge:
+    driver: bridge
+    internal: true
+  
+  core_logger_bridge:
+    driver: bridge
+    internal: true
+  
+  core_ha_bridge:
+    driver: bridge
+    internal: true
+  
+  core_backup_bridge:
+    driver: bridge
+    internal: true
+  
+  # Service-specific internal networks
+  ai_internal:
+    driver: bridge
+    internal: true
+  
+  memory_internal:
+    driver: bridge
+    internal: true
+
+volumes:
+  ollama_models:
+    name: ollama_models
+  core_data_primary:
+  core_data_secondary:
+  core_data_ha:
+  raft_primary_data:
+  raft_secondary_data:
+  raft_ha_data:
+  postgres_data:
+  redis_data:
+  influx_data:
+  certs:
+    name: runecore_certs
+  backups:
+    name: runecore_backups
+
+services:
+  # ============================================================================
+  # CORE SERVICES (Primary and Secondary)
+  # ============================================================================
+  
+  core_primary:
+    build:
+      context: ./projects/RuneCore_Core
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_core_primary_1
+    environment:
+      - RUNECORE_DATA_DIR=/data
+      - RUNECORE_CA_PASSPHRASE=${CA_PASSPHRASE:-changeme_in_production}
+      - RUNECORE_DISABLE_MTLS=${DISABLE_MTLS:-false}
+      - RUNECORE_ENABLE_RAFT=true
+      - RAFT_NODE_ID=1
+      - RAFT_PEER_URLS=2=http://core_secondary:11440,3=http://runecore_ha:11440
+      - RAFT_STORAGE_PATH=/var/lib/runecore/raft
+      - RAFT_SNAPSHOT_INTERVAL=1000
+      - AUTO_RESTART_SERVICES=true
+    volumes:
+      - core_data_primary:/data
+      - raft_primary_data:/var/lib/runecore/raft
+      - certs:/certs
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - core_public
+      - core_ai_bridge
+      - core_memory_bridge
+      - core_logger_bridge
+      - core_ha_bridge
+      - core_backup_bridge
+    ports:
+      - "11440:11440"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-k", "https://localhost:11440/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  core_secondary:
+    build:
+      context: ./projects/RuneCore_Core
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_core_secondary_1
+    environment:
+      - RUNECORE_DATA_DIR=/data
+      - RUNECORE_CA_PASSPHRASE=${CA_PASSPHRASE:-changeme_in_production}
+      - RUNECORE_DISABLE_MTLS=${DISABLE_MTLS:-false}
+      - RUNECORE_ENABLE_RAFT=true
+      - RAFT_NODE_ID=2
+      - RAFT_PEER_URLS=1=http://core_primary:11440,3=http://runecore_ha:11440
+      - RAFT_STORAGE_PATH=/var/lib/runecore/raft
+      - RAFT_SNAPSHOT_INTERVAL=1000
+    volumes:
+      - core_data_secondary:/data
+      - raft_secondary_data:/var/lib/runecore/raft
+      - certs:/certs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - core_public
+      - core_ai_bridge
+      - core_memory_bridge
+      - core_logger_bridge
+      - core_ha_bridge
+      - core_backup_bridge
+    ports:
+      - "11441:11440"
+    restart: unless-stopped
+    depends_on:
+      - core_primary
+
+  runecore_ha:
+    build:
+      context: ./projects/RuneCore_Core
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_ha_1
+    environment:
+      - RUNECORE_DATA_DIR=/data
+      - RUNECORE_CA_PASSPHRASE=${CA_PASSPHRASE:-changeme_in_production}
+      - RUNECORE_DISABLE_MTLS=${DISABLE_MTLS:-false}
+      - RUNECORE_ENABLE_RAFT=true
+      - RAFT_NODE_ID=3
+      - RAFT_PEER_URLS=1=http://core_primary:11440,2=http://core_secondary:11440
+      - RAFT_STORAGE_PATH=/var/lib/runecore/raft
+      - RAFT_SNAPSHOT_INTERVAL=1000
+      - RUNECORE_HA_MODE=true
+    volumes:
+      - core_data_ha:/data
+      - raft_ha_data:/var/lib/runecore/raft
+      - certs:/certs:ro
+    networks:
+      - core_ha_bridge
+    ports:
+      - "11442:11440"
+    restart: unless-stopped
+    depends_on:
+      - core_primary
+      - core_secondary
+
+  # ============================================================================
+  # AI SERVICE BRIDGE (Backend, Frontend, Ollama Wrapper, Ollama)
+  # ============================================================================
+  
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_ollama_1
+    volumes:
+      - ollama_models:/root/.ollama
+    networks:
+      - ai_internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  ollama_service:
+    build:
+      context: ./projects/RuneCore_AI/ollama_service
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_ollama_service_1
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - PORT=5002
+    networks:
+      - ai_internal
+    restart: unless-stopped
+    depends_on:
+      - ollama
+
+  ai_backend:
+    build:
+      context: ./projects/RuneCore_AI/backend
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_ai_backend_1
+    environment:
+      - OLLAMA_SERVICE_URL=http://ollama_service:5002
+      - PORT=5000
+      - RUNECORE_CORE_URL=https://core_primary:11440
+      - RUNECORE_REGISTER_WITH_CORE=1
+      - CLIENT_CERT_PATH=/certs/ai/client.crt
+      - CLIENT_KEY_PATH=/certs/ai/client.key
+      - CA_CERT_PATH=/certs/ca.crt
+      - CONTAINER_NAME=${COMPOSE_PROJECT_NAME:-runecore}_ai_backend_1
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
+    volumes:
+      - certs:/certs:ro
+    networks:
+      - core_ai_bridge
+      - ai_internal
+    restart: unless-stopped
+    depends_on:
+      - ollama_service
+      - core_primary
+
+  ai_frontend:
+    build:
+      context: ./projects/RuneCore_AI/frontend
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_ai_frontend_1
+    environment:
+      - REACT_APP_API_URL=
+      - PORT=3000
+    networks:
+      - ai_internal
+      - core_public
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    depends_on:
+      - ai_backend
+
+  # ============================================================================
+  # MEMORY SERVICE BRIDGE (API Handler + Databases)
+  # ============================================================================
+  
+  postgresql:
+    image: postgres:15-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_postgresql_1
+    environment:
+      - POSTGRES_DB=runecore_memory
+      - POSTGRES_USER=runecore
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - memory_internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U runecore"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_redis_1
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    networks:
+      - memory_internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_influxdb_1
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUX_PASSWORD}
+      - DOCKER_INFLUXDB_INIT_ORG=runecore
+      - DOCKER_INFLUXDB_INIT_BUCKET=metrics
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUX_TOKEN}
+    volumes:
+      - influx_data:/var/lib/influxdb2
+    networks:
+      - memory_internal
+    restart: unless-stopped
+
+  core_memory_api:
+    build:
+      context: ./projects/RuneCore_Memory
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_memory_api_1
+    environment:
+      - DATABASE_URL=postgresql://runecore:${POSTGRES_PASSWORD}@postgresql:5432/runecore_memory
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - INFLUX_URL=http://influxdb:8086
+      - INFLUX_TOKEN=${INFLUX_TOKEN}
+      - INFLUX_ORG=runecore
+      - INFLUX_BUCKET=metrics
+      - RUNECORE_CORE_URL=https://core_primary:11440
+      - RUNECORE_REGISTER_WITH_CORE=1
+      - CLIENT_CERT_PATH=/certs/memory/client.crt
+      - CLIENT_KEY_PATH=/certs/memory/client.key
+      - CA_CERT_PATH=/certs/ca.crt
+      - CONTAINER_NAME=${COMPOSE_PROJECT_NAME:-runecore}_memory_api_1
+      - ENABLE_AUTH=true
+      - INFLUX_RETENTION_DAYS=90
+    volumes:
+      - certs:/certs:ro
+    networks:
+      - core_memory_bridge
+      - memory_internal
+    restart: unless-stopped
+    depends_on:
+      - postgresql
+      - redis
+      - influxdb
+      - core_primary
+
+  # ============================================================================
+  # RUNEGUARD SERVICES (Logger and Backup)
+  # ============================================================================
+  
+  runeguard_logger:
+    build:
+      context: ./projects/RuneGuard_Logger
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_logger_1
+    environment:
+      - ERRORLOGGER_PORT=5001
+      - RUNECORE_CORE_URL=https://core_primary:11440
+      - RUNECORE_REGISTER_WITH_CORE=1
+      - CLIENT_CERT_PATH=/certs/logger/client.crt
+      - CLIENT_KEY_PATH=/certs/logger/client.key
+      - CA_CERT_PATH=/certs/ca.crt
+      - CONTAINER_NAME=${COMPOSE_PROJECT_NAME:-runecore}_logger_1
+    volumes:
+      - certs:/certs:ro
+      - ./logs:/app/logs
+    networks:
+      - core_logger_bridge
+    restart: unless-stopped
+    depends_on:
+      - core_primary
+
+  # NOTE: RuneGuard_Backup and RuneCore_HA services will be added in subsequent steps
+  # as they require additional implementation
+
+# ============================================================================
+# ENVIRONMENT VARIABLES REQUIRED (create .env file):
+# ============================================================================
+# CA_PASSPHRASE=your_secure_passphrase
+# JWT_SECRET_KEY=your_jwt_secret_key
+# POSTGRES_PASSWORD=your_postgres_password
+# REDIS_PASSWORD=your_redis_password
+# INFLUX_PASSWORD=your_influx_password
+# INFLUX_TOKEN=your_influx_token
+# ALLOWED_ORIGINS=http://localhost:3000

@@ -35,12 +35,17 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
     }
   }, [isOpen]);
 
+  const API_BASE = process.env.REACT_APP_API_URL || "";
+
   const fetchAvailableModels = async () => {
     try {
-      const response = await fetch("http://localhost:5000/api/models");
+      const response = await fetch(`${API_BASE}/api/models`);
       if (response.ok) {
         const data = await response.json();
-        setAvailableModels(data.models || []);
+        // Backend may return objects {name, size, ...} or plain strings — normalize to strings
+        const raw = data.models || [];
+        const models = raw.map((m) => (typeof m === "string" ? m : m?.name || null)).filter(Boolean);
+        setAvailableModels(models);
       }
     } catch (error) {
       logFrontendError("FRONTEND_MODEL_ERROR", "Failed to fetch models", error);
@@ -99,7 +104,7 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
   const checkModelAvailability = async (modelName) => {
     try {
       const response = await fetch(
-        `http://localhost:5000/api/models/check/${modelName}`
+        `${API_BASE}/api/models/check/${encodeURIComponent(modelName)}`
       );
       if (response.ok) {
         const data = await response.json();
@@ -122,7 +127,7 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
       setModelDownloading(modelName);
 
       const response = await fetch(
-        `http://localhost:5000/api/models/download/${modelName}`,
+        `${API_BASE}/api/models/download/${encodeURIComponent(modelName)}`,
         {
           method: "POST",
         }
@@ -288,7 +293,7 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
         requestHeaders["Content-Type"] = "application/json";
       }
 
-      const response = await fetch("http://localhost:5000/api/agents", {
+  const response = await fetch(`${API_BASE}/api/agents`, {
         method: "POST",
         headers: requestHeaders,
         body: requestBody,

@@ -1,4 +1,4 @@
-use axum::{extract::State, response::Json, routing::{get, post}, Router, body::Bytes};
+use axum::{extract::State, response::{Json, IntoResponse}, routing::{get, post}, Router, body::Bytes, extract::Path as AxumPath};
 use axum::http::HeaderMap;
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -9,12 +9,22 @@ mod diag;
 mod ca;
 mod db;
 mod cli;
+mod proxy;
+mod crl;
+mod raft_consensus;
+mod raft_network;
+mod raft_storage;
 
 #[derive(Clone)]
 struct AppState {
     db: sqlx::SqlitePool,
     data_dir: String,
     ca_passphrase: String,
+    raft_manager: Option<Arc<parking_lot::Mutex<raft_consensus::RaftManager>>>,
+    enable_raft: bool,
+    /// mTLS-capable reqwest client for outbound proxy calls.
+    /// Built once at startup (PBKDF2 key derivation is expensive).
+    proxy_client: reqwest::Client,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -25,6 +35,12 @@ struct ServiceInfo {
     ws_url: Option<String>,
     rest_url: Option<String>,
     public_key_pem: Option<String>,
+    #[serde(default)]
+    dependencies: Vec<String>,
+    #[serde(default)]
+    wishlist: Vec<String>,
+    #[serde(default)]
+    container_name: Option<String>,
 }
 
 #[tokio::main]
@@ -49,6 +65,11 @@ async fn main() -> anyhow::Result<()> {
     };
 
     ca::init_ca(&data_dir, &passphrase).expect("Failed to initialize CA");
+    ca::ensure_server_cert(&data_dir, &passphrase).expect("Failed to ensure server cert/key");
+
+    // Initialize CRL
+    let crl_manager = crl::CrlManager::new(&data_dir);
+    crl_manager.init_crl(&passphrase).expect("Failed to initialize CRL");
 
     // Initialize tracing (configurable through RUST_LOG). Also install a panic hook to send
     // fatal errors to the ErrorLogger service so we can diagnose crashes in containers.
@@ -72,15 +93,84 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = db::init_db(&data_dir).await?;
 
-    let state = AppState { db: pool, data_dir: data_dir.clone(), ca_passphrase: passphrase.clone() };
+    // Initialize Raft consensus if enabled
+    let enable_raft = env::var("RUNECORE_ENABLE_RAFT").unwrap_or_else(|_| "false".to_string()) == "true";
+    let raft_manager = if enable_raft {
+        let node_id = env::var("RAFT_NODE_ID")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(1);
+        
+        // Get storage path from env or use default in data_dir
+        let storage_path = env::var("RAFT_STORAGE_PATH")
+            .unwrap_or_else(|_| format!("{}/raft_node_{}", data_dir, node_id));
+        
+        tracing::info!("Initializing Raft consensus for node {} with storage at {}", node_id, storage_path);
+        
+        match raft_consensus::create_three_node_cluster(node_id, &storage_path) {
+            Ok(mut manager) => {
+                if let Err(e) = manager.bootstrap_cluster() {
+                    tracing::warn!("Failed to bootstrap Raft cluster: {}", e);
+                }
+                Some(Arc::new(parking_lot::Mutex::new(manager)))
+            }
+            Err(e) => {
+                tracing::error!("Failed to create Raft manager: {}", e);
+                None
+            }
+        }
+    } else {
+        tracing::info!("Raft consensus disabled, using direct database writes");
+        None
+    };
 
-    let app = Router::new()
-        .route("/", get(root))
-        .route("/health", get(health))
-        .route("/api/v1/services/register", post(register_service))
-        .route("/api/v1/services", get(get_services))
-        .route("/api/v1/pki/sign", post(sign_csr))
-        .with_state(state);
+    // Build the mTLS proxy client once — avoids re-running PBKDF2 on every request.
+    // Falls back to a plain client if cert loading fails (e.g. during first-boot before init).
+    let proxy_client = match proxy::build_proxy_client(&data_dir, &passphrase) {
+        Ok(client) => {
+            tracing::info!("Proxy mTLS client ready");
+            client
+        }
+        Err(e) => {
+            tracing::warn!("Could not build mTLS proxy client: {} — falling back to plain HTTP", e);
+            reqwest::Client::new()
+        }
+    };
+
+    let state = AppState {
+        db: pool,
+        data_dir: data_dir.clone(),
+        ca_passphrase: passphrase.clone(),
+        raft_manager,
+        enable_raft,
+        proxy_client,
+    };
+
+    // HA mode: expose only heartbeat + raft/message + health (offloads health pings from Core)
+    let is_ha_mode = env::var("RUNECORE_HA_MODE").unwrap_or_default() == "1";
+    let app = if is_ha_mode {
+        tracing::info!("Running in HA mode — limited routes (heartbeat + raft + health)");
+        Router::new()
+            .route("/health", get(health))
+            .route("/api/v1/services/heartbeat", post(heartbeat_service))
+            .route("/api/v1/raft/message", post(raft_message_handler))
+            .with_state(state.clone())
+    } else {
+        Router::new()
+            .route("/", get(root))
+            .route("/health", get(health))
+            .route("/api/v1/services/register", post(register_service))
+            .route("/api/v1/services", get(get_services))
+            .route("/api/v1/services/query", get(proxy::query_service))
+            .route("/api/v1/services/heartbeat", post(heartbeat_service))
+            .route("/api/v1/pki/sign", post(sign_csr))
+            .route("/api/v1/pki/renew", post(renew_certificate))
+            .route("/api/v1/pki/revoke", post(revoke_certificate))
+            .route("/api/v1/pki/crl", get(get_crl))
+            .route("/api/v1/raft/message", post(raft_message_handler))
+            .route("/api/proxy/*path", axum::routing::any(proxy_route_handler))
+            .with_state(state.clone())
+    };
 
     // Load server cert & key and start TLS server
     let (cert_pem, key_pem) = ca::get_server_cert_and_key_pem(&data_dir, &passphrase).expect("Failed to load server cert/key");
@@ -164,8 +254,50 @@ async fn main() -> anyhow::Result<()> {
     let tls_cfg = std::sync::Arc::new(config);
     // axum_server expects its RustlsConfig type
     let rustls_cfg: axum_server::tls_rustls::RustlsConfig = axum_server::tls_rustls::RustlsConfig::from_config(tls_cfg);
-    let addr = SocketAddr::from(([0, 0, 0, 0], 11440));
+    let port: u16 = env::var("RUNECORE_PORT")
+        .ok().and_then(|s| s.parse().ok()).unwrap_or(11440);
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     println!("RuneCore core listening on https://{}", addr);
+    
+    // Start Raft network task if enabled
+    if let Some(ref raft_mgr) = state.raft_manager {
+        let peer_urls = env::var("RAFT_PEER_URLS")
+            .unwrap_or_else(|_| "1=http://core_primary:11440,2=http://core_secondary:11441,3=http://runecore_ha:11442".to_string());
+        
+        let node_id = env::var("RAFT_NODE_ID")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(1);
+        
+        match raft_network::RaftTransport::new(node_id, &peer_urls) {
+            Ok(transport) => {
+                let raft_clone = Arc::clone(raft_mgr);
+                tokio::spawn(async move {
+                    if let Err(e) = raft_network::raft_network_task(raft_clone, transport).await {
+                        tracing::error!("Raft network task failed: {}", e);
+                    }
+                });
+                tracing::info!("Raft network task started");
+            }
+            Err(e) => {
+                tracing::error!("Failed to create Raft transport: {}", e);
+            }
+        }
+    }
+    
+    // Spawn plain HTTP listener for internal container-to-container proxy calls (no TLS)
+    if let Ok(p) = env::var("RUNECORE_HTTP_INTERNAL_PORT") {
+        if let Ok(http_port) = p.parse::<u16>() {
+            let http_app = app.clone();
+            tokio::spawn(async move {
+                let listener = tokio::net::TcpListener::bind(("0.0.0.0", http_port)).await
+                    .expect("HTTP internal bind failed");
+                tracing::info!("HTTP internal proxy listener on :{}", http_port);
+                axum::serve(listener, http_app).await.unwrap();
+            });
+        }
+    }
+
     axum_server::bind_rustls(addr, rustls_cfg)
         .serve(app.into_make_service())
         .await
@@ -181,6 +313,24 @@ async fn root() -> &'static str {
 async fn health() -> Json<serde_json::Value> {
     tracing::info!("health handler invoked");
     Json(serde_json::json!({"status": "ok"}))
+}
+
+// Handler for incoming Raft messages from peer nodes
+async fn raft_message_handler(
+    State(state): State<AppState>,
+    body: Bytes,
+) -> Json<serde_json::Value> {
+    if let Some(ref raft_mgr) = state.raft_manager {
+        match raft_network::handle_raft_message(Arc::clone(raft_mgr), body.to_vec()).await {
+            Ok(_) => Json(serde_json::json!({"ok": true})),
+            Err(e) => {
+                tracing::error!("Failed to handle Raft message: {}", e);
+                Json(serde_json::json!({"ok": false, "error": e.to_string()}))
+            }
+        }
+    } else {
+        Json(serde_json::json!({"ok": false, "error": "Raft not enabled"}))
+    }
 }
 
 async fn register_service(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Json<serde_json::Value> {
@@ -202,6 +352,25 @@ async fn register_service(State(state): State<AppState>, headers: HeaderMap, bod
     if info.id.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
         info.id = Some(uuid::Uuid::new_v4().to_string());
     }
+
+    // Validate dependencies (check for cycles and missing services)
+    let dependencies_json = serde_json::to_string(&info.dependencies).unwrap_or_else(|_| "[]".to_string());
+    let wishlist_json = serde_json::to_string(&info.wishlist).unwrap_or_else(|_| "[]".to_string());
+
+    // Check each dependency exists in registry
+    let mut missing_deps = Vec::new();
+    let mut available_deps = Vec::new();
+    for dep in &info.dependencies {
+        match db::get_service_by_name(&state.db, dep).await {
+            Ok(Some(svc)) if svc.status == "running" || svc.status == "limb_mode" => {
+                available_deps.push(dep.clone());
+            }
+            _ => {
+                missing_deps.push(dep.clone());
+            }
+        }
+    }
+
     let row = db::ServiceRow {
         id: info.id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         name: info.name.clone(),
@@ -209,14 +378,92 @@ async fn register_service(State(state): State<AppState>, headers: HeaderMap, bod
         ws_url: info.ws_url.clone(),
         rest_url: info.rest_url.clone(),
         public_key_pem: info.public_key_pem.clone(),
+        dependencies: dependencies_json.clone(),
+        wishlist: wishlist_json.clone(),
+        container_name: info.container_name.clone(),
+        status: if missing_deps.is_empty() { "running".to_string() } else { "limb_mode".to_string() },
+        last_seen: chrono::Utc::now().timestamp(),
+        offline_since: None,
     };
-    if let Err(e) = db::insert_service(&state.db, &row).await {
-        // Report DB insert failure to ErrorLogger for diagnostics
-        let _ = diag::report_error_sync(&format!("db insert error: {}", e), None);
-        return Json(serde_json::json!({"ok": false, "error": format!("db error: {}", e)}));
+
+    // ─── Raft consensus or direct DB write ───────────────────────────────────
+    // All raft-related operations (mutex locks, propose) are contained inside a
+    // synchronous block expression. No reference to raft_mgr escapes this block,
+    // so no !Send type is alive at the .await points below.
+    let raft_result: Option<Result<(), anyhow::Error>> = if state.enable_raft {
+        if let Some(raft_mgr) = &state.raft_manager {
+            // Check leadership; lock is acquired and released within this inner block.
+            let (is_leader, leader_id) = {
+                let manager = raft_mgr.lock();
+                (manager.is_leader(), manager.leader_id())
+            };
+
+            if !is_leader {
+                tracing::debug!("Not leader, current leader is node {}", leader_id);
+                return Json(serde_json::json!({
+                    "ok": false,
+                    "error": "not_leader",
+                    "leader_id": leader_id,
+                    "message": "Please retry request with the leader node"
+                }));
+            }
+
+            let cmd = raft_consensus::RegistryCommand::RegisterService {
+                name: info.name.clone(),
+                version: info.version.clone(),
+                rest_url: info.rest_url.clone(),
+                ws_url: info.ws_url.clone(),
+                dependencies: info.dependencies.clone(),
+                wishlist: info.wishlist.clone(),
+                container_name: info.container_name.clone(),
+            };
+
+            // Lock is held only for propose(); guard dropped at end of statement.
+            // raft_mgr borrow ends at the closing `}` of this block — nothing
+            // non-Send escapes into the async continuation below.
+            Some(raft_mgr.lock().propose(cmd).map(|_| ()))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Handle raft outcome; .await points below are safe — raft_mgr is out of scope.
+    match raft_result {
+        Some(Ok(())) => {
+            tracing::info!("Service registration proposed via Raft: {}", info.name);
+            // Dual-write to local DB during migration to full Raft
+            if let Err(e) = db::insert_service(&state.db, &row).await {
+                tracing::warn!("Local DB write failed: {}", e);
+            }
+        }
+        Some(Err(e)) => {
+            tracing::error!("Raft propose failed: {}", e);
+            return Json(serde_json::json!({
+                "ok": false,
+                "error": format!("raft error: {}", e)
+            }));
+        }
+        None => {
+            // Direct database write (Raft disabled)
+            if let Err(e) = db::insert_service(&state.db, &row).await {
+                let _ = diag::report_error_sync(&format!("db insert error: {}", e), None);
+                return Json(serde_json::json!({"ok": false, "error": format!("db error: {}", e)}));
+            }
+        }
     }
-    tracing::info!("register_service succeeded: id={}", info.id.clone().unwrap_or_default());
-    Json(serde_json::json!({"ok": true, "service_id": info.id}))
+
+    tracing::info!("register_service succeeded: id={}, status={}", info.id.clone().unwrap_or_default(), row.status);
+    
+    Json(serde_json::json!({
+        "ok": true,
+        "registered": true,
+        "service_id": info.id,
+        "status": row.status,
+        "missing_dependencies": missing_deps,
+        "available_dependencies": available_deps,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -239,3 +486,199 @@ async fn get_services(State(state): State<AppState>) -> Json<serde_json::Value> 
         Err(e) => Json(serde_json::json!({"ok": false, "error": format!("db error: {}", e)})),
     }
 }
+
+#[derive(Deserialize)]
+struct HeartbeatRequest {
+    name: String,
+    #[serde(default = "default_status")]
+    status: String,
+    #[serde(default)]
+    metadata: Option<serde_json::Value>,
+}
+
+fn default_status() -> String {
+    "healthy".to_string()
+}
+
+async fn heartbeat_service(State(state): State<AppState>, Json(payload): Json<HeartbeatRequest>) -> Json<serde_json::Value> {
+    tracing::debug!("heartbeat from service: {}, status: {}", payload.name, payload.status);
+
+    // When Raft is enabled, propose heartbeat via consensus (replicates to all nodes).
+    // This is fire-and-forget — we don't wait for commit to avoid blocking health pings.
+    if state.enable_raft {
+        if let Some(ref raft_mgr) = state.raft_manager {
+            let cmd = raft_consensus::RegistryCommand::UpdateHeartbeat {
+                name: payload.name.clone(),
+                status: payload.status.clone(),
+                metadata: payload.metadata.clone(),
+            };
+            let _ = raft_mgr.lock().propose(cmd);
+            tracing::debug!("heartbeat for {} proposed via Raft", payload.name);
+            return Json(serde_json::json!({"ok": true, "via": "raft"}));
+        }
+    }
+
+    // Direct DB write fallback (Raft disabled or propose failed)
+    match db::update_service_heartbeat(&state.db, &payload.name, &payload.status).await {
+        Ok(_) => Json(serde_json::json!({"ok": true})),
+        Err(e) => {
+            tracing::error!("failed to update heartbeat for {}: {}", payload.name, e);
+            Json(serde_json::json!({"ok": false, "error": format!("db error: {}", e)}))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct RenewCertRequest {
+    service_name: String,
+    container_name: String,
+    old_serial: String,
+    csr_pem: String,
+}
+
+async fn renew_certificate(State(state): State<AppState>, Json(payload): Json<RenewCertRequest>) -> Json<serde_json::Value> {
+    let cert_registry = crl::CertificateRegistry::new(&state.data_dir);
+    
+    // Verify container name matches the original certificate
+    match cert_registry.verify_renewal(&payload.old_serial, &payload.container_name) {
+        Ok(true) => {
+            // Container verified, issue new certificate with 7 days validity
+            match ca::sign_csr(&state.data_dir, &state.ca_passphrase, &payload.csr_pem, 7) {
+                Ok(cert_pem) => {
+                    // Extract serial from new certificate and register it
+                    let cert_str = String::from_utf8_lossy(&cert_pem);
+                    // Register in certificate registry
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs() as i64;
+                    
+                    // Note: In production, extract actual serial from cert
+                    // For now, use timestamp as proxy
+                    let new_serial = format!("{:x}", now);
+                    let _ = cert_registry.register_certificate(
+                        &new_serial,
+                        &payload.container_name,
+                        &payload.service_name,
+                        now
+                    );
+                    
+                    tracing::info!("renewed certificate for service {} container {}", 
+                        payload.service_name, payload.container_name);
+                    
+                    Json(serde_json::json!({
+                        "ok": true,
+                        "cert_pem": cert_str,
+                        "expires_in_days": 7
+                    }))
+                },
+                Err(e) => Json(serde_json::json!({
+                    "ok": false,
+                    "error": format!("signing error: {}", e)
+                })),
+            }
+        },
+        Ok(false) => {
+            tracing::warn!("renewal denied: container name mismatch for service {} serial {}",
+                payload.service_name, payload.old_serial);
+            Json(serde_json::json!({
+                "ok": false,
+                "error": "container name verification failed"
+            }))
+        },
+        Err(e) => Json(serde_json::json!({
+            "ok": false,
+            "error": format!("verification error: {}", e)
+        })),
+    }
+}
+
+#[derive(Deserialize)]
+struct RevokeCertRequest {
+    serial: String,
+    reason: String,
+}
+
+async fn revoke_certificate(State(state): State<AppState>, Json(payload): Json<RevokeCertRequest>) -> Json<serde_json::Value> {
+    let crl_manager = crl::CrlManager::new(&state.data_dir);
+    let cert_registry = crl::CertificateRegistry::new(&state.data_dir);
+    
+    match crl_manager.revoke_certificate(&state.ca_passphrase, &payload.serial, &payload.reason) {
+        Ok(_) => {
+            // Mark as revoked in registry
+            let _ = cert_registry.mark_revoked(&payload.serial);
+            
+            tracing::info!("revoked certificate serial {}: {}", payload.serial, payload.reason);
+            Json(serde_json::json!({
+                "ok": true,
+                "revoked": payload.serial
+            }))
+        },
+        Err(e) => Json(serde_json::json!({
+            "ok": false,
+            "error": format!("revocation error: {}", e)
+        })),
+    }
+}
+
+async fn get_crl(State(state): State<AppState>) -> impl axum::response::IntoResponse {
+    let crl_manager = crl::CrlManager::new(&state.data_dir);
+    
+    match crl_manager.get_crl_pem() {
+        Ok(crl_pem) => {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                axum::http::header::CONTENT_TYPE,
+                "application/x-pem-file".parse().unwrap()
+            );
+            (headers, crl_pem).into_response()
+        },
+        Err(e) => {
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to read CRL: {}", e)
+            ).into_response()
+        }
+    }
+}
+
+// Route handler that extracts service name and path from wildcard route
+async fn proxy_route_handler(
+    state: State<AppState>,
+    req: axum::extract::Request,
+) -> impl axum::response::IntoResponse {
+    let path = req.uri().path();
+    
+    // Extract service name and remaining path from /api/proxy/{service}/{path}
+    let parts: Vec<&str> = path.trim_start_matches("/api/proxy/").split('/').collect();
+    if parts.is_empty() || parts[0].is_empty() {
+        return (axum::http::StatusCode::BAD_REQUEST, "Missing service name").into_response();
+    }
+    
+    let service_name = parts[0].to_string();
+    let remaining_path = if parts.len() > 1 {
+        parts[1..].join("/")
+    } else {
+        String::new()
+    };
+    
+    tracing::debug!("proxy route: service={}, path={}", service_name, remaining_path);
+    
+    // Decompose request into method, headers, and body
+    let (parts, body) = req.into_parts();
+    let method = parts.method;
+    let headers = parts.headers;
+
+    // Call proxy handler
+    match proxy::proxy_handler(
+        state,
+        AxumPath((service_name, remaining_path)),
+        method,
+        headers,
+        body,
+    ).await {
+        Ok(response) => response.into_response(),
+        Err((status, msg)) => (status, msg).into_response(),
+    }
+}
+

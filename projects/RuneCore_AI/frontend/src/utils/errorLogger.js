@@ -3,8 +3,9 @@
  * Sends errors to backend which forwards to ErrorLogger service
  */
 
-const API_BASE =
-  process.env.NODE_ENV === "production" ? "" : "http://localhost:5000";
+// Use REACT_APP_API_URL when provided by the environment (works for dev and prod).
+// Fallback to empty string so requests become relative and go through the router.
+const API_BASE = process.env.REACT_APP_API_URL || "";
 
 export const logFrontendError = async (
   errorCode,
@@ -39,7 +40,35 @@ export const logFrontendError = async (
 };
 
 export const getErrorExplanation = (errorCode) => {
+  /**
+   * Error codes follow RuneGuard convention:
+   * [Type][Origin][Component][Subcomponent][Number]
+   * Type: E(rror), W(arning), I(nfo)
+   * Origin: A (AI Service)
+   * Component: F (Frontend)
+   * Subcomponent: X (General), C (Chat), M (Modal), A (Agent)
+   */
   const errorExplanations = {
+    // Frontend - General (AFX)
+    IAFX01: "Frontend application initialized",
+    EAFX01: "Frontend rendering error",
+    EAFX02: "Frontend API call failed",
+    EAFX03: "Frontend state error",
+    // Frontend - Chat (AFC)
+    IAFC01: "Chat message sent",
+    EAFC01: "Chat request failed",
+    EAFC02: "Chat connection error",
+    WAFC01: "Chat response delayed",
+    // Frontend - Agent (AFA)
+    IAFA01: "Agent created",
+    IAFA02: "Agent updated",
+    IAFA03: "Agent deleted",
+    EAFA01: "Agent operation failed",
+    // Frontend - Model (AFM)
+    IAFM01: "Model list loaded",
+    IAFM02: "Model download started",
+    EAFM01: "Model operation failed",
+    // Legacy codes (for backward compatibility)
     FRONTEND_INIT: "Frontend application initialized",
     FRONTEND_API_ERROR: "API request failed",
     FRONTEND_RENDER_ERROR: "Component render error",
@@ -48,7 +77,7 @@ export const getErrorExplanation = (errorCode) => {
     FRONTEND_CONNECTION_ERROR: "Backend connection error",
   };
 
-  return errorExplanations[errorCode] || "Frontend error occurred";
+  return errorExplanations[errorCode] || `Error: ${errorCode}`;
 };
 
 // Global error handler for unhandled errors

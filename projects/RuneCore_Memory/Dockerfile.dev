@@ -1,0 +1,10 @@
+FROM runecore/python-slim-dev:latest
+WORKDIR /app
+COPY requirements.txt /app/
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . /app
+COPY migrate.py /app/migrate.py
+COPY start_core_memory.sh /app/start_core_memory.sh
+RUN chmod +x /app/start_core_memory.sh
+ENV PYTHONUNBUFFERED=1
+CMD ["/app/start_core_memory.sh"]

@@ -6,14 +6,15 @@ import React, {
   useCallback,
 } from "react";
 import "./theme.css";
+import ReactMarkdown from "react-markdown";
 import { logFrontendError } from "./utils/errorLogger";
 import CreateAgentModal from "./components/CreateAgentModal";
 import EditAgentModal from "./components/EditAgentModal";
 import ModelManager from "./components/ModelManager";
+import UserProfileModal from "./components/UserProfileModal";
 
 // API base URL
-const API_BASE =
-  process.env.NODE_ENV === "production" ? "" : "http://localhost:5000";
+const API_BASE = process.env.REACT_APP_API_URL || "";
 
 // Pre-computed avatar colors for better performance
 const AVATAR_COLORS = [
@@ -59,27 +60,31 @@ const calculateDowntime = (lastActive) => {
   return "Just now";
 };
 
-const getAgentStatusDisplay = (agent) => {
-  // Parse metadata once
-  let metadata = {};
-  try {
-    metadata =
-      typeof agent.metadata === "string"
-        ? JSON.parse(agent.metadata)
-        : agent.metadata || {};
-  } catch (e) {
-    metadata = {};
+const getAgentStatusDisplay = (agent, isThinking = false) => {
+  // If agent is currently thinking, show as busy
+  if (isThinking) {
+    return { text: "busy", class: "busy" };
   }
 
-  if (metadata.model_downloading || agent.status === "offline") {
-    return { text: "offline", class: "offline" };
+  // Determine downtime
+  if (!agent || !agent.last_active) {
+    return { text: "online", class: "idle" };
+  }
+
+  const lastActiveTime = new Date(agent.last_active).getTime();
+  const now = Date.now();
+  const downtime = now - lastActiveTime;
+
+  // If more than 5 minutes inactive, show as online
+  if (downtime > 300000) {
+    return { text: "online", class: "idle" };
   }
 
   switch (agent.status) {
     case "idle":
-      return { text: "ready", class: "idle" };
+      return { text: "online", class: "idle" };
     case "busy":
-      return { text: "thinking", class: "busy" };
+      return { text: "busy", class: "busy" };
     default:
       return { text: agent.status, class: agent.status };
   }
@@ -90,20 +95,176 @@ function App() {
   const [agents, setAgents] = useState([]);
   const [agentsLoading, setAgentsLoading] = useState(true);
   const [selectedAgent, setSelectedAgent] = useState(null);
+  // Ref that mirrors selectedAgent so async handlers can read the CURRENT value without stale closures
+  const selectedAgentRef = useRef(null);
   const [messages, setMessages] = useState([]);
+  // Per-agent message store: { [agentId]: Message[] }
+  const [messageStore, setMessageStore] = useState({});
+  
+  // Helper to trim message store to last 10 messages (matching backend limit)
+  const trimMessageStore = (store, agentId, messages) => {
+    const trimmed = messages.slice(-10);
+    return { ...store, [agentId]: trimmed };
+  };
   const [inputText, setInputText] = useState("");
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [connecting, setConnecting] = useState(true);
-  const [thinking, setThinking] = useState(false);
+  const [thinkingAgents, setThinkingAgents] = useState(new Set()); // Track which agents are thinking
+  const [unreadCounts, setUnreadCounts] = useState({}); // Track unread messages per agent
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [agentToEdit, setAgentToEdit] = useState(null);
   const [showModelManager, setShowModelManager] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [cacheStatus, setCacheStatus] = useState(null);
+
+  // Model retry/cancel helpers: when backend reports a model pull timeout we
+  // start a background retry loop and present a Cancel button to the user.
+  const [modelRetryingAgent, setModelRetryingAgent] = useState(null);
+  const modelRetryCancelRef = useRef({});
+
+  const startBackgroundRetry = (userMessage, agentId, initialErrorCode) => {
+    // Mark retrying state
+    setModelRetryingAgent(agentId);
+    modelRetryCancelRef.current[agentId] = false;
+
+    const baseMs = parseInt(process.env.REACT_APP_MODEL_RETRY_BASE_MS || "2000", 10);
+    const maxBackoffPow = 6; // cap exponent to avoid huge waits
+
+    (async () => {
+      let attempt = 0;
+      while (!modelRetryCancelRef.current[agentId]) {
+        attempt += 1;
+        const waitMs = baseMs * Math.pow(2, Math.min(attempt - 1, maxBackoffPow));
+        // wait before retrying
+        await new Promise((res) => setTimeout(res, waitMs));
+
+        try {
+          const retryResp = await fetch(`${API_BASE}/api/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ message: userMessage, agent_id: agentId }),
+          });
+
+          const retryData = await retryResp.json().catch(() => ({}));
+
+          if (retryResp.ok) {
+            // Replace previous model-missing messages and append the successful response
+            const successMsg = {
+              id: Date.now() + Math.random(),
+              sender: "ai",
+              text: retryData.response,
+              timestamp: new Date().toISOString(),
+              agentId: agentId,
+            };
+            setMessageStore((prev) => {
+              const list = (prev[agentId] || []).filter((m) => m.errorCode !== initialErrorCode).concat([successMsg]);
+              return trimMessageStore(prev, agentId, list);
+            });
+            if (agentId === selectedAgentRef.current) {
+              setMessages((prev) => prev.filter((m) => m.errorCode !== initialErrorCode).concat([successMsg]));
+            }
+            logFrontendError("FRONTEND_CHAT_SUCCESS_RETRY_BG", "Background retry succeeded", { attempt, agentId });
+            // clear thinking and retrying state
+            setThinkingAgents((prev) => {
+              const newSet = new Set(prev);
+              newSet.delete(agentId);
+              return newSet;
+            });
+            delete modelRetryCancelRef.current[agentId];
+            break;
+          } else {
+            // update the visible status message so user knows we're still trying
+            const interim = {
+              id: Date.now() + Math.random(),
+              sender: "ai",
+              text: retryData.message || `Attempt ${attempt} failed; still trying...`,
+              timestamp: new Date().toISOString(),
+              agentId,
+              error: true,
+              errorCode: retryData.error_code || initialErrorCode,
+            };
+            setMessageStore((prev) => {
+              const list = (prev[agentId] || []).filter((m) => m.errorCode !== initialErrorCode).concat([interim]);
+              return trimMessageStore(prev, agentId, list);
+            });
+            if (agentId === selectedAgentRef.current) {
+              setMessages((prev) => prev.filter((m) => m.errorCode !== initialErrorCode).concat([interim]));
+            }
+          }
+        } catch (err) {
+          const netErr = {
+            id: Date.now() + Math.random(),
+            sender: "ai",
+            text: `Network error during retry; still trying...`,
+            timestamp: new Date().toISOString(),
+            agentId,
+            error: true,
+          };
+          setMessageStore((prev) => {
+            const list = (prev[agentId] || []).filter((m) => m.errorCode !== initialErrorCode).concat([netErr]);
+            return trimMessageStore(prev, agentId, list);
+          });
+          if (agentId === selectedAgentRef.current) {
+            setMessages((prev) => prev.filter((m) => m.errorCode !== initialErrorCode).concat([netErr]));
+          }
+        }
+      }
+
+      if (modelRetryCancelRef.current[agentId]) {
+        // User canceled: inform in chat and clear thinking indicator
+        const cancelMsg = {
+          id: Date.now() + Math.random(),
+          sender: "ai",
+          text: "Model download canceled by user.",
+          timestamp: new Date().toISOString(),
+          agentId,
+          error: true,
+          errorCode: "E_MODEL_PULL_CANCELED",
+        };
+        setMessageStore((prev) => {
+          const list = (prev[agentId] || []).filter((m) => m.errorCode !== initialErrorCode).concat([cancelMsg]);
+          return trimMessageStore(prev, agentId, list);
+        });
+        if (agentId === selectedAgentRef.current) {
+          setMessages((prev) => prev.filter((m) => m.errorCode !== initialErrorCode).concat([cancelMsg]));
+        }
+        setThinkingAgents((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(agentId);
+          return newSet;
+        });
+        setModelRetryingAgent(null);
+        delete modelRetryCancelRef.current[agentId];
+      }
+    })();
+  };
+
+  const cancelModelRetry = (agentId) => {
+    if (!agentId) agentId = selectedAgent;
+    modelRetryCancelRef.current[agentId] = true;
+    // UI state cleanup will be handled by the background loop
+    logFrontendError("FRONTEND_MODEL_PULL_CANCELED", "User canceled model pull retry", { agentId });
+  };
+
+  // Keep selectedAgentRef in sync so async handlers can read the current value
+  useEffect(() => {
+    selectedAgentRef.current = selectedAgent;
+  }, [selectedAgent]);
+
+  // Auto-resize textarea to fit content (resets when inputText is cleared)
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+  }, [inputText]);
 
   const fileInputRef = useRef(null);
   const chatAreaRef = useRef(null);
+  const textareaRef = useRef(null);
 
   // Memoized values for performance
   const currentAgent = useMemo(
@@ -122,26 +283,57 @@ function App() {
   // Optimized API calls with useCallback
   const loadAgents = useCallback(async () => {
     try {
-      setAgentsLoading(true);
+      setAgentsLoading((prev) => prev); // keep loading state on refresh without flash
       const response = await fetch(`${API_BASE}/api/agents`);
       if (response.ok) {
         const data = await response.json();
-        const validAgents = (data.agents || []).filter(
+        const incoming = (data.agents || []).filter(
           (agent) =>
             agent && typeof agent === "object" && agent.id && agent.name
         );
-        setAgents(validAgents);
+
+        // Smart merge: only update state if something actually changed.
+        // This prevents the full list from disappearing and reappearing on
+        // each polling tick.
+        setAgents((prev) => {
+          const prevMap = new Map(prev.map((a) => [a.id, a]));
+          const inMap = new Map(incoming.map((a) => [a.id, a]));
+
+          // Check for deletions or additions
+          const sameIds =
+            prev.length === incoming.length &&
+            incoming.every((a) => prevMap.has(a.id));
+
+          if (sameIds) {
+            // Same set of agents — only replace entries that actually changed
+            const merged = prev.map((a) => {
+              const fresh = inMap.get(a.id);
+              if (!fresh) return a;
+              // Shallow compare a few key fields to avoid unnecessary re-renders
+              if (
+                a.name === fresh.name &&
+                a.model_name === fresh.model_name &&
+                a.status === fresh.status &&
+                a.last_active === fresh.last_active
+              ) {
+                return a; // no change — return same reference
+              }
+              return fresh;
+            });
+            return merged;
+          }
+
+          // Agent list changed (add/remove) — use fresh list
+          return incoming;
+        });
 
         // Set first agent as selected if none selected
-        if (validAgents.length > 0 && !selectedAgent) {
-          setSelectedAgent(validAgents[0].id);
+        if (incoming.length > 0 && !selectedAgent) {
+          setSelectedAgent(incoming[0].id);
         }
-      } else {
-        setAgents([]);
       }
     } catch (error) {
       logFrontendError("AGENTS_LOAD_ERROR", "Failed to load agents", error);
-      setAgents([]);
     } finally {
       setAgentsLoading(false);
     }
@@ -173,7 +365,9 @@ function App() {
           },
         ]);
 
-        setMessages(historyMessages);
+        // Save into per-agent store and return the messages
+        setMessageStore((prev) => ({ ...prev, [agentId]: historyMessages }));
+        return historyMessages;
         logFrontendError(
           "CONVERSATION_HISTORY_LOADED",
           `Loaded ${conversations.length} conversations for agent ${agentId}`
@@ -185,7 +379,9 @@ function App() {
         `Failed to load conversation history for agent ${agentId}`,
         error
       );
-      setMessages([]);
+      // Keep any existing store for the agent, but clear visible messages if currently selected
+      setMessageStore((prev) => ({ ...prev, [agentId]: prev[agentId] || [] }));
+      return [];
     }
   }, []);
 
@@ -193,23 +389,44 @@ function App() {
     async (agentId) => {
       if (agentId === selectedAgent) return;
 
+      // Switch selection and restore stored messages (or load from backend)
       setSelectedAgent(agentId);
-      setMessages([]);
       setInputText("");
 
-      if (agentId) {
-        await loadConversationHistory(agentId);
+      // Clear unread count for this agent
+      setUnreadCounts((prev) => ({ ...prev, [agentId]: 0 }));
+
+      const stored = messageStore[agentId];
+      if (stored && stored.length > 0) {
+        // Immediately show stored messages for this agent
+        setMessages(stored);
+      } else {
+        // Immediately clear so we don't show the previous agent's messages
+        setMessages([]);
+        // Load from backend and populate store
+        if (agentId) {
+          const history = await loadConversationHistory(agentId);
+          setMessages(history || []);
+        }
       }
     },
-    [selectedAgent, loadConversationHistory]
+    [selectedAgent, loadConversationHistory, messageStore]
   );
 
   const handleSend = useCallback(async () => {
-    if (connecting || !inputText.trim() || thinking) return;
+    const isAgentThinking = thinkingAgents.has(selectedAgent);
+    if (connecting || !inputText.trim() || isAgentThinking) return;
+
+    // If true, we will keep the agent in the thinking state (used for EABB5)
+    let keepThinkingVisible = false;
 
     const userMessage = inputText.trim();
     setInputText("");
-    setThinking(true);
+
+    // Mark this agent as thinking
+    setThinkingAgents((prev) => new Set([...prev, selectedAgent]));
+    // Capture agent id for this send operation to avoid race conditions
+    const agentIdNow = selectedAgent;
 
     // Generate unique IDs once
     const messageId = Date.now() + Math.random();
@@ -224,20 +441,34 @@ function App() {
       timestamp,
       files: selectedFiles.length > 0 ? [...selectedFiles] : undefined,
     };
-    setMessages((prev) => [...prev, newMessage]);
+    // Persist the new user message into the per-agent store (limit to 10)
+    setMessageStore((prev) => {
+      const cur = (prev[agentIdNow] || []).concat([newMessage]);
+      return trimMessageStore(prev, agentIdNow, cur);
+    });
+    // Update visible messages only if still viewing this agent
+    if (agentIdNow === selectedAgent) {
+      setMessages((prev) => [...prev, newMessage]);
+    }
     setSelectedFiles([]);
 
     // Add thinking indicator
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: thinkingId,
-        sender: "ai",
-        text: "Thinking...",
-        timestamp,
-        isThinking: true,
-      },
-    ]);
+    const thinkingMsg = {
+      id: thinkingId,
+      sender: "ai",
+      text: "Thinking...",
+      timestamp,
+      isThinking: true,
+      agentId: agentIdNow,
+    };
+    setMessageStore((prev) => {
+      const cur = (prev[agentIdNow] || []).concat([thinkingMsg]);
+      return trimMessageStore(prev, agentIdNow, cur);
+    });
+    // Update visible messages only if still viewing this agent
+    if (agentIdNow === selectedAgent) {
+      setMessages((prev) => [...prev, thinkingMsg]);
+    }
 
     try {
       const response = await fetch(`${API_BASE}/api/chat`, {
@@ -249,48 +480,147 @@ function App() {
         }),
       });
 
-      const data = await response.json();
+      // Check if response is JSON before parsing
+      const contentType = response.headers.get("content-type");
+      let data;
+      try {
+        if (contentType && contentType.includes("application/json")) {
+          data = await response.json();
+        } else {
+          // Got HTML or other non-JSON response (nginx error page)
+          const text = await response.text();
+          throw new Error(`Server returned non-JSON response (${response.status}): ${text.substring(0, 100)}`);
+        }
+      } catch (parseError) {
+        throw new Error(`Failed to parse server response: ${parseError.message}`);
+      }
 
-      if (response.ok) {
+      // Model-missing codes that require the CANCEL/retry flow.
+      // Checked both inside response.ok (HTTP 202 "accepted") and the error branch.
+      const modelMissingCodes = new Set([
+        "E_MODEL_MISSING",
+        "E_MODEL_MISSING_PULL_TIMEOUT",
+        "E_MODEL_MISSING_PULL_STARTED",
+        "E_MODEL_PULL_IN_PROGRESS",   // backend returns HTTP 202 for this
+        "MODEL_PULL_IN_PROGRESS",     // alternate form
+      ]);
+
+      // HTTP 202 is response.ok===true but means "model pull started, retry later".
+      // Detect it by checking error_code in the body before treating as success.
+      const isModelPull202 = response.status === 202 && data && modelMissingCodes.has(data.error_code);
+
+      if (response.ok && !isModelPull202) {
         // Remove thinking message and add AI response
-        setMessages((prev) => [
-          ...prev.filter((msg) => msg.id !== thinkingId),
-          {
-            id: Date.now() + Math.random(),
-            sender: "ai",
-            text: data.response,
-            timestamp: new Date().toISOString(),
-            agentId: selectedAgent,
-          },
-        ]);
+        const aiMsg = {
+          id: Date.now() + Math.random(),
+          sender: "ai",
+          text: data.response,
+          timestamp: new Date().toISOString(),
+          agentId: agentIdNow,
+        };
+
+        setMessageStore((prev) => {
+          const list = (prev[agentIdNow] || []).filter((msg) => msg.id !== thinkingId).concat([aiMsg]);
+          return trimMessageStore(prev, agentIdNow, list);
+        });
+
+        // Use the ref to read the CURRENT selected agent — avoids stale closure and
+        // avoids calling setMessages inside setSelectedAgent which can cause extra renders
+        if (agentIdNow === selectedAgentRef.current) {
+          // Still viewing this agent — update visible messages
+          setMessages((prev) => prev.filter((msg) => msg.id !== thinkingId).concat([aiMsg]));
+        } else {
+          // User switched to a different agent — increment unread badge only
+          setUnreadCounts((counts) => ({
+            ...counts,
+            [agentIdNow]: (counts[agentIdNow] || 0) + 1,
+          }));
+        }
+
         logFrontendError(
           "FRONTEND_CHAT_SUCCESS",
           "Chat message sent successfully"
         );
       } else {
-        let errorMessage = "Sorry, I couldn't process your message. ";
-
-        if (data.message) {
-          errorMessage = data.message;
-        } else if (data.error) {
-          switch (data.error) {
-            case "AI service unavailable":
-              errorMessage =
-                "The AI service is currently offline. Please wait a moment and try again.";
-              break;
-            case "AI processing failed":
-              errorMessage =
-                "I'm having trouble understanding your message. Could you try rephrasing it?";
-              break;
-            case "Empty message":
-              errorMessage = "Please type a message to send.";
-              break;
-            default:
-              errorMessage = data.error;
+        // Handle specific backend error codes for model-missing and upstream failures.
+        // modelMissingCodes is defined above and shared with the 202 check.
+        if (data && data.error_code === "EABB5") {
+          // Upstream AI unavailable — show error and let user retry manually.
+          // Do NOT keep thinking visible (no background retry is started for this case).
+          const serverMsg = data.message || "Upstream AI service unavailable. Please retry.";
+          const eabbMsg = {
+            id: Date.now() + Math.random(),
+            sender: "ai",
+            text: serverMsg,
+            timestamp: new Date().toISOString(),
+            agentId: agentIdNow,
+            error: true,
+            errorCode: "EABB5",
+          };
+          setMessageStore((prev) => {
+            const list = (prev[agentIdNow] || []).filter((m) => m.id !== thinkingId).concat([eabbMsg]);
+            return trimMessageStore(prev, agentIdNow, list);
+          });
+          if (agentIdNow === selectedAgentRef.current) {
+            setMessages((prev) => prev.filter((m) => m.id !== thinkingId).concat([eabbMsg]));
           }
-        }
+          // keepThinkingVisible stays false — this releases the textarea so user can retry
+          logFrontendError("FRONTEND_CHAT_EABB5", "Received EABB5 from backend", data);
+        } else if (data && modelMissingCodes.has(data.error_code)) {
+          // Model missing: instead of immediately failing, start a background
+          // retry loop and show a Cancel button so the user can stop attempts.
+          const modelMissingMsg = {
+            id: Date.now() + Math.random(),
+            sender: "ai",
+            text: data.message || "Requested model is not available. We are attempting to download it — press Cancel to stop.",
+            timestamp: new Date().toISOString(),
+            agentId: agentIdNow,
+            error: true,
+            errorCode: data.error_code,
+          };
+          setMessageStore((prev) => {
+            const list = (prev[agentIdNow] || []).concat([modelMissingMsg]);
+            return trimMessageStore(prev, agentIdNow, list);
+          });
+          if (agentIdNow === selectedAgentRef.current) {
+            setMessages((prev) => [...prev, modelMissingMsg]);
+          }
 
-        throw new Error(errorMessage);
+          // Keep the thinking indicator visible while background retries proceed
+          keepThinkingVisible = true;
+
+          // Start background retries (non-blocking)
+          try {
+            startBackgroundRetry(userMessage, agentIdNow, data.error_code);
+            logFrontendError("FRONTEND_MODEL_PULL_WAITING", "Started background retries for missing model", { agentId: agentIdNow, error_code: data.error_code });
+          } catch (err) {
+            logFrontendError("FRONTEND_MODEL_PULL_WAIT_ERR", "Failed to start background retry", err);
+          }
+        } else {
+          let errorMessage = "Sorry, I couldn't process your message. ";
+
+          if (data.message) {
+            errorMessage = data.message;
+          } else if (data.error) {
+            switch (data.error) {
+              case "AI service unavailable":
+                errorMessage =
+                  "The AI service is currently offline. Please wait a moment and try again.";
+                break;
+              case "AI processing failed":
+                errorMessage =
+                  "I'm having trouble understanding your message. Could you try rephrasing it?";
+                break;
+              case "Empty message":
+                errorMessage = "Please type a message to send.";
+                break;
+              default:
+                errorMessage = data.error;
+            }
+          }
+
+          throw new Error(errorMessage);
+        }
       }
     } catch (error) {
       let userFriendlyMessage = "Sorry, something went wrong. ";
@@ -302,21 +632,40 @@ function App() {
           "Can't connect to the AI service. Please check your internet connection and try again.";
       }
 
-      setMessages((prev) => [
-        ...prev.filter((msg) => msg.id !== thinkingId),
-        {
-          id: Date.now() + Math.random(),
-          sender: "ai",
-          text: userFriendlyMessage,
-          timestamp: new Date().toISOString(),
-          error: true,
-        },
-      ]);
+      const errMsg = {
+        id: Date.now() + Math.random(),
+        sender: "ai",
+        text: userFriendlyMessage,
+        timestamp: new Date().toISOString(),
+        error: true,
+        agentId: agentIdNow,
+      };
+      
+      // If network error, show connection lost indicator
+      if (error.name === "TypeError" || error.name === "NetworkError" || userFriendlyMessage.includes("Can't connect")) {
+        setConnecting(true);
+      }
+      
+      setMessageStore((prev) => {
+        const list = (prev[agentIdNow] || []).filter((msg) => msg.id !== thinkingId).concat([errMsg]);
+        return trimMessageStore(prev, agentIdNow, list);
+      });
+      if (agentIdNow === selectedAgentRef.current) {
+        setMessages((prev) => prev.filter((msg) => msg.id !== thinkingId).concat([errMsg]));
+      }
       logFrontendError("FRONTEND_CHAT_ERROR", "Chat request failed", error);
     }
 
-    setThinking(false);
-  }, [connecting, inputText, thinking, selectedFiles, selectedAgent]);
+    // Remove this agent from thinking set unless we intentionally
+    // want to keep the thinking indicator visible (EABB5 case)
+    if (!keepThinkingVisible) {
+      setThinkingAgents((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(agentIdNow);
+        return newSet;
+      });
+    }
+  }, [connecting, inputText, thinkingAgents, selectedFiles, selectedAgent]);
 
   // Check backend connection and load agents on mount
   useEffect(() => {
@@ -340,14 +689,38 @@ function App() {
 
     checkBackend();
 
-    // Set up periodic agent refresh
+    // Set up periodic agent refresh (less aggressive to prevent flickering)
     const refreshInterval = setInterval(async () => {
       if (!connecting) {
-        await loadAgents();
+        try {
+          await loadAgents();
+        } catch (error) {
+          // Silently fail on refresh errors to prevent UI disruption
+          console.error("Agent refresh failed:", error);
+        }
       }
-    }, 5000);
+    }, 30000); // Reduced from 5s to 30s to prevent flickering
 
-    return () => clearInterval(refreshInterval);
+    // Poll cache status separately so the UI can surface memory-core availability
+    const loadCacheStatus = async () => {
+      if (connecting) return;
+      try {
+        const r = await fetch(`${API_BASE}/api/cache/stats`);
+        if (r.ok) {
+          const d = await r.json();
+          setCacheStatus(d);
+        }
+      } catch (e) {
+        setCacheStatus({ cache: { using_redis: false } });
+      }
+    };
+    loadCacheStatus();
+    const cacheIv = setInterval(loadCacheStatus, 5000);
+
+    return () => {
+      clearInterval(refreshInterval);
+      clearInterval(cacheIv);
+    };
   }, [connecting, loadAgents]);
 
   // Auto scroll to bottom when new messages arrive
@@ -452,34 +825,91 @@ function App() {
       {/* Top Bar */}
       <div className="top-bar">
         <div className="brand">
-          <h2>Rommesmo Informatics</h2>
+          <span className="brand-mark">▲</span>
+          <span className="brand-name">RuneCore Mind</span>
         </div>
-        <div className="top-bar-spacer"></div>
+        <div className="top-bar-spacer" />
+        <div className="top-bar-status">
+          {cacheStatus && (
+            <span
+              className={`status-dot ${
+                (cacheStatus.cache?.using_redis || cacheStatus.using_redis)
+                  ? "online"
+                  : cacheStatus.core_memory?.available
+                  ? "online"
+                  : "warn"
+              }`}
+            >
+              {(cacheStatus.cache?.using_redis || cacheStatus.using_redis)
+                ? "CACHE:REDIS"
+                : cacheStatus.core_memory?.available
+                ? "CACHE:CORE"
+                : "CACHE:LOCAL"}
+            </span>
+          )}
+          {cacheStatus?.core_memory && (
+            <span
+              className={`status-dot ${cacheStatus.core_memory.available ? "online" : "warn"}`}
+            >
+              {cacheStatus.core_memory.available ? "MEM:ONLINE" : "MEM:OFFLINE"}
+            </span>
+          )}
+          <span className={`status-dot ${connecting ? "error" : "online"}`}>
+            {connecting ? "CORE:OFFLINE" : "CORE:ONLINE"}
+          </span>
+        </div>
+        <button
+          className="top-bar-btn"
+          onClick={() => setShowModelManager(true)}
+          title="Manage models"
+        >
+          MODELS
+        </button>
+        <button
+          className="top-bar-btn"
+          onClick={() => setShowProfileModal(true)}
+          title="User profile"
+        >
+          PROFILE
+        </button>
       </div>
 
       <div className="main-layout">
-        {/* Left Sidebar - Agents */}
+        {/* Left Sidebar */}
         <div className="agents-sidebar">
+          <div className="sidebar-header">
+            <span className="sidebar-title">Agents</span>
+            <button
+              className="sidebar-add-btn"
+              onClick={() => setShowCreateModal(true)}
+              title="New agent"
+            >
+              +
+            </button>
+          </div>
+
           <div className="agents-list">
             {agentsLoading ? (
               <div className="loading-agents">
-                <div className="loading-indicator">Loading agents...</div>
+                <div className="loading-indicator">Loading...</div>
               </div>
             ) : validAgents.length === 0 ? (
               <div className="no-agents">
-                <p>No agents available.</p>
+                <span>No agents yet</span>
                 <button
                   onClick={() => setShowCreateModal(true)}
                   className="create-first-agent-btn"
                 >
-                  Create your first agent
+                  + Create Agent
                 </button>
               </div>
             ) : (
               validAgents.map((agent) => {
-                const statusDisplay = getAgentStatusDisplay(agent);
+                const statusDisplay = getAgentStatusDisplay(
+                  agent,
+                  thinkingAgents.has(agent.id)
+                );
                 const avatarColor = getAvatarColor(agent.name);
-                const downtime = calculateDowntime(agent.last_active);
 
                 return (
                   <div
@@ -494,7 +924,7 @@ function App() {
                       {agent.avatar_image ? (
                         agent.avatar_image.startsWith("/api/avatars/") ? (
                           <img
-                            src={`http://localhost:5000${agent.avatar_image}`}
+                            src={`${API_BASE}${agent.avatar_image}`}
                             alt={agent.name}
                             className="agent-avatar-image"
                           />
@@ -504,13 +934,21 @@ function App() {
                       ) : (
                         agent.name.charAt(0).toUpperCase()
                       )}
+                      {unreadCounts[agent.id] > 0 && selectedAgent !== agent.id && (
+                        <div className="unread-badge">
+                          {unreadCounts[agent.id]}
+                        </div>
+                      )}
                     </div>
                     <div className="agent-info">
                       <div className="agent-name">{agent.name}</div>
                       <div className="agent-meta">
-                        <span className="downtime">{downtime}</span>
-                        <span className={`status ${statusDisplay.class}`}>
-                          {statusDisplay.text}
+                        <div
+                          className={`status-pip ${statusDisplay.class}`}
+                          title={statusDisplay.text}
+                        />
+                        <span className="agent-model-label">
+                          {agent.model_name || "no model"}
                         </span>
                       </div>
                     </div>
@@ -519,29 +957,58 @@ function App() {
               })
             )}
 
-            {/* Create New Agent Button */}
-            <div
-              className="agent-item create-new"
-              onClick={() => setShowCreateModal(true)}
-            >
-              <div className="agent-avatar create-avatar">+</div>
-              <div className="agent-info">
-                <div className="agent-name">Create New Agent</div>
-                <div className="agent-meta">
-                  <span className="status">ready</span>
+            {/* Create new agent entry */}
+            {validAgents.length > 0 && (
+              <div
+                className="agent-item create-new"
+                onClick={() => setShowCreateModal(true)}
+              >
+                <div className="agent-avatar create-avatar">+</div>
+                <div className="agent-info">
+                  <div className="agent-name">New Agent</div>
                 </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 
-        {/* Main Chat Area */}
+        {/* Chat Main */}
         <div className="chat-main">
-          {/* Connection Status */}
+          {/* Chat panel header */}
+          <div className="chat-header">
+            <div className="chat-header-agent">
+              {currentAgent ? (
+                <>
+                  <span className="chat-header-name">{currentAgent.name}</span>
+                  <span className="chat-header-sep">—</span>
+                  <span className="chat-header-model">
+                    {currentAgent.model_name || "no model"}
+                  </span>
+                </>
+              ) : (
+                <span className="chat-header-name" style={{ color: "var(--text-muted)" }}>
+                  Select an agent
+                </span>
+              )}
+            </div>
+            <div className="chat-header-actions">
+              {currentAgent && (
+                <button
+                  className="chat-header-btn"
+                  onClick={() => handleEditAgent(currentAgent)}
+                  title="Edit agent"
+                >
+                  Edit
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Connecting banner */}
           {connecting && (
             <div className="connection-status">
               <div className="connection-message">
-                <span className="loading-dots">⚡</span>
+                <span className="loading-dots">■</span>
                 Connecting to AI service...
               </div>
             </div>
@@ -558,54 +1025,64 @@ function App() {
             {messages.length === 0 ? (
               <div className="empty-chat">
                 <div className="empty-message">
-                  <h3>Start a conversation</h3>
+                  <h3>No messages yet</h3>
                   <p>
-                    Type in the input box below to begin chatting with{" "}
-                    {currentAgent?.name || "your AI assistant"}
+                    Type a command below to begin with{" "}
+                    {currentAgent?.name || "your agent"}
                   </p>
                 </div>
               </div>
             ) : (
               messages.map((message) => (
-                <div key={message.id} className="message-wrapper">
+                <div key={message.id} className="message-wrapper group-start">
                   <div
-                    className={`message ${message.sender} ${message.error ? "error" : ""} ${message.isThinking ? "thinking" : ""}`}
+                    className={`message ${message.sender} ${message.error ? "error" : ""}`}
                   >
-                    <div
-                      className="message-avatar"
-                      style={{
-                        backgroundColor:
-                          message.sender === "user"
-                            ? "#6b46c1"
-                            : getAvatarColor(currentAgent?.name || "AI"),
-                      }}
-                      title={formatTime(message.timestamp)}
-                    >
-                      {message.sender === "user"
-                        ? "U"
-                        : currentAgent?.name?.charAt(0) || "A"}
+                    <div className="message-header">
+                      <span
+                        className={`message-sender ${message.sender}`}
+                      >
+                        {message.sender === "user"
+                          ? "YOU"
+                          : (currentAgent?.name || "AI").toUpperCase()}
+                      </span>
+                      <span className="message-time">
+                        {formatTime(message.timestamp)}
+                      </span>
                     </div>
-                    <div className="message-content">
-                      <div className="message-text">{message.text}</div>
-                      {message.files && (
-                        <div className="message-files">
-                          {message.files.map((file, i) => (
-                            <span key={i} className="file-tag">
-                              {file.name}
-                            </span>
-                          ))}
+
+                    {message.isThinking ? (
+                      <>
+                        <div className="thinking-bar">
+                          <div className="thinking-fill" />
                         </div>
-                      )}
-                    </div>
+                        <div className="thinking-label">Processing...</div>
+                      </>
+                    ) : message.sender === "ai" && !message.error ? (
+                      <div className="message-text message-markdown">
+                        <ReactMarkdown>{message.text || ""}</ReactMarkdown>
+                      </div>
+                    ) : (
+                      <div className="message-text">{message.text}</div>
+                    )}
+
+                    {message.files && (
+                      <div className="message-files">
+                        {message.files.map((file, i) => (
+                          <span key={i} className="file-tag">
+                            {file.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div className="message-separator"></div>
                 </div>
               ))
             )}
 
             {dragOver && (
               <div className="drop-overlay">
-                <div className="drop-message">Drop files here to upload</div>
+                <div className="drop-message">Drop files to attach</div>
               </div>
             )}
           </div>
@@ -630,11 +1107,11 @@ function App() {
                 onKeyPress={handleKeyPress}
                 placeholder={
                   connecting
-                    ? "Connecting..."
-                    : `Message ${currentAgent?.name || "AI"}...`
+                    ? "Offline..."
+                    : `> ${currentAgent?.name || "agent"}...`
                 }
-                disabled={connecting || thinking}
-                rows={1}
+                disabled={connecting || thinkingAgents.has(selectedAgent)}
+                ref={textareaRef}
                 className="message-input"
               />
 
@@ -642,33 +1119,30 @@ function App() {
                 <button
                   className="file-upload-btn"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={connecting || thinking}
-                  title="Upload files"
+                  disabled={connecting || thinkingAgents.has(selectedAgent)}
+                  title="Attach file"
                 >
-                  📎
+                  [+]
                 </button>
 
                 <div className="tools-dropdown">
                   <button
                     className={`tools-btn ${toolsOpen ? "open" : ""}`}
                     onClick={() => setToolsOpen(!toolsOpen)}
-                    disabled={connecting || thinking}
-                    title="Agent Management"
+                    title="Tools"
                   >
-                    ⚙️
+                    CFG
                   </button>
                   {toolsOpen && (
                     <div className="tools-menu">
                       <div className="tools-section">
-                        <div className="tools-section-title">
-                          Agent Management
-                        </div>
+                        <div className="tools-section-title">Agent</div>
                         {selectedAgent && (
                           <button
                             className="tool-item"
                             onClick={() => handleEditAgent(currentAgent)}
                           >
-                            ✏️ Edit Agent
+                            Edit Agent
                           </button>
                         )}
                         <button
@@ -678,10 +1152,9 @@ function App() {
                             setToolsOpen(false);
                           }}
                         >
-                          ➕ Create Agent
+                          New Agent
                         </button>
                       </div>
-
                       <div className="tools-section">
                         <div className="tools-section-title">Models</div>
                         <button
@@ -691,21 +1164,34 @@ function App() {
                             setToolsOpen(false);
                           }}
                         >
-                          📥 Download Models
+                          Manage Models
                         </button>
-                        <button className="tool-item">📊 Model Status</button>
                       </div>
                     </div>
                   )}
                 </div>
 
-                <button
-                  className="send-btn"
-                  onClick={handleSend}
-                  disabled={connecting || thinking || !inputText.trim()}
-                >
-                  {thinking ? "⏳" : "➤"}
-                </button>
+                {modelRetryingAgent !== null && modelRetryingAgent === selectedAgent ? (
+                  <button
+                    className="cancel-model-btn"
+                    onClick={() => cancelModelRetry(selectedAgent)}
+                    title="Cancel model download"
+                  >
+                    CANCEL
+                  </button>
+                ) : (
+                  <button
+                    className="send-btn"
+                    onClick={handleSend}
+                    disabled={
+                      connecting ||
+                      thinkingAgents.has(selectedAgent) ||
+                      !inputText.trim()
+                    }
+                  >
+                    {thinkingAgents.has(selectedAgent) ? "..." : "SEND ▶"}
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -742,6 +1228,11 @@ function App() {
       <ModelManager
         isOpen={showModelManager}
         onClose={() => setShowModelManager(false)}
+      />
+
+      <UserProfileModal
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
       />
     </div>
   );

@@ -1,0 +1,25 @@
+FROM python:3.11-slim
+WORKDIR /app
+
+RUN set -eux; \
+    apt-get update && apt-get install -y --no-install-recommends gcc libpq-dev curl && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY projects/RuneCore_AI/backend/requirements.txt /app/requirements.txt
+RUN set -eux; \
+    python -m pip install --upgrade pip setuptools wheel; \
+    python -m pip install --no-cache-dir -r /app/requirements.txt; \
+    python -m pip install --no-cache-dir psycopg2-binary gunicorn; \
+    rm -rf /root/.cache/pip
+
+# Copy application code
+COPY projects/RuneCore_AI/backend/ /app/backend/
+COPY projects/shared_utils/ /app/shared_utils/
+COPY projects/RuneGuard_Logger/ /app/ErrorLogger/
+
+# Create necessary directories
+RUN mkdir -p /app/uploads /app/logs /app/backend/data && chmod 777 /app/logs /app/backend/data
+
+EXPOSE 5000
+WORKDIR /app/backend
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "1", "--timeout", "120", "app:app"]

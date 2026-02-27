@@ -1,0 +1,106 @@
+version: '3.8'
+services:
+  backend:
+    build:
+      context: ../../
+      dockerfile: projects/RuneCore_AI/docker/Dockerfile.backend.dev
+    ports:
+      - '5000:5000'
+    networks:
+      # Backend is on AI net only — reaches Core and RuneGuard via runecore_ai_net (both are on it)
+      runecore_ai_net:
+        aliases:
+          - ai_backend
+    environment:
+      - PYTHONUNBUFFERED=1
+      - ERRORLOGGER_URL=http://runeguard:5001
+      # Cross-VLAN: CoreMemory access goes through Core's internal HTTP proxy
+      - CORE_MEMORY_URL=http://runecore_core:11441/api/proxy/CoreMemoryAPI
+      - OLLAMA_SERVICE_URL=http://ollama_wrapper:5002
+      - OLLAMA_AUTO_PULL=1
+      - OLLAMA_AUTO_PULL_WAIT=30
+      - LOCAL_CACHE_ENABLED=true
+      - LOCAL_CACHE_MESSAGE_LIMIT=10
+      - LOCAL_CACHE_CONTEXT_SIZE=5
+      - LOCAL_CACHE_FALLBACK_FILE=/app/backend/data/fallback_cache.json
+      # Register with Core for service discovery
+      - RUNECORE_CORE_URL=http://runecore_core:11441
+      - RUNECORE_REGISTER_WITH_CORE=true
+    volumes:
+      - backend_data:/app/backend/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    ports:
+      - '3000:3000'
+    networks:
+      # Frontend only needs AI net — talks to backend within the VLAN
+      runecore_ai_net:
+        aliases:
+          - ai_frontend
+    environment:
+      REACT_APP_API_URL: ""
+      REACT_APP_MODEL_RETRY_MAX: "6"
+      REACT_APP_MODEL_RETRY_BASE_MS: "2000"
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/" ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: runecore-ollama
+    restart: unless-stopped
+    networks:
+      # Ollama stays within AI net — only accessible to AI components
+      runecore_ai_net:
+        aliases:
+          - ollama
+    volumes:
+      - ollama_data:/root/.ollama
+
+  ollama_wrapper:
+    build:
+      context: ./ollama_service
+      dockerfile: Dockerfile
+    container_name: runecore-ollama-wrapper
+    depends_on:
+      - ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - PORT=5002
+    ports:
+      - "5002:5002"
+    networks:
+      # Wrapper stays within AI net — only accessible to AI components
+      runecore_ai_net:
+        aliases:
+          - ollama_wrapper
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+networks:
+  runecore_ai_net:
+    external: true
+
+volumes:
+  ollama_data:
+    name: runecore_ollama_data
+  backend_data:
+    name: runecore_ai_backend_data

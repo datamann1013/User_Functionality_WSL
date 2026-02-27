@@ -1,0 +1,48 @@
+version: '3.8'
+services:
+  core:
+    build: .
+    ports:
+      - '11440:11440'
+      # 11441 is the internal HTTP proxy port — not exposed to host, internal containers only
+    environment:
+      - RUNECORE_MODE=development
+      - RUNECORE_CA_PASSPHRASE=runecore-dev
+      - RUNECORE_DISABLE_MTLS=1
+      - RUST_LOG=info
+      # Raft: Node 1 (primary) in the 3-node cluster
+      - RUNECORE_ENABLE_RAFT=true
+      - RAFT_NODE_ID=1
+      - RAFT_PEER_URLS=1=http://runecore_core:11440,2=http://core_secondary:11441,3=http://runecore_ha:11442
+      # Internal HTTP listener for container-to-container proxy calls (no TLS)
+      - RUNECORE_HTTP_INTERNAL_PORT=11441
+    networks:
+      # Core is on all three networks — it is the bridge/firewall between VLANs
+      runecore_dev:
+        aliases:
+          - runecore_core
+      runecore_ai_net:
+        aliases:
+          - runecore_core
+      runecore_memory_net:
+        aliases:
+          - runecore_core
+    volumes:
+      - runecore_core_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsk", "https://localhost:11440/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+networks:
+  runecore_dev:
+    external: true
+  runecore_ai_net:
+    external: true
+  runecore_memory_net:
+    external: true
+
+volumes:
+  runecore_core_data:

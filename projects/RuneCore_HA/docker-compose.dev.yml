@@ -1,0 +1,52 @@
+version: '3.8'
+
+# RuneCore_HA — Raft Node 3 (High Availability)
+#
+# Role in the cluster:
+#   - Participates in Raft consensus as Node 3
+#   - Handles service heartbeats (offloads health ping processing from Core)
+#   - Does NOT serve PKI, proxy, or service registry reads
+#
+# With Node 1 (runecore_core) + Node 3 (runecore_ha), the cluster has 2/3 quorum
+# and can commit Raft entries as long as both nodes are healthy.
+#
+# Prerequisite: runecore_core-core:latest image must be built first.
+#   cd ../RuneCore_Core && docker compose -f docker-compose.dev.yml build
+
+services:
+  runecore_ha:
+    image: runecore_core-core:latest
+    ports:
+      - '11442:11442'
+    environment:
+      # HA mode: only health + heartbeat + raft/message routes
+      - RUNECORE_HA_MODE=1
+      # Raft: Node 3 in the 3-node cluster
+      - RUNECORE_ENABLE_RAFT=true
+      - RUNECORE_PORT=11442
+      - RAFT_NODE_ID=3
+      - RAFT_PEER_URLS=1=http://runecore_core:11440,2=http://core_secondary:11441,3=http://runecore_ha:11442
+      # CA: must match RuneCore_Core's passphrase to share the same PKI
+      - RUNECORE_CA_PASSPHRASE=runecore-dev
+      - RUNECORE_DISABLE_MTLS=1
+      - RUNECORE_DATA_DIR=/data
+      - RUST_LOG=info
+    volumes:
+      - runecore_ha_data:/data
+    networks:
+      runecore_dev:
+        aliases:
+          - runecore_ha
+    healthcheck:
+      test: ["CMD", "curl", "-fsk", "https://localhost:11442/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+networks:
+  runecore_dev:
+    external: true
+
+volumes:
+  runecore_ha_data:

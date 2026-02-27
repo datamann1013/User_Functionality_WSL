@@ -316,3 +316,12 @@ dump.*
 
 # Alembic templates and compiled artifacts
 projects/core_memory/alembic/versions/*.pyc
+artifacts/dev-bases/*
+
+# Ollama model data (large, persistent model files)
+projects/RuneCore_AI/ollama_data/
+
+
+.claude/*
+.opencode*
+.playwright*

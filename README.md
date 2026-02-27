@@ -1240,3 +1240,13 @@ register_module(RuneNewModule())
 
 **RuneCore**: Building the future of personal computing environments, one module at a time.
 
+## Roadmap
+
+- [x] Multi-agent chat separation and per-agent history
+- [x] Agent-specific model configuration
+- [x] Long-running prompt support (no premature timeout)
+- [x] Ollama health check endpoint (`/api/ollama_status`)
+- [ ] Continuous polling/progress reporting for LLM requests (planned)
+    - Frontend and backend will support periodic progress checks for long-running requests
+    - Will explore Ollama streaming/async APIs if available
+

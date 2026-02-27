@@ -1,29 +1,26 @@
 # RuneGuard Security Service Dockerfile
-FROM python:3.11-alpine
+FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install minimal dependencies
-RUN apk add --no-cache curl
+# Install minimal runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install dependencies
-COPY projects/ErrorLogger/requirements.txt .
+# Install Python dependencies (copy requirements first to leverage Docker layer caching)
+# The build context is the project root (this directory), so use relative paths
+COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir --disable-pip-version-check -r requirements.txt
 
-# Copy ErrorLogger code
-COPY projects/ErrorLogger/ /app/
+# Copy service source files
+COPY . /app/
 
-# Create logs directory
+# Create logs directory with permissive permissions for containerized dev use
 RUN mkdir -p /app/logs && chmod 777 /app/logs
 
-# Create non-root user
-RUN addgroup -g 1001 -S appuser && adduser -S -u 1001 -G appuser appuser
-RUN chown -R appuser:appuser /app
+# Create non-root user and set ownership
+RUN groupadd -g 1001 appuser && useradd -u 1001 -g appuser -s /bin/bash -M appuser \
+    && chown -R appuser:appuser /app
 USER appuser
-
-# Health check
-HEALTHCHECK --interval=60s --timeout=3s --start-period=15s --retries=2 \
-    CMD curl -f http://localhost:5001/health || exit 1
 
 EXPOSE 5001
 

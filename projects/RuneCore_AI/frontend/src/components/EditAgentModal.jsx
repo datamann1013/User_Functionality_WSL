@@ -23,8 +23,7 @@ const EditAgentModal = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // API base URL
-  const API_BASE =
-    process.env.NODE_ENV === "production" ? "" : "http://localhost:5000";
+  const API_BASE = process.env.REACT_APP_API_URL || "";
 
   useEffect(() => {
     if (isOpen && agent) {

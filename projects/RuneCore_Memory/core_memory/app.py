@@ -1,10 +1,15 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from .routers import memories
+from .routers import telemetry
+from .routers import stats
 from .utils import log_exception
 import traceback
 from fastapi.requests import Request
 from fastapi.responses import JSONResponse
+from . import service_discovery
+from sqlalchemy import text
+import os
 
 
 app = FastAPI(title="CoreMemory", version="0.1.0")
@@ -18,6 +23,72 @@ app.add_middleware(
 )
 
 app.include_router(memories.router, prefix="/v1")
+app.include_router(telemetry.router, prefix="/v1")
+app.include_router(stats.router, prefix="/v1")
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize service on startup"""
+    print("🗄️  CoreMemory API Starting")
+    
+    # Register with Core if configured
+    core_url = os.environ.get("RUNECORE_CORE_URL")
+    if core_url:
+        print(f"📍 Core URL: {core_url}")
+        result = service_discovery.register_with_core()
+        
+        if result.get("registered"):
+            print("✅ Registered with Core")
+            # Start heartbeat thread
+            service_discovery.start_heartbeat_thread()
+        else:
+            print(f"⚠️  Registration failed: {result.get('reason', 'unknown')}")
+    else:
+        print("📍 Running in standalone mode (no Core URL)")
+    
+    # Check database connection
+    try:
+        from .db import engine
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        print("✅ PostgreSQL connected")
+    except Exception as e:
+        print(f"⚠️  PostgreSQL connection failed: {e}")
+    
+    # Check Redis connection
+    redis_url = os.environ.get("REDIS_URL")
+    if redis_url:
+        try:
+            import redis
+            r = redis.from_url(redis_url)
+            r.ping()
+            print("✅ Redis connected")
+        except Exception as e:
+            print(f"⚠️  Redis connection failed: {e}")
+
+    # Check InfluxDB connection
+    try:
+        from .influx import is_available as influx_available, INFLUX_URL
+        if influx_available():
+            print(f"✅ InfluxDB connected: {INFLUX_URL}")
+        else:
+            print(f"⚠️  InfluxDB not available at {INFLUX_URL}")
+    except Exception as e:
+        print(f"⚠️  InfluxDB startup check failed: {e}")
+
+    # Start background collectors
+    try:
+        from .collectors.service_health import start_service_health_collector
+        start_service_health_collector()
+    except Exception as e:
+        print(f"⚠️  Service health collector failed to start: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    service_discovery.stop_heartbeat_thread()
 
 
 @app.get("/v1/health")

@@ -1,0 +1,26 @@
+version: '3.8'
+services:
+  dashboard_backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: dashboard_backend
+    ports:
+      - '5004:5004'
+    environment:
+      - RUNECORE_CORE_URL=http://runecore_core:11441
+      - CORE_PROXY_URL=http://runecore_core:11441/api/proxy/CoreMemoryAPI
+    networks:
+      runecore_dev:
+        aliases:
+          - dashboard_backend
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5004/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  runecore_dev:
+    external: true

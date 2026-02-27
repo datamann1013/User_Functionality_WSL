@@ -1,28 +1,58 @@
+version: '3.8'
 services:
   postgres:
-  image: "${POSTGRES_IMAGE:-postgres:15}"
+    image: "${POSTGRES_IMAGE:-postgres:15}"
     environment:
       POSTGRES_USER: core
       POSTGRES_PASSWORD: core
       POSTGRES_DB: corememory
-    # Use a non-standard host port to avoid collisions with host Postgres
     ports:
       - '15432:5432'
     volumes:
       - core_pgdata:/var/lib/postgresql/data
+    networks:
+      # Postgres stays within memory net — only accessible to memory components
+      - runecore_memory_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U core -d corememory"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7
-    # Bind to an alternate host port to avoid conflicts with existing Redis
     ports:
       - '16379:6379'
+    networks:
+      # Redis stays within memory net
+      - runecore_memory_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
   influx:
-    # Use a stable tag or `latest` to avoid manifest-not-found issues in CI/docker hosts.
-    image: influxdb:latest
-    # Bind to an alternate host port to avoid conflicts
+    image: influxdb:2.7
     ports:
       - '18086:8086'
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: runecore-admin
+      DOCKER_INFLUXDB_INIT_ORG: runecore
+      DOCKER_INFLUXDB_INIT_BUCKET: telemetry
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: runecore-dev-token
+    volumes:
+      - influx_data:/var/lib/influxdb2
+    networks:
+      # InfluxDB stays within memory net
+      - runecore_memory_net
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   core_memory:
     build: .
@@ -32,10 +62,40 @@ services:
       - POSTGRES_DSN=postgresql://core:core@postgres:5432/corememory
       - REDIS_URL=redis://redis:6379/0
       - INFLUX_URL=http://influx:8086
+      - INFLUX_TOKEN=runecore-dev-token
+      - INFLUX_ORG=runecore
+      - INFLUX_BUCKET=telemetry
+      - ERRORLOGGER_SERVICE_URL=http://runeguard:5001/log
+      - RUN_MIGRATIONS=true
+      # Service discovery: register with Core so it can be proxied
+      - RUNECORE_CORE_URL=http://runecore_core:11441
+      # rest_url includes /v1 so Core proxy forwards to correct path
+      - RUNECORE_REST_URL=http://core_memory:5010/v1
+      # Heartbeats go to HA node (offloads health processing from Core)
+      - RUNECORE_HEARTBEAT_URL=http://runecore_core:11441/api/v1/services/heartbeat
+      - PORT=5010
     depends_on:
-      - postgres
-      - redis
-      - influx
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      influx:
+        condition: service_healthy
+    networks:
+      # core_memory is on memory net only — reaches Core and RuneGuard via runecore_memory_net
+      runecore_memory_net:
+        aliases:
+          - core_memory
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5010/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
 volumes:
   core_pgdata:
+  influx_data:
+
+networks:
+  runecore_memory_net:
+    external: true

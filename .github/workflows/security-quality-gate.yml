@@ -63,16 +63,16 @@ jobs:
         # Documentation tools
         pip install pydocstyle
 
-      - name: ESLint Check
-        run: |
-          find . -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" | 
-          grep -v node_modules | 
-          xargs -r npx eslint --max-warnings 0
+    - name: ESLint Check
+      run: |
+        find . -name "*.js" -o -name "*.jsx" -o -name "*.ts" -o -name "*.tsx" | 
+        grep -v node_modules | 
+        xargs -r npx eslint --max-warnings 0
 
-      - name: Python Linting
-        run: |
-          find . -name "*.py" -not -path "./venv/*" -not -path "./.env/*" | \
-          xargs -r pylint --fail-under=8.0 --disable=C0114,C0115,C0116
+    - name: Python Linting
+      run: |
+        find . -name "*.py" -not -path "./venv/*" -not -path "./.env/*" | \
+        xargs -r pylint --fail-under=8.0 --disable=C0114,C0115,C0116
 
     - name: Code Formatting Check
       run: |
