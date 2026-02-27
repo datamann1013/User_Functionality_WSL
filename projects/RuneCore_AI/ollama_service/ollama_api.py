@@ -472,6 +472,34 @@ def agent():
 
         # Check for tool calls in the response
         raw_tool_calls = msg.get("tool_calls")
+        content = msg.get("content", "") or ""
+
+        # Fallback: models without native tool-call support (e.g. qwen2.5-coder, codellama)
+        # emit the tool call as raw JSON text in `content` instead of using `tool_calls`.
+        # Detect and promote these so the agent loop can execute them properly.
+        if not raw_tool_calls and ollama_tools and content:
+            stripped = content.strip()
+            try:
+                if stripped.startswith("{") and stripped.endswith("}"):
+                    parsed = json.loads(stripped)
+                    if isinstance(parsed, dict) and "name" in parsed and "arguments" in parsed:
+                        raw_tool_calls = [{"function": {"name": parsed["name"], "arguments": parsed["arguments"]}}]
+                        content = ""
+                        logger.debug("/api/agent: promoted text-format tool call: %s", parsed["name"])
+                elif stripped.startswith("[") and stripped.endswith("]"):
+                    parsed_list = json.loads(stripped)
+                    if isinstance(parsed_list, list) and all(
+                        isinstance(item, dict) and "name" in item for item in parsed_list
+                    ):
+                        raw_tool_calls = [
+                            {"function": {"name": item["name"], "arguments": item.get("arguments", {})}}
+                            for item in parsed_list
+                        ]
+                        content = ""
+                        logger.debug("/api/agent: promoted %d text-format tool calls", len(raw_tool_calls))
+            except (json.JSONDecodeError, TypeError):
+                pass
+
         if raw_tool_calls:
             tool_calls = []
             for i, tc in enumerate(raw_tool_calls):
@@ -483,13 +511,10 @@ def agent():
                 })
             return jsonify({
                 "role": "assistant",
-                "content": msg.get("content") or None,
+                "content": content or None,
                 "tool_calls": tool_calls,
                 "done": False,
             })
-
-        # Pure text response
-        content = msg.get("content", "")
 
         if stream:
             # stream=true was requested but tools were provided — emit as single NDJSON chunk
