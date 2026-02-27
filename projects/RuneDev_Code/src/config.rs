@@ -60,7 +60,7 @@ pub struct ContextConfig {
 impl Default for ContextConfig {
     fn default() -> Self {
         ContextConfig {
-            max_file_size_kb: 100,
+            max_file_size_kb: 16,
             project_context_files: vec![
                 "README.md".to_string(),
                 "CLAUDE.md".to_string(),

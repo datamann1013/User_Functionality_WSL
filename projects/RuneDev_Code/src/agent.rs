@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use serde_json::Value;
+use tokio::sync::broadcast;
 
 use crate::approval::ApprovalGate;
 use crate::cli::Cli;
@@ -148,6 +149,24 @@ pub async fn run(cli: Cli) -> Result<()> {
     display::print_header(&model, &project.root.to_string_lossy());
 
     // -----------------------------------------------------------------------
+    // Ctrl+C cancellation — broadcast channel so every in-flight request can
+    // subscribe and abort cleanly without killing the whole process.
+    // -----------------------------------------------------------------------
+    let (cancel_tx, _) = broadcast::channel::<()>(4);
+    {
+        let tx = cancel_tx.clone();
+        tokio::spawn(async move {
+            loop {
+                if tokio::signal::ctrl_c().await.is_ok() {
+                    // Ignore send errors — no active receivers means nobody is
+                    // waiting on a request right now (user is at the prompt).
+                    let _ = tx.send(());
+                }
+            }
+        });
+    }
+
+    // -----------------------------------------------------------------------
     // One-shot task
     // -----------------------------------------------------------------------
     if let Some(task) = cli.task {
@@ -161,6 +180,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             &mut gate,
             &mut mcp,
             config.model.temperature,
+            cancel_tx.subscribe(),
         )
         .await?;
         return Ok(());
@@ -175,7 +195,7 @@ pub async fn run(cli: Cli) -> Result<()> {
 
         let mut input = String::new();
         match stdin.lock().read_line(&mut input) {
-            Ok(0) => break, // EOF
+            Ok(0) => break, // EOF (also what Ctrl+C triggers at the prompt on Windows)
             Ok(_) => {}
             Err(_) => break,
         }
@@ -200,6 +220,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             &mut gate,
             &mut mcp,
             config.model.temperature,
+            cancel_tx.subscribe(),
         )
         .await?;
     }
@@ -222,13 +243,26 @@ async fn run_turn(
     gate: &mut ApprovalGate,
     mcp: &mut McpRegistry,
     temperature: f64,
+    mut cancel: broadcast::Receiver<()>,
 ) -> Result<()> {
     messages.push(serde_json::json!({
         "role": "user",
         "content": user_input
     }));
 
+    // Deduplication cache: "tool_name:args_json" → result
+    // Prevents the model from calling the same tool repeatedly with identical args.
+    let mut tool_call_cache: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut iteration: u32 = 0;
+    const MAX_ITERATIONS: u32 = 20;
+
     loop {
+        iteration += 1;
+        if iteration > MAX_ITERATIONS {
+            eprintln!("\n  \x1b[33m⚠\x1b[0m  Stopped after {MAX_ITERATIONS} tool calls — model may be stuck.");
+            break;
+        }
+
         display::print_thinking();
 
         let req = AgentRequest {
@@ -239,19 +273,27 @@ async fn run_turn(
             temperature: Some(temperature),
         };
 
-        let response = match client.agent(req).await {
-            Ok(r) => r,
-            Err(e) => {
-                display::clear_thinking();
-                // Try to give a helpful message for common errors
-                let msg = e.to_string();
-                if msg.contains("404") {
-                    eprintln!("\n  Model not found — is '{model}' downloaded in Ollama?");
-                } else if msg.contains("502") || msg.contains("503") {
-                    eprintln!("\n  AI service error — check docker logs for ollama_wrapper");
-                } else {
-                    eprintln!("\n  Error: {e}");
+        let response = tokio::select! {
+            // Normal path: LLM responds
+            res = client.agent(req) => match res {
+                Ok(r) => r,
+                Err(e) => {
+                    display::clear_thinking();
+                    let msg = e.to_string();
+                    if msg.contains("404") {
+                        eprintln!("\n  Model not found — is '{model}' downloaded in Ollama?");
+                    } else if msg.contains("502") || msg.contains("503") {
+                        eprintln!("\n  AI service error — check docker logs for ollama_wrapper");
+                    } else {
+                        eprintln!("\n  Error: {e}");
+                    }
+                    return Ok(());
                 }
+            },
+            // Ctrl+C: drop the in-flight HTTP request and return to the prompt
+            _ = cancel.recv() => {
+                display::clear_thinking();
+                println!("\n  Cancelled.");
                 return Ok(());
             }
         };
@@ -307,6 +349,24 @@ async fn run_turn(
                         display::print_tool_exec(&tc.name, &args_display);
                     }
 
+                    // Deduplication: if we already ran this exact call, inject the cached
+                    // result with an insistent "stop repeating yourself" message.
+                    let cache_key = format!("{}:{}", tc.name, tc.arguments);
+                    if let Some(cached) = tool_call_cache.get(&cache_key) {
+                        let force = format!(
+                            "You already called `{}` with these arguments and got this result:\n{}\n\n\
+                             Do NOT call this tool again. Use these results and answer in plain English now.",
+                            tc.name, cached
+                        );
+                        display::print_tool_result(&tc.name, "(cached — duplicate call)", false);
+                        if response.promoted {
+                            messages.push(serde_json::json!({"role": "user", "content": force}));
+                        } else {
+                            messages.push(serde_json::json!({"role": "tool", "tool_call_id": tc.id, "content": force}));
+                        }
+                        continue;
+                    }
+
                     // Route: external MCP server or built-in
                     let (result, is_error) = if mcp.owns(&tc.name) {
                         mcp.execute(&tc.name, tc.arguments.clone()).await
@@ -316,6 +376,9 @@ async fn run_turn(
 
                     let preview: String = result.lines().next().unwrap_or("").chars().take(80).collect();
                     display::print_tool_result(&tc.name, &preview, is_error);
+
+                    // Cache result so duplicate calls are caught above.
+                    tool_call_cache.insert(cache_key, result.clone());
 
                     if response.promoted {
                         // Inject result as a user message so the model sees it in history.
