@@ -54,7 +54,12 @@ dim()   { echo -e "${_d}$*${_0}"; }
 bold()  { echo -e "${_B}$*${_0}"; }
 
 # ---------------------------------------------------------------------------
-# Verify a runecode binary is present, sane-sized, and executable
+# Verify a runecode binary is present and sane-sized.
+#
+# NOTE: We intentionally do NOT run the binary here. On Windows, Smart App
+# Control (and Defender) block freshly compiled binaries until they pass a
+# reputation check. Running the binary from the script causes a permission
+# error even though the binary is valid. Size + PE-magic check is enough.
 # ---------------------------------------------------------------------------
 verify_binary() {
     local bin="$1"
@@ -71,13 +76,15 @@ verify_binary() {
         return 1
     fi
 
-    local ver
-    if ! ver=$("$bin" --version 2>&1); then
-        red "  ✗ Binary failed to execute (--version returned non-zero)"
+    # Check Windows PE magic bytes ("MZ" header)
+    local magic
+    magic=$(dd if="$bin" bs=1 count=2 2>/dev/null | od -An -tx1 | tr -d ' \n')
+    if [[ "$magic" != "4d5a"* ]]; then
+        red "  ✗ Not a valid Windows executable (bad PE header)"
         return 1
     fi
 
-    green "  ✓ OK: $ver  (${size} bytes)"
+    green "  ✓ OK: $(basename "$bin")  (${size} bytes)"
     return 0
 }
 

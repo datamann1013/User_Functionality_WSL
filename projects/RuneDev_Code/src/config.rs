@@ -84,7 +84,7 @@ impl Default for RuneCoreConfig {
     fn default() -> Self {
         RuneCoreConfig {
             register: true,
-            core_url: "http://localhost:11441".to_string(),
+            core_url: "https://localhost:11440".to_string(),
         }
     }
 }

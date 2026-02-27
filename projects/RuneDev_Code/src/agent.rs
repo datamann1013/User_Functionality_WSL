@@ -380,8 +380,11 @@ async fn run_delete(cwd: &PathBuf) -> Result<()> {
 
 /// Attempts to register with RuneCore Core. Returns true if confirmed.
 async fn register_and_confirm(core_url: &str) -> bool {
+    // Core uses a self-signed TLS cert — accept it for local registration.
+    // mTLS client certs are not required when RUNECORE_DISABLE_MTLS=1 (dev default).
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(5))
+        .danger_accept_invalid_certs(true)
         .build()
     {
         Ok(c) => c,

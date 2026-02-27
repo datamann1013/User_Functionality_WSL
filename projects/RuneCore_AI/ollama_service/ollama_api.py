@@ -166,22 +166,50 @@ def download_model_via_ollama(name):
     pull_url = f"{OLLAMA_HOST}/api/pull"
 
     def _stream_reader(model_name, response):
-        """Read the streaming pull response and track progress."""
+        """Read the streaming pull response and track aggregate progress.
+
+        Ollama reports progress per-layer (each layer has its own total/completed).
+        Computing per-layer percentage causes the display to jump back toward 0
+        whenever a new layer starts. Instead, we accumulate bytes across all layers
+        so progress is always a fraction of the total bytes downloaded vs. total
+        bytes to download — monotonically increasing throughout the pull.
+        """
+        # digest -> total bytes for that layer
+        layer_totals: dict = {}
+        # digest -> bytes downloaded so far for that layer
+        layer_completed: dict = {}
+
         try:
             for raw_line in response.iter_lines():
                 if not raw_line:
                     continue
                 try:
                     data = json.loads(raw_line)
+                    digest = data.get("digest")
                     total = data.get("total", 0)
                     completed = data.get("completed", 0)
-                    progress = int(completed / total * 100) if total > 0 else 0
+
+                    # Only count layers that report a real size
+                    if digest and total > 0:
+                        layer_totals[digest] = total
+                        layer_completed[digest] = completed
+
+                    # Aggregate progress across all layers seen so far
+                    grand_total = sum(layer_totals.values())
+                    grand_completed = sum(layer_completed.values())
+                    if grand_total > 0:
+                        # Cap at 99 until Ollama sends "success" — layers finishing
+                        # doesn't mean the model is fully written and ready.
+                        progress = min(int(grand_completed / grand_total * 100), 99)
+                    else:
+                        progress = 0
 
                     with _active_pulls_lock:
                         entry = _active_pulls.get(model_name)
                         if entry is None:
                             return
                         entry["last_update"] = datetime.now().isoformat()
+                        # Belt-and-suspenders: never display lower than what we showed before
                         entry["progress"] = max(entry.get("progress", 0), progress)
                         if "error" in data:
                             entry["status"] = "failed"

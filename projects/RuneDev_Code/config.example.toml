@@ -41,7 +41,7 @@ respect_gitignore = true
 
 [runecore]
 register = true
-core_url = "http://localhost:11441"
+core_url = "https://localhost:11440"  # Core HTTPS port (self-signed cert accepted)
 
 # ---------------------------------------------------------------------------
 # External MCP servers (optional)
