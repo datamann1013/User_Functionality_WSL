@@ -351,7 +351,10 @@ async fn run_turn(
 
                     // Deduplication: if we already ran this exact call, inject the cached
                     // result with an insistent "stop repeating yourself" message.
-                    let cache_key = format!("{}:{}", tc.name, tc.arguments);
+                    // Normalize args first — some tools have equivalent call forms that differ
+                    // only in JSON representation (e.g. list_directory {} vs {"path":"."}).
+                    let norm_args = normalize_args(&tc.name, &tc.arguments);
+                    let cache_key = format!("{}:{}", tc.name, norm_args);
                     if let Some(cached) = tool_call_cache.get(&cache_key) {
                         let force = format!(
                             "You already called `{}` with these arguments and got this result:\n{}\n\n\
@@ -513,6 +516,25 @@ async fn register_and_confirm(core_url: &str) -> bool {
 
     print!("\r");
     false
+}
+
+/// Normalise tool arguments for deduplication caching.
+/// Some tools accept multiple equivalent argument forms; collapse them to a
+/// canonical form so the cache catches repeated calls correctly.
+fn normalize_args(tool_name: &str, args: &Value) -> String {
+    match tool_name {
+        // list_directory: missing path, empty string, and "." all mean cwd
+        "list_directory" => {
+            let path = args.get("path").and_then(|p| p.as_str()).unwrap_or(".");
+            let canonical = if path.is_empty() || path == "." { "" } else { path };
+            if canonical.is_empty() {
+                "{}".to_string()
+            } else {
+                serde_json::json!({"path": canonical}).to_string()
+            }
+        }
+        _ => args.to_string(),
+    }
 }
 
 fn gethostname() -> String {
