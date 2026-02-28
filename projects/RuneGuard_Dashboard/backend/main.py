@@ -47,6 +47,10 @@ app.add_middleware(
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_STATIC_DIR):
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+    # Vite outputs JS/CSS to /assets — mount that path so index.html can load them
+    _assets_dir = os.path.join(_STATIC_DIR, "assets")
+    if os.path.isdir(_assets_dir):
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
 
 
 @app.get("/", include_in_schema=False)
