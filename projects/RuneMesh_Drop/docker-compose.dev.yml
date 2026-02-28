@@ -2,14 +2,15 @@ version: '3.8'
 services:
   mesh_drop:
     build: .
-    ports:
-      - '5100:5010'
+    environment:
+      - PORT=5010
+      - RUNECORE_CORE_URL=http://runecore_core:11441
+      - RUNECORE_ALLOW_INSECURE_REGISTRATION=true
     networks:
       runecore_dev:
         aliases:
           - mesh_drop
     healthcheck:
-      # container exposes 5010; map host 5100 -> container 5010 and check container-local port
       test: ["CMD", "curl", "-f", "http://localhost:5010/health"]
       interval: 15s
       timeout: 3s

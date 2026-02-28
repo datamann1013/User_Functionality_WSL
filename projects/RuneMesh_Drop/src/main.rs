@@ -285,8 +285,14 @@ async fn register_with_core(req_body: String) -> impl Responder {
     }
 
     let core_url = std::env::var("RUNECORE_CORE_URL").unwrap_or_else(|_| "http://localhost:5000/api/modules/register".into());
-    let register_name = "RuneDrop";
-    let register_body = serde_json::json!({"name": register_name, "version": "0.1.0", "port": std::env::var("PORT").unwrap_or_else(|_| "5010".into()), "capabilities": ["file_sharing"]});
+    let register_name = "RuneMesh_Drop";
+    let register_body = serde_json::json!({
+        "name": register_name,
+        "version": "0.1.0",
+        "port": std::env::var("PORT").unwrap_or_else(|_| "5010".into()),
+        "rest_url": format!("http://mesh_drop:{}", std::env::var("PORT").unwrap_or_else(|_| "5010".into())),
+        "capabilities": ["file_transfer", "qr_code"]
+    });
 
     match build_reqwest_client(insecure) {
         Ok(client) => {
@@ -305,7 +311,7 @@ async fn register_with_core(req_body: String) -> impl Responder {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    println!("Starting RuneDrop service (RuneCore_Drop) ...");
+    println!("Starting RuneMesh_Drop service ...");
     ensure_dirs()?;
     let state = load_meta();
 
@@ -313,8 +319,14 @@ async fn main() -> std::io::Result<()> {
 
     // Try to register with core (best-effort)
     let core_url = std::env::var("RUNECORE_CORE_URL").unwrap_or_else(|_| "http://localhost:5000/api/modules/register".into());
-    let register_name = "RuneDrop";
-    let register_body = serde_json::json!({"name": register_name, "version": "0.1.0", "port": std::env::var("PORT").unwrap_or_else(|_| "5010".into()), "capabilities": ["file_sharing"]});
+    let register_name = "RuneMesh_Drop";
+    let register_body = serde_json::json!({
+        "name": register_name,
+        "version": "0.1.0",
+        "port": std::env::var("PORT").unwrap_or_else(|_| "5010".into()),
+        "rest_url": format!("http://mesh_drop:{}", std::env::var("PORT").unwrap_or_else(|_| "5010".into())),
+        "capabilities": ["file_transfer", "qr_code"]
+    });
 
     // fire-and-forget registration
     let core_url_clone = core_url.clone();
@@ -341,8 +353,8 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(data.clone())
-            // serve the frontend static files at /frontend
-            .service(actix_files::Files::new("/frontend", "./frontend").index_file("index.html"))
+            // serve the frontend static files at / (root) - Vite builds to dist/
+            .service(actix_files::Files::new("/", "./frontend-dist").index_file("index.html"))
             .service(upload)
             .service(download)
             .service(post_signal)
