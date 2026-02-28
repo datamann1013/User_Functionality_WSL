@@ -1,7 +1,9 @@
-version: '3.8'
 services:
   mesh_drop:
     build: .
+    container_name: mesh_drop
+    ports:
+      - "5100:5010"
     environment:
       - PORT=5010
       - RUNECORE_CORE_URL=http://runecore_core:11441

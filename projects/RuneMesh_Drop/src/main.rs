@@ -156,11 +156,14 @@ async fn upload(req: HttpRequest, mut payload: Multipart, data: web::Data<std::s
 
         // write to disk in a blocking task (clone path for move into closure)
         let write_path = filepath.clone();
+        // web::block returns Result<Result<T, io::Error>, BlockingError> — propagate both
         web::block(move || {
             let mut f = std::fs::File::create(&write_path)?;
             f.write_all(&buf)?;
             Ok::<(), std::io::Error>(())
-        }).await.map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+        }).await
+            .map_err(|e| actix_web::error::ErrorInternalServerError(e))?
+            .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
         // create token and expire
         let token = Uuid::new_v4().to_string();
@@ -222,7 +225,7 @@ async fn upload(req: HttpRequest, mut payload: Multipart, data: web::Data<std::s
 }
 
 #[get("/download/{file_id}")]
-async fn download(req: HttpRequest, path: web::Path<String>, query: web::Query<HashMap<String, String>>, data: web::Data<std::sync::Mutex<AppStateData>>) -> Result<actix_files::NamedFile> {
+async fn download(_req: HttpRequest, path: web::Path<String>, query: web::Query<HashMap<String, String>>, data: web::Data<std::sync::Mutex<AppStateData>>) -> Result<actix_files::NamedFile> {
     let file_id = path.into_inner();
     let token_q = query.get("token");
 
