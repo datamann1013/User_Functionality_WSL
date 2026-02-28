@@ -47,6 +47,10 @@ app.add_middleware(
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_STATIC_DIR):
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+    # Vite outputs JS/CSS to /assets — mount that path so index.html can load them
+    _assets_dir = os.path.join(_STATIC_DIR, "assets")
+    if os.path.isdir(_assets_dir):
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
 
 
 @app.get("/", include_in_schema=False)
@@ -309,6 +313,46 @@ def get_errors_history():
         {"results": []},
     )
     return {"series": _build_series(data.get("results", []))}
+
+
+@app.get("/api/machine")
+def get_machine():
+    """
+    Returns the latest static hardware profile for the host machine.
+    Source: CoreMemory memories, namespace 'machine_profile'.
+    """
+    data = _proxy_post(
+        "memories/query",
+        {"namespace": "machine_profile", "top_k": 5},
+        {"results": []},
+    )
+    results = data.get("results", [])
+    if not results:
+        return {"available": False, "profile": {}}
+    # Take last result (all have same structure; any recent profile is valid)
+    latest = results[-1]
+    return {"available": True, "profile": latest.get("metadata", {})}
+
+
+@app.get("/api/host_load")
+def get_host_load():
+    """
+    Returns the latest live host usage metrics (CPU, RAM, GPU).
+    Source: InfluxDB measurement 'host_metrics', last 30 seconds.
+    """
+    data = _proxy_post(
+        "telemetry/query",
+        {"measurement": "host_metrics", "start": "-30s", "limit": 200},
+        {"results": []},
+    )
+    results = data.get("results", [])
+    # Take the most recent value for each field
+    latest: dict = {}
+    for row in results:
+        field = row.get("field")
+        if field:
+            latest[field] = row.get("value", 0)
+    return {"available": bool(latest), "metrics": latest}
 
 
 @app.get("/api/containers/history")

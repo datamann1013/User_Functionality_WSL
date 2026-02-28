@@ -74,7 +74,7 @@ def create_memory(payload: MemoryCreate):
                 namespace=payload.namespace,
                 agent_id=payload.agent_id,
                 text=payload.text,
-                metadata=payload.metadata,
+                metadata_json=payload.metadata,  # model attr is metadata_json (not metadata)
             )
             db.add(mem)
             db.commit()
