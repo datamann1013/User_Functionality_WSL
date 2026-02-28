@@ -1,0 +1,25 @@
+[package]
+name = "runecode"
+version = "0.1.0"
+edition = "2021"
+description = "RuneDev_Code — native coding agent for the RuneCore ecosystem"
+
+[[bin]]
+name = "runecode"
+path = "src/main.rs"
+
+[dependencies]
+tokio        = { version = "1", features = ["full"] }
+reqwest      = { version = "0.12", features = ["json", "stream"] }
+serde        = { version = "1", features = ["derive"] }
+serde_json   = "1"
+clap         = { version = "4", features = ["derive"] }
+toml         = "0.8"
+crossterm    = "0.27"
+colored      = "2"
+similar      = "2"
+glob         = "0.3"
+regex        = "1"
+dirs         = "5"
+anyhow       = "1"
+futures-util = "0.3"
