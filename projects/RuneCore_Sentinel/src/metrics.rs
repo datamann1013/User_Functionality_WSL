@@ -41,7 +41,7 @@ fn run_nvidia_smi(args: &[&str]) -> std::io::Result<std::process::Output> {
 /// Never called again in the hot loop.
 #[derive(Debug, Clone)]
 pub struct StaticHardware {
-    /// GPU model, vendor, total VRAM, driver — from nvidia-smi or PowerShell
+    /// GPU model, vendor, total VRAM, driver — from nvidia-smi + Win32_VideoController
     pub gpu_base: Option<Vec<GpuInfo>>,
     pub npu: Option<Vec<NpuInfo>>,
     pub disks: Option<Vec<DiskInfo>>,
@@ -75,6 +75,8 @@ pub struct GpuInfo {
     pub utilization_percent: Option<f32>,
     pub device_id: Option<String>,
     pub driver_version: Option<String>,
+    /// "discrete" | "integrated" | None
+    pub gpu_type: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -154,32 +156,100 @@ pub fn sample_system_metrics(hw: &StaticHardware) -> SystemMetrics {
 
 // ── GPU ───────────────────────────────────────────────────────────────────────
 
+/// Classify a GPU as "discrete" or "integrated" from its display name.
+/// NVIDIA → always discrete.
+/// Intel → always integrated (Intel Arc on laptops is still listed as iGPU class).
+/// AMD: "RX" prefix = discrete, everything else (Radeon Vega, 860M, etc.) = integrated.
+fn classify_gpu_type(name: &str) -> &'static str {
+    let low = name.to_lowercase();
+    if low.contains("nvidia") { return "discrete"; }
+    if low.contains("intel")  { return "integrated"; }
+    // AMD discrete GPUs carry "RX" in the name (RX 6700, RX 7900 XTX, etc.)
+    if low.contains(" rx ") || low.starts_with("amd radeon rx") { return "discrete"; }
+    // AMD iGPU: "Radeon Vega", "Radeon 860M", "Radeon Graphics", "Radeon(TM) Graphics"
+    "integrated"
+}
+
 /// Collect static GPU info (name, vendor, total VRAM, driver).  Called ONCE.
+/// Always queries both nvidia-smi (NVIDIA dGPU) AND Win32_VideoController (iGPU).
 fn detect_gpu_static() -> Option<Vec<GpuInfo>> {
-    // nvidia-smi: fast, gives us everything including initial util snapshot
+    let mut result: Vec<GpuInfo> = Vec::new();
+    // Track NVIDIA names (lowercase) so we don't double-count from Win32_VideoController
+    let mut nvidia_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // 1. nvidia-smi — discrete NVIDIA GPU(s)
     if let Ok(out) = run_nvidia_smi(&[
         "--query-gpu=name,memory.total,driver_version",
         "--format=csv,noheader,nounits",
     ]) {
         if out.status.success() {
             if let Ok(s) = str::from_utf8(&out.stdout) {
-                let mut res = Vec::new();
                 for line in s.lines() {
                     let parts: Vec<&str> = line.split(',').map(|p| p.trim()).collect();
                     let name     = parts.first().map(|s| s.to_string());
                     let total_kb = parts.get(1).and_then(|v| v.parse::<u64>().ok()).map(|m| m * 1024);
                     let driver   = parts.get(2).map(|s| s.to_string());
-                    res.push(GpuInfo {
+                    if let Some(ref n) = name {
+                        nvidia_names.insert(n.to_lowercase());
+                    }
+                    result.push(GpuInfo {
                         name, vendor: Some("NVIDIA".to_string()),
                         total_memory_kb: total_kb, used_memory_kb: None,
-                        utilization_percent: None, device_id: None, driver_version: driver,
+                        utilization_percent: None, device_id: None,
+                        driver_version: driver, gpu_type: Some("discrete".to_string()),
                     });
                 }
-                if !res.is_empty() { return Some(res); }
             }
         }
     }
 
+    // 2. Windows: Win32_VideoController — catches AMD/Intel iGPU not in nvidia-smi
+    #[cfg(target_os = "windows")]
+    {
+        let ps = r#"Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM,PNPDeviceID,DriverVersion | ConvertTo-Json"#;
+        if let Ok(out) = run_powershell(ps) {
+            if out.status.success() {
+                if let Ok(s) = str::from_utf8(&out.stdout) {
+                    if let Ok(json) = serde_json::from_str::<JsonValue>(s) {
+                        for item in json_to_array(json) {
+                            let name = item.get("Name")
+                                .and_then(|v| v.as_str()).map(|s| s.to_string());
+                            let name_low = name.as_deref()
+                                .map(|n| n.to_lowercase()).unwrap_or_default();
+
+                            // Skip adapters already reported by nvidia-smi
+                            if nvidia_names.contains(&name_low) { continue; }
+                            // Skip virtual/software adapters
+                            if name_low.contains("microsoft") || name_low.contains("remote")
+                                || name_low.contains("basic display") { continue; }
+                            // Skip empty names
+                            if name_low.trim().is_empty() { continue; }
+
+                            let total_kb = item.get("AdapterRAM")
+                                .and_then(|v| v.as_u64()).map(|b| b / 1024);
+                            let pnp = item.get("PNPDeviceID")
+                                .and_then(|v| v.as_str()).map(|s| s.to_string());
+                            let drv = item.get("DriverVersion")
+                                .and_then(|v| v.as_str()).map(|s| s.to_string());
+                            let vendor = name.as_deref().and_then(vendor_from_name);
+                            let gpu_type = name.as_deref()
+                                .map(|n| classify_gpu_type(n).to_string());
+
+                            result.push(GpuInfo {
+                                name, vendor, total_memory_kb: total_kb,
+                                used_memory_kb: None, utilization_percent: None,
+                                device_id: pnp, driver_version: drv, gpu_type,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !result.is_empty() { return Some(result); }
+
+    // 3. Linux fallback
     if cfg!(target_os = "linux") {
         if let Ok(out) = Command::new("lspci").arg("-nn").output() {
             if out.status.success() {
@@ -189,38 +259,14 @@ fn detect_gpu_static() -> Option<Vec<GpuInfo>> {
                         let low = line.to_lowercase();
                         if low.contains("vga") || low.contains("3d") || low.contains("display") {
                             let vendor = vendor_from_name(line);
+                            let gpu_type = Some(classify_gpu_type(line).to_string());
                             res.push(GpuInfo { name: Some(line.to_string()), vendor,
                                 total_memory_kb: None, used_memory_kb: None,
-                                utilization_percent: None, device_id: None, driver_version: None });
+                                utilization_percent: None, device_id: None,
+                                driver_version: None, gpu_type });
                         }
                     }
                     if !res.is_empty() { return Some(res); }
-                }
-            }
-        }
-    }
-
-    // Windows fallback: PowerShell CIM — called ONCE only, hidden window
-    #[cfg(target_os = "windows")]
-    {
-        let ps = r#"Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM,PNPDeviceID,DriverVersion | ConvertTo-Json"#;
-        if let Ok(out) = run_powershell(ps) {
-            if out.status.success() {
-                if let Ok(s) = str::from_utf8(&out.stdout) {
-                    if let Ok(json) = serde_json::from_str::<JsonValue>(s) {
-                        let mut res = Vec::new();
-                        for item in json_to_array(json) {
-                            let name     = item.get("Name").and_then(|v| v.as_str()).map(|s| s.to_string());
-                            let total_kb = item.get("AdapterRAM").and_then(|v| v.as_u64()).map(|b| b / 1024);
-                            let pnp      = item.get("PNPDeviceID").and_then(|v| v.as_str()).map(|s| s.to_string());
-                            let drv      = item.get("DriverVersion").and_then(|v| v.as_str()).map(|s| s.to_string());
-                            let vendor   = name.as_deref().and_then(vendor_from_name);
-                            res.push(GpuInfo { name, vendor, total_memory_kb: total_kb,
-                                used_memory_kb: None, utilization_percent: None,
-                                device_id: pnp, driver_version: drv });
-                        }
-                        if !res.is_empty() { return Some(res); }
-                    }
                 }
             }
         }
@@ -230,15 +276,18 @@ fn detect_gpu_static() -> Option<Vec<GpuInfo>> {
 }
 
 /// Called every loop — runs only nvidia-smi (fast, hidden window) to get live
-/// utilization/used-VRAM.  Falls back to static base for non-NVIDIA GPUs.
+/// utilization/used-VRAM for NVIDIA GPUs.  Non-NVIDIA entries (iGPU etc.) are
+/// carried forward from the static base unchanged.
 fn sample_gpu_live(base: &Option<Vec<GpuInfo>>) -> Option<Vec<GpuInfo>> {
+    let mut result: Vec<GpuInfo> = Vec::new();
+
+    // Fresh NVIDIA live data
     if let Ok(out) = run_nvidia_smi(&[
         "--query-gpu=name,memory.total,memory.used,utilization.gpu,driver_version",
         "--format=csv,noheader,nounits",
     ]) {
         if out.status.success() {
             if let Ok(s) = str::from_utf8(&out.stdout) {
-                let mut res = Vec::new();
                 for line in s.lines() {
                     let parts: Vec<&str> = line.split(',').map(|p| p.trim()).collect();
                     let name     = parts.first().map(|s| s.to_string());
@@ -246,20 +295,62 @@ fn sample_gpu_live(base: &Option<Vec<GpuInfo>>) -> Option<Vec<GpuInfo>> {
                     let used_kb  = parts.get(2).and_then(|v| v.parse::<u64>().ok()).map(|m| m * 1024);
                     let util     = parts.get(3).and_then(|v| v.parse::<f32>().ok());
                     let driver   = parts.get(4).map(|s| s.to_string());
-                    res.push(GpuInfo {
+                    result.push(GpuInfo {
                         name, vendor: Some("NVIDIA".to_string()),
                         total_memory_kb: total_kb, used_memory_kb: used_kb,
-                        utilization_percent: util, device_id: None, driver_version: driver,
+                        utilization_percent: util, device_id: None,
+                        driver_version: driver, gpu_type: Some("discrete".to_string()),
                     });
                 }
-                if !res.is_empty() { return Some(res); }
             }
         }
     }
-    base.clone()
+
+    // Preserve non-NVIDIA adapters (iGPU) from the static base — we have no
+    // fast live-query for AMD/Intel iGPU, so just forward the static entry.
+    if let Some(base_gpus) = base {
+        for bg in base_gpus {
+            let is_nvidia = bg.vendor.as_deref()
+                .map(|v| v.eq_ignore_ascii_case("nvidia")).unwrap_or(false);
+            if !is_nvidia {
+                result.push(bg.clone());
+            }
+        }
+    }
+
+    if result.is_empty() { base.clone() } else { Some(result) }
 }
 
 // ── NPU ───────────────────────────────────────────────────────────────────────
+
+/// Map PCI VEN/DEV IDs in a PnP InstanceId to a specific chip model name.
+/// Returns None if the ID is not in the known table — caller falls back to
+/// the Windows FriendlyName / device Name.
+fn npu_name_from_instance_id(instance_id: &str) -> Option<&'static str> {
+    let id = instance_id.to_uppercase();
+    // AMD
+    if id.contains("VEN_1022") {
+        // Ryzen AI 300 "Strix Point" — XDNA 2
+        if id.contains("DEV_17F0") || id.contains("DEV_17F4") { return Some("AMD XDNA 2"); }
+        // Ryzen AI 100/200 "Phoenix / Hawk Point" — XDNA 1
+        if id.contains("DEV_1502") || id.contains("DEV_15BF") || id.contains("DEV_17F1") {
+            return Some("AMD XDNA");
+        }
+        return Some("AMD NPU");
+    }
+    // Intel
+    if id.contains("VEN_8086") {
+        if id.contains("DEV_7E40") || id.contains("DEV_7270") { return Some("Intel AI Boost (Meteor Lake)"); }
+        if id.contains("DEV_B03B") || id.contains("DEV_B0A0") { return Some("Intel AI Boost (Lunar Lake)"); }
+        if id.contains("DEV_B1A0") { return Some("Intel AI Boost (Arrow Lake)"); }
+        return Some("Intel AI Boost");
+    }
+    // Qualcomm
+    if id.contains("VEN_17CB") || id.contains("QCOM") {
+        return Some("Qualcomm Hexagon NPU");
+    }
+    None
+}
 
 fn detect_npu() -> Option<Vec<NpuInfo>> {
     if cfg!(target_os = "linux") {
@@ -298,9 +389,21 @@ fn detect_npu() -> Option<Vec<NpuInfo>> {
                             let friendly  = item.get("FriendlyName").and_then(|v| v.as_str()).map(|s| s.to_string());
                             let name_f    = item.get("Name").and_then(|v| v.as_str()).map(|s| s.to_string());
                             let inst_id   = item.get("InstanceId").and_then(|v| v.as_str()).map(|s| s.to_string());
-                            if let Some(dev_name) = friendly.or(name_f) {
-                                res.push(NpuInfo { name: Some(dev_name), utilization_percent: None,
-                                    device_id: inst_id, class: Some("ComputeAccelerator".to_string()) });
+
+                            if friendly.is_some() || name_f.is_some() {
+                                // Resolve chip model from hardware ID (more specific than FriendlyName)
+                                let resolved_name = inst_id.as_deref()
+                                    .and_then(|id| npu_name_from_instance_id(id))
+                                    .map(|s| s.to_string())
+                                    .or_else(|| friendly.clone())
+                                    .or(name_f);
+
+                                res.push(NpuInfo {
+                                    name: resolved_name,
+                                    utilization_percent: None,
+                                    device_id: inst_id,
+                                    class: Some("ComputeAccelerator".to_string()),
+                                });
                             }
                         }
                         if !res.is_empty() { return Some(res); }
@@ -334,7 +437,12 @@ fn detect_npu() -> Option<Vec<NpuInfo>> {
                                 class_f.as_deref().unwrap_or(""),
                             ).to_lowercase();
                             if NPU_NAMES.iter().any(|kw| combined.contains(kw)) {
-                                res.push(NpuInfo { name: friendly.or(name_f),
+                                let resolved = inst_id.as_deref()
+                                    .and_then(|id| npu_name_from_instance_id(id))
+                                    .map(|s| s.to_string())
+                                    .or_else(|| friendly.clone())
+                                    .or(name_f);
+                                res.push(NpuInfo { name: resolved,
                                     utilization_percent: None, device_id: inst_id, class: class_f });
                                 break;
                             }
@@ -474,7 +582,7 @@ fn vendor_from_name(name: &str) -> Option<String> {
     let low = name.to_lowercase();
     if low.contains("nvidia") { Some("NVIDIA".to_string()) }
     else if low.contains("intel") { Some("Intel".to_string()) }
-    else if low.contains("amd") { Some("AMD".to_string()) }
+    else if low.contains("amd") || low.contains("radeon") || low.contains("ati") { Some("AMD".to_string()) }
     else { None }
 }
 
@@ -526,5 +634,21 @@ mod tests {
         assert_eq!(smbios_memory_type(34).as_deref(), Some("DDR5"));
         assert_eq!(smbios_memory_type(43).as_deref(), Some("LPDDR5"));
         assert!(smbios_memory_type(0).is_none());
+    }
+
+    #[test]
+    fn gpu_type_classification() {
+        assert_eq!(classify_gpu_type("NVIDIA GeForce RTX 5050 Laptop GPU"), "discrete");
+        assert_eq!(classify_gpu_type("AMD Radeon 860M"), "integrated");
+        assert_eq!(classify_gpu_type("AMD Radeon RX 7900 XTX"), "discrete");
+        assert_eq!(classify_gpu_type("Intel Iris Xe Graphics"), "integrated");
+        assert_eq!(classify_gpu_type("AMD Radeon Vega 8 Graphics"), "integrated");
+    }
+
+    #[test]
+    fn npu_id_lookup() {
+        assert_eq!(npu_name_from_instance_id("PCI\\VEN_1022&DEV_17F0&SUBSYS_12345678&REV_00"), Some("AMD XDNA 2"));
+        assert_eq!(npu_name_from_instance_id("PCI\\VEN_8086&DEV_7E40&SUBSYS_00000000&REV_00"), Some("Intel AI Boost (Meteor Lake)"));
+        assert!(npu_name_from_instance_id("PCI\\VEN_10DE&DEV_1234").is_none());
     }
 }
