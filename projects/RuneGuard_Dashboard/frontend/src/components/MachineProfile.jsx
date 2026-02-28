@@ -5,6 +5,25 @@ export default function MachineProfile({ data, loading, error }) {
 
   const p = data.profile
 
+  // Split GPUs into discrete and integrated for labelling
+  const gpus = p.gpu || []
+  const discrete   = gpus.filter(g => g.gpu_type !== 'integrated')
+  const integrated = gpus.filter(g => g.gpu_type === 'integrated')
+
+  function GpuRow({ g, label }) {
+    const vram = g.total_memory_gb != null && g.total_memory_gb > 0
+      ? ` · ${g.total_memory_gb.toFixed(0)}GB`
+      : ''
+    return (
+      <div className="stat-row">
+        <span className="stat-label">{label}</span>
+        <span className="stat-value" style={{ fontSize: 11 }}>
+          {g.name || '—'}{vram}
+        </span>
+      </div>
+    )
+  }
+
   return (
     <div>
       <div className="stat-row">
@@ -28,16 +47,10 @@ export default function MachineProfile({ data, loading, error }) {
         <span className="stat-value">{p.memory_total_gb != null ? `${p.memory_total_gb.toFixed(1)} GB` : '—'}</span>
       </div>
 
-      {/* GPU row(s) */}
-      {(p.gpu || []).length > 0
-        ? (p.gpu || []).map((g, i) => (
-          <div key={i} className="stat-row">
-            <span className="stat-label">GPU{(p.gpu || []).length > 1 ? ` ${i}` : ''}</span>
-            <span className="stat-value" style={{ fontSize: 11 }}>
-              {g.name || '—'}
-              {g.total_memory_gb != null ? ` · ${g.total_memory_gb.toFixed(0)}GB` : ''}
-            </span>
-          </div>
+      {/* Discrete GPUs */}
+      {discrete.length > 0
+        ? discrete.map((g, i) => (
+          <GpuRow key={i} g={g} label={discrete.length > 1 ? `GPU ${i}` : 'GPU'} />
         ))
         : (
           <div className="stat-row">
@@ -46,6 +59,11 @@ export default function MachineProfile({ data, loading, error }) {
           </div>
         )
       }
+
+      {/* Integrated GPUs */}
+      {integrated.map((g, i) => (
+        <GpuRow key={i} g={g} label={integrated.length > 1 ? `iGPU ${i}` : 'iGPU'} />
+      ))}
 
       {/* NPU row(s) */}
       {(p.npu || []).length > 0

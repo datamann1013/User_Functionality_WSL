@@ -226,6 +226,7 @@ def query_memories(req: QueryRequest):
                 db = SessionLocal()
                 q = (db.query(Memory)
                      .filter(Memory.namespace == req.namespace)
+                     .order_by(Memory.created_at.desc())
                      .limit(req.top_k)
                      .all())
                 for r in q:

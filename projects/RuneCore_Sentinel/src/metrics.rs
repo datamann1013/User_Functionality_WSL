@@ -219,9 +219,12 @@ fn detect_gpu_static() -> Option<Vec<GpuInfo>> {
 
                             // Skip adapters already reported by nvidia-smi
                             if nvidia_names.contains(&name_low) { continue; }
-                            // Skip virtual/software adapters
-                            if name_low.contains("microsoft") || name_low.contains("remote")
-                                || name_low.contains("basic display") { continue; }
+                            // Skip virtual/software adapters (Parsec, NVIDIA Streamer, etc.)
+                            if name_low.contains("microsoft")
+                                || name_low.contains("basic display")
+                                || name_low.contains("parsec")
+                                || name_low.contains("virtual display")
+                                || name_low.contains("remote display") { continue; }
                             // Skip empty names
                             if name_low.trim().is_empty() { continue; }
 

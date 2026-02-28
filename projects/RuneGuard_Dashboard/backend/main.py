@@ -329,8 +329,8 @@ def get_machine():
     results = data.get("results", [])
     if not results:
         return {"available": False, "profile": {}}
-    # Take last result (all have same structure; any recent profile is valid)
-    latest = results[-1]
+    # Results are ordered newest-first by CoreMemory query (ORDER BY created_at DESC)
+    latest = results[0]
     return {"available": True, "profile": latest.get("metadata", {})}
 
 

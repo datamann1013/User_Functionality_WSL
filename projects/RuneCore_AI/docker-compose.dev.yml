@@ -71,6 +71,15 @@ services:
           - ollama
     volumes:
       - ollama_data:/root/.ollama
+    # NVIDIA GPU passthrough — Ollama auto-detects GPU and uses it for inference.
+    # Falls back to CPU silently if GPU is unavailable.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
 
   ollama_wrapper:
     build:
