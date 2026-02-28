@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-// Helper to format file sizes
 function formatFileSize(bytes) {
   if (bytes === 0) return '0 B';
   const k = 1024;
@@ -9,23 +8,31 @@ function formatFileSize(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// Get API base URL - use proxy in production
 function getApiBase() {
-  const path = window.location.pathname;
-  if (path.startsWith('/api/proxy/RuneMesh_Drop')) {
+  if (window.location.pathname.startsWith('/api/proxy/RuneMesh_Drop')) {
     return '/api/proxy/RuneMesh_Drop';
   }
   return '';
 }
 
-// Escape HTML
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-  })[c]);
+// Matches the Panel component pattern used in RuneGuard_Dashboard
+function Panel({ title, lastUpdated, children, className }) {
+  const timeStr = lastUpdated
+    ? lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : null;
+  return (
+    <div className={`panel ${className ?? ''}`}>
+      <div className="panel-header">
+        <span className="panel-title">{title}</span>
+        {timeStr && <span className="panel-updated">updated {timeStr}</span>}
+      </div>
+      <div className="panel-body">{children}</div>
+    </div>
+  );
 }
 
-function App() {
+export default function App() {
+  const [serverOnline, setServerOnline] = useState(false);
   const [interfaceUrl, setInterfaceUrl] = useState('');
   const [interfaces, setInterfaces] = useState([]);
   const [selectedFile, setSelectedFile] = useState(null);
@@ -42,9 +49,8 @@ function App() {
   const [transfers, setTransfers] = useState([]);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
-  const downloadInputRef = useRef(null);
 
-  // Load available network interfaces
+  // Load available network interfaces and track server connectivity
   useEffect(() => {
     async function loadInterfaces() {
       try {
@@ -54,8 +60,10 @@ function App() {
           setInterfaces(data.candidates);
           setInterfaceUrl(data.candidates[0]);
         }
+        setServerOnline(true);
       } catch (e) {
         console.error('Failed to load interfaces:', e);
+        setServerOnline(false);
       }
     }
     loadInterfaces();
@@ -65,25 +73,21 @@ function App() {
   useEffect(() => {
     try {
       const saved = localStorage.getItem('runemesh_transfers');
-      if (saved) {
-        setTransfers(JSON.parse(saved));
-      }
+      if (saved) setTransfers(JSON.parse(saved));
     } catch (e) {
       console.error('Failed to load transfers:', e);
     }
   }, []);
 
-  // Save transfers to localStorage
-  const saveTransfers = useCallback((newTransfers) => {
-    setTransfers(newTransfers);
+  const saveTransfers = useCallback((next) => {
+    setTransfers(next);
     try {
-      localStorage.setItem('runemesh_transfers', JSON.stringify(newTransfers));
+      localStorage.setItem('runemesh_transfers', JSON.stringify(next));
     } catch (e) {
       console.error('Failed to save transfers:', e);
     }
   }, []);
 
-  // Handle file drop
   const handleDrop = useCallback((e) => {
     e.preventDefault();
     setDragOver(false);
@@ -95,15 +99,8 @@ function App() {
     }
   }, []);
 
-  const handleDragOver = useCallback((e) => {
-    e.preventDefault();
-    setDragOver(true);
-  }, []);
-
-  const handleDragLeave = useCallback((e) => {
-    e.preventDefault();
-    setDragOver(false);
-  }, []);
+  const handleDragOver  = useCallback((e) => { e.preventDefault(); setDragOver(true); }, []);
+  const handleDragLeave = useCallback((e) => { e.preventDefault(); setDragOver(false); }, []);
 
   const handleFileSelect = useCallback((e) => {
     const files = e.target.files;
@@ -116,27 +113,18 @@ function App() {
 
   const handleUpload = async () => {
     if (!selectedFile) return;
-
     setUploading(true);
     setUploadError('');
     setUploadResult(null);
-
     try {
       const formData = new FormData();
       formData.append('file', selectedFile, selectedFile.name);
-
       let url = `${getApiBase()}/upload`;
-      if (interfaceUrl) {
-        url += `?external_base=${encodeURIComponent(interfaceUrl)}`;
-      }
-
+      if (interfaceUrl) url += `?external_base=${encodeURIComponent(interfaceUrl)}`;
       const res = await fetch(url, { method: 'POST', body: formData });
       if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
-
       const data = await res.json();
       setUploadResult(data);
-
-      // Add to transfers list
       const newTransfer = {
         id: data.file_id,
         name: data.filename,
@@ -146,7 +134,6 @@ function App() {
         time: new Date().toISOString(),
       };
       saveTransfers([newTransfer, ...transfers].slice(0, 20));
-
     } catch (e) {
       setUploadError(e.message);
     } finally {
@@ -155,62 +142,45 @@ function App() {
   };
 
   const handleCopyLink = () => {
-    if (uploadResult?.download_url) {
-      navigator.clipboard.writeText(uploadResult.download_url);
-    }
+    if (uploadResult?.download_url) navigator.clipboard.writeText(uploadResult.download_url);
   };
 
   const handleDownload = async () => {
     if (!downloadCode.trim()) return;
-
     setDownloading(true);
     setDownloadError('');
     setDownloadProgress(0);
     setDownloadSuccess(false);
-
     try {
-      // Parse the code - could be full URL or just file_id
       let fileId = downloadCode.trim();
-      let token = '';
-
-      // Check if it's a full URL
-      const urlMatch = downloadCode.match(/\/download\/([^\?]+)/);
-      if (urlMatch) {
-        fileId = urlMatch[1];
-      }
-
-      // Extract token from URL if present
+      const urlMatch = downloadCode.match(/\/download\/([^?]+)/);
+      if (urlMatch) fileId = urlMatch[1];
       const tokenMatch = downloadCode.match(/token=([^&\s]+)/);
-      if (tokenMatch) {
-        token = tokenMatch[1];
-      }
+      const token = tokenMatch ? tokenMatch[1] : '';
+      if (!fileId) throw new Error('Invalid file code');
 
-      if (!fileId) {
-        throw new Error('Invalid file code');
-      }
-
-      // Build download URL
       let downloadUrl = `${getApiBase()}/download/${fileId}`;
-      if (token) {
-        downloadUrl += `?token=${token}`;
-      }
+      if (token) downloadUrl += `?token=${token}`;
 
-      // Download with progress
       const xhr = new XMLHttpRequest();
       xhr.open('GET', downloadUrl, true);
       xhr.responseType = 'blob';
 
       xhr.onprogress = (e) => {
-        if (e.lengthComputable) {
-          const pct = Math.round((e.loaded / e.total) * 100);
-          setDownloadProgress(pct);
-        }
+        if (e.lengthComputable) setDownloadProgress(Math.round((e.loaded / e.total) * 100));
       };
 
       xhr.onload = () => {
         if (xhr.status >= 200 && xhr.status < 300) {
+          // Extract real filename from Content-Disposition if the server sent one
+          const cd = xhr.getResponseHeader('Content-Disposition');
+          let filename = fileId;
+          if (cd) {
+            const match = cd.match(/filename[^;=\n]*=(['"]?)([^'"\n]*)\1/);
+            if (match && match[2]) filename = decodeURIComponent(match[2].trim());
+          }
+
           const blob = xhr.response;
-          const filename = fileId; // Default filename
           const url = window.URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
@@ -221,8 +191,6 @@ function App() {
           document.body.removeChild(a);
 
           setDownloadSuccess(true);
-
-          // Add to transfers list
           const newTransfer = {
             id: fileId,
             name: filename,
@@ -231,8 +199,6 @@ function App() {
             time: new Date().toISOString(),
           };
           saveTransfers([newTransfer, ...transfers].slice(0, 20));
-
-          // Clear after success
           setTimeout(() => {
             setDownloadCode('');
             setDownloadProgress(0);
@@ -245,12 +211,11 @@ function App() {
       };
 
       xhr.onerror = () => {
-        setDownloadError('Download failed: Network error');
+        setDownloadError('Download failed: network error');
         setDownloading(false);
       };
 
       xhr.send();
-
     } catch (e) {
       setDownloadError(e.message);
       setDownloading(false);
@@ -261,9 +226,7 @@ function App() {
     setSelectedFile(null);
     setUploadResult(null);
     setUploadError('');
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   return (
@@ -277,227 +240,181 @@ function App() {
         </div>
         <div className="top-bar-spacer" />
         <div className="top-bar-status">
-          <span className="status-dot online"></span>
-          <span>Ready</span>
+          <span className={`status-dot ${serverOnline ? 'online' : 'error'}`} />
+          <span>{serverOnline ? 'Ready' : 'Offline'}</span>
         </div>
       </div>
 
       {/* Main Content */}
       <div className="main-content">
+
         {/* Send Panel */}
-        <div className="panel send-panel">
-          <div className="panel-header">
-            <span className="panel-title">Send File</span>
+        <Panel title="Send File" className="send-panel">
+          {/* Interface Selector */}
+          <div className="section">
+            <label className="section-label">Network Interface</label>
+            <select
+              className="input"
+              value={interfaceUrl}
+              onChange={(e) => setInterfaceUrl(e.target.value)}
+            >
+              <option value="">Auto-detect</option>
+              {interfaces.map(iface => (
+                <option key={iface} value={iface}>{iface}</option>
+              ))}
+            </select>
           </div>
-          <div className="panel-body">
-            {/* Interface Selector */}
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ display: 'block', fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
-                Network Interface
-              </label>
-              <select
-                className="input"
-                value={interfaceUrl}
-                onChange={(e) => setInterfaceUrl(e.target.value)}
-                style={{ appearance: 'none', cursor: 'pointer' }}
-              >
-                <option value="">Auto-detect</option>
-                {interfaces.map(iface => (
-                  <option key={iface} value={iface}>{iface}</option>
-                ))}
-              </select>
+
+          {/* Drop Zone */}
+          {!uploadResult && (
+            <div
+              className={`drop-zone ${dragOver ? 'drag-over' : ''}`}
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <div className="drop-zone-icon">+</div>
+              <div className="drop-zone-text">Drop file here</div>
+              <div className="drop-zone-hint">or click to browse</div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                style={{ display: 'none' }}
+                onChange={handleFileSelect}
+              />
             </div>
+          )}
 
-            {/* Drop Zone */}
-            {!uploadResult ? (
-              <div
-                className={`drop-zone ${dragOver ? 'drag-over' : ''}`}
-                onDrop={handleDrop}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <div className="drop-zone-icon">+</div>
-                <div className="drop-zone-text">Drop file here</div>
-                <div className="drop-zone-hint">or click to browse</div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  style={{ display: 'none' }}
-                  onChange={handleFileSelect}
-                />
+          {/* Selected File (pre-upload) */}
+          {selectedFile && !uploadResult && (
+            <div className="file-info">
+              <div className="file-info-header">
+                <span className="file-icon">[*]</span>
+                <div>
+                  <div className="file-name">{selectedFile.name}</div>
+                  <div className="file-size">{formatFileSize(selectedFile.size)}</div>
+                </div>
               </div>
-            ) : null}
+              <div className="btn-row">
+                <button className="btn btn-primary" onClick={handleUpload} disabled={uploading}>
+                  {uploading ? 'Uploading...' : 'Generate QR Code'}
+                </button>
+                <button className="btn" onClick={handleClearUpload}>Clear</button>
+              </div>
+            </div>
+          )}
 
-            {/* Selected File */}
-            {selectedFile && !uploadResult && (
+          {uploadError && <div className="message error">{uploadError}</div>}
+
+          {/* Upload Result — QR + share link */}
+          {uploadResult && (
+            <div>
               <div className="file-info">
                 <div className="file-info-header">
-                  <span className="file-icon">[*]</span>
+                  <span className="file-icon">[OK]</span>
                   <div>
-                    <div className="file-name">{selectedFile.name}</div>
-                    <div className="file-size">{formatFileSize(selectedFile.size)}</div>
+                    <div className="file-name">{uploadResult.filename}</div>
+                    <div className="file-size">Ready to share</div>
                   </div>
-                </div>
-                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                  <button className="btn btn-primary" onClick={handleUpload} disabled={uploading}>
-                    {uploading ? 'Uploading...' : 'Generate QR Code'}
-                  </button>
-                  <button className="btn" onClick={handleClearUpload}>Clear</button>
                 </div>
               </div>
-            )}
 
-            {/* Upload Error */}
-            {uploadError && (
-              <div className="message error">{uploadError}</div>
-            )}
+              <div className="qr-display">
+                <div dangerouslySetInnerHTML={{ __html: uploadResult.qr_svg }} />
+              </div>
 
-            {/* Upload Result */}
-            {uploadResult && (
-              <div>
-                <div className="file-info">
-                  <div className="file-info-header">
-                    <span className="file-icon">[OK]</span>
-                    <div>
-                      <div className="file-name">{uploadResult.filename}</div>
-                      <div className="file-size">Ready to share</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* QR Code */}
-                <div className="qr-display">
-                  <div
-                    dangerouslySetInnerHTML={{ __html: uploadResult.qr_svg }}
+              <div className="download-link">
+                <span className="section-label">Share Link</span>
+                <div className="download-link-row">
+                  <input
+                    className="download-link-input"
+                    type="text"
+                    value={uploadResult.download_url}
+                    readOnly
                   />
+                  <button className="copy-btn" onClick={handleCopyLink}>Copy</button>
                 </div>
-
-                {/* Download Link */}
-                <div className="download-link">
-                  <div className="download-link-label">Share Link</div>
-                  <div className="download-link-row">
-                    <input
-                      className="download-link-input"
-                      type="text"
-                      value={uploadResult.download_url}
-                      readOnly
-                    />
-                    <button className="copy-btn" onClick={handleCopyLink}>Copy</button>
-                  </div>
-                </div>
-
-                {/* Reset */}
-                <button
-                  className="btn"
-                  style={{ marginTop: 16, width: '100%' }}
-                  onClick={handleClearUpload}
-                >
-                  Send Another File
-                </button>
               </div>
-            )}
-          </div>
-        </div>
+
+              <button className="btn btn-full" onClick={handleClearUpload}>
+                Send Another File
+              </button>
+            </div>
+          )}
+        </Panel>
 
         {/* Receive Panel */}
-        <div className="panel receive-panel">
-          <div className="panel-header">
-            <span className="panel-title">Receive File</span>
-          </div>
-          <div className="panel-body">
-            {/* Manual Code Entry */}
-            <div className="code-entry">
-              <div className="code-entry-label">Enter File Code or URL</div>
-              <div className="code-entry-row">
-                <input
-                  ref={downloadInputRef}
-                  className="code-entry-input"
-                  type="text"
-                  placeholder="Paste URL or file code..."
-                  value={downloadCode}
-                  onChange={(e) => setDownloadCode(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleDownload()}
-                />
-                <button
-                  className="btn btn-primary"
-                  onClick={handleDownload}
-                  disabled={downloading || !downloadCode.trim()}
-                >
-                  {downloading ? '...' : 'Get'}
-                </button>
-              </div>
+        <Panel title="Receive File" className="receive-panel">
+          <div className="code-entry">
+            <label className="section-label">Enter File Code or URL</label>
+            <div className="code-entry-row">
+              <input
+                className="code-entry-input"
+                type="text"
+                placeholder="Paste URL or file code..."
+                value={downloadCode}
+                onChange={(e) => setDownloadCode(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleDownload()}
+              />
+              <button
+                className="btn btn-primary"
+                onClick={handleDownload}
+                disabled={downloading || !downloadCode.trim()}
+              >
+                {downloading ? '...' : 'Get'}
+              </button>
             </div>
-
-            {/* Download Progress */}
-            {downloading && (
-              <div className="download-progress">
-                <div className="progress-bar-track">
-                  <div className="progress-bar" style={{ width: `${downloadProgress}%` }} />
-                </div>
-                <div className="progress-label">{downloadProgress}% complete</div>
-              </div>
-            )}
-
-            {/* Download Error */}
-            {downloadError && (
-              <div className="message error">{downloadError}</div>
-            )}
-
-            {/* Download Success */}
-            {downloadSuccess && (
-              <div className="message success">File downloaded successfully!</div>
-            )}
           </div>
-        </div>
+
+          {downloading && (
+            <div className="download-progress">
+              <div className="progress-bar-track">
+                <div className="progress-bar" style={{ width: `${downloadProgress}%` }} />
+              </div>
+              <div className="progress-label">{downloadProgress}% complete</div>
+            </div>
+          )}
+
+          {downloadError   && <div className="message error">{downloadError}</div>}
+          {downloadSuccess && <div className="message success">File downloaded successfully!</div>}
+        </Panel>
 
         {/* Recent Transfers Panel */}
-        <div className="panel recent-panel">
-          <div className="panel-header">
-            <span className="panel-title">Recent</span>
-          </div>
-          <div className="panel-body">
-            {transfers.length === 0 ? (
-              <div className="empty-state">
-                <div className="empty-icon">[-]</div>
-                <div className="empty-text">No transfers yet</div>
-              </div>
-            ) : (
-              <div className="transfers-list">
-                {transfers.map(transfer => (
-                  <div
-                    key={transfer.id}
-                    className="transfer-item"
-                    onClick={() => {
-                      if (transfer.type === 'received') {
-                        setDownloadCode(transfer.url || transfer.id);
-                      } else {
-                        setDownloadCode(transfer.url || transfer.id);
-                      }
-                    }}
-                  >
-                    <span className="transfer-icon">
-                      {transfer.type === 'sent' ? '[->]' : '[<-]'}
-                    </span>
-                    <div className="transfer-info">
-                      <div className="transfer-name">{transfer.name}</div>
-                      <div className="transfer-meta">
-                        <span>{formatFileSize(transfer.size)}</span>
-                        <span>{new Date(transfer.time).toLocaleTimeString()}</span>
-                      </div>
+        <Panel title="Recent" className="recent-panel">
+          {transfers.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-icon">[-]</div>
+              <div className="empty-text">No transfers yet</div>
+            </div>
+          ) : (
+            <div className="transfers-list">
+              {transfers.map(transfer => (
+                <div
+                  key={transfer.id}
+                  className="transfer-item"
+                  onClick={() => setDownloadCode(transfer.url || transfer.id)}
+                >
+                  <span className="transfer-icon">
+                    {transfer.type === 'sent' ? '[->]' : '[<-]'}
+                  </span>
+                  <div className="transfer-info">
+                    <div className="transfer-name">{transfer.name}</div>
+                    <div className="transfer-meta">
+                      <span>{formatFileSize(transfer.size)}</span>
+                      <span>{new Date(transfer.time).toLocaleTimeString()}</span>
                     </div>
-                    <span className={`transfer-status ${transfer.type}`}>
-                      {transfer.type}
-                    </span>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+                  <span className={`transfer-status ${transfer.type}`}>
+                    {transfer.type}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+
       </div>
     </div>
   );
 }
-
-export default App;

@@ -86,13 +86,14 @@ async fn get_interfaces(req: HttpRequest) -> Result<impl Responder> {
     let host = info.host();
     candidates.push(format!("{}://{}", scheme, host));
 
-    // 3) local non-loopback IPv4 addresses
+    // 3) local non-loopback IPv4 addresses (include port so QR links work cross-device)
+    let port = std::env::var("PORT").unwrap_or_else(|_| "5010".into());
     if let Ok(addrs) = get_if_addrs() {
         for ifa in addrs {
             if ifa.is_loopback() { continue; }
             match ifa.ip() {
                 std::net::IpAddr::V4(ipv4) => {
-                    candidates.push(format!("http://{}", ipv4));
+                    candidates.push(format!("http://{}:{}", ipv4, port));
                 }
                 _ => {}
             }
@@ -201,7 +202,10 @@ async fn upload(req: HttpRequest, mut payload: Multipart, data: web::Data<std::s
         };
 
         let download_url = format!("{}/download/{}?token={}", base.trim_end_matches('/'), file_id, token);
-        let qr_svg = QrCode::new(&format!("{}", download_url)).unwrap().render::<svg::Color>().build();
+        let qr_svg = match QrCode::new(download_url.as_bytes()) {
+            Ok(code) => code.render::<svg::Color>().build(),
+            Err(e) => return Ok(HttpResponse::InternalServerError().body(format!("QR generation failed: {}", e))),
+        };
 
         let resp = serde_json::json!({
             "file_id": file_id,
@@ -353,14 +357,15 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(data.clone())
-            // serve the frontend static files at / (root) - Vite builds to dist/
-            .service(actix_files::Files::new("/", "./frontend-dist").index_file("index.html"))
+            // API routes registered first so they are not shadowed by the file server
             .service(upload)
             .service(download)
             .service(post_signal)
             .service(get_signal)
-        .service(health)
-        .service(register_with_core)
+            .service(health)
+            .service(register_with_core)
+            // Static file server last — serves the Vite-built frontend for all other paths
+            .service(actix_files::Files::new("/", "./frontend-dist").index_file("index.html"))
     })
     .bind(bind)?
     .run()
