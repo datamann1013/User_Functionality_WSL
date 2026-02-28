@@ -29,8 +29,10 @@ impl Config {
 
         let service_name = env::var("SENTINEL_SERVICE_NAME").unwrap_or_else(|_| "RuneCore_Sentinel".to_string());
 
+        // Port 5010 = CoreMemory FastAPI (host-mapped).
+        // Port 11441 = Core internal proxy (container-to-container only, NOT host-mapped).
         let core_memory_url = env::var("SENTINEL_CORE_MEMORY_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:11441/api/proxy/CoreMemoryAPI".to_string());
+            .unwrap_or_else(|_| "http://127.0.0.1:5010".to_string());
 
         Config {
             sampling_interval,

@@ -1,63 +1,93 @@
 /// tray.rs — Windows system tray icon for RuneSentry.
 ///
 /// Creates a notification-area icon so the daemon shows up alongside Windows
-/// Defender, Docker Desktop, etc. The icon persists until the user chooses
+/// Defender, Docker Desktop, etc.  The icon persists until the user chooses
 /// "Exit" from the right-click context menu or the process is killed.
+///
+/// **Why a dedicated thread?**
+/// `TrayIconBuilder::build()` creates a hidden HWND on the *calling* thread.
+/// Windows only dispatches messages (WM_APP, mouse clicks, etc.) to that HWND
+/// when the owning thread pumps its message queue via PeekMessage/DispatchMessage.
+/// The main thread spends most of its time in `thread::sleep`, so we run the
+/// tray entirely on a separate "tray-pump" thread that loops at 50 ms.
 ///
 /// This module is compiled only on Windows.
 
 use log::warn;
-use tray_icon::{TrayIcon, TrayIconBuilder};
+use tray_icon::TrayIconBuilder;
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 
-/// Initialise the tray icon and return the handle.
-/// Drop the handle to remove the icon from the tray.
-///
-/// Spawns a background thread that listens for the "Exit" menu event;
-/// when triggered it calls `std::process::exit(0)`.
-pub fn setup() -> TrayIcon {
-    let icon = make_icon();
-
-    // Build the right-click context menu
-    let exit_item = MenuItem::new("Exit RuneSentry", true, None);
-    let header   = MenuItem::new("RuneSentry — host monitoring", false, None);
-
-    let menu = Menu::new();
-    let _ = menu.append(&header);
-    let _ = menu.append(&PredefinedMenuItem::separator());
-    let _ = menu.append(&exit_item);
-
-    // Clone the exit-item id so the event thread can compare without holding
-    // a reference into the menu that's about to be boxed
-    let exit_id = exit_item.id().clone();
-
-    // Background thread: polls the global MenuEvent channel
+/// Spawn the tray-pump thread. Returns immediately; the icon lives for the
+/// duration of the process (the spawned thread loops forever).
+pub fn setup() {
     std::thread::Builder::new()
-        .name("tray-events".into())
-        .spawn(move || loop {
-            while let Ok(evt) = MenuEvent::receiver().try_recv() {
-                if evt.id == exit_id {
-                    std::process::exit(0);
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        })
-        .expect("failed to spawn tray event thread");
+        .name("tray-pump".into())
+        .spawn(|| {
+            // Build everything on this thread — TrayIcon owns a thread-local HWND.
+            let header    = MenuItem::new("RuneSentry — host monitoring", false, None);
+            let exit_item = MenuItem::new("Exit RuneSentry", true, None);
 
-    TrayIconBuilder::new()
-        .with_menu(Box::new(menu))
-        .with_tooltip("RuneSentry — host monitoring")
-        .with_icon(icon)
-        .build()
-        .unwrap_or_else(|e| {
-            warn!("tray icon creation failed (running headless?): {}", e);
-            // Build without menu as a fallback
-            TrayIconBuilder::new()
-                .with_tooltip("RuneSentry")
+            let menu = Menu::new();
+            let _ = menu.append(&header);
+            let _ = menu.append(&PredefinedMenuItem::separator());
+            let _ = menu.append(&exit_item);
+
+            let exit_id = exit_item.id().clone();
+
+            let _tray = TrayIconBuilder::new()
+                .with_menu(Box::new(menu))
+                .with_tooltip("RuneSentry — host monitoring")
                 .with_icon(make_icon())
                 .build()
-                .expect("tray icon fallback also failed")
+                .unwrap_or_else(|e| {
+                    warn!("tray icon creation failed (running headless?): {}", e);
+                    TrayIconBuilder::new()
+                        .with_tooltip("RuneSentry")
+                        .with_icon(make_icon())
+                        .build()
+                        .expect("tray icon fallback also failed")
+                });
+
+            // Keep MenuItem handles alive for the lifetime of the thread so the
+            // menu entries remain valid (muda holds them by Arc, but be explicit).
+            let _keep = (header, exit_item, _tray);
+
+            // Pump Windows messages so the hidden HWND receives click events.
+            pump_messages(exit_id);
         })
+        .expect("failed to spawn tray-pump thread");
+}
+
+/// Loop forever: drain the Windows message queue + check for menu events.
+///
+/// Uses PeekMessageW (non-blocking) so we can also poll the MenuEvent channel
+/// at the same cadence without blocking either path.
+fn pump_messages(exit_id: tray_icon::menu::MenuId) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE,
+    };
+
+    let mut msg: MSG = unsafe { std::mem::zeroed() };
+
+    loop {
+        // Check the muda MenuEvent channel first.
+        while let Ok(evt) = MenuEvent::receiver().try_recv() {
+            if evt.id == exit_id {
+                std::process::exit(0);
+            }
+        }
+
+        // Drain the Win32 message queue for this thread.
+        // hwnd=0 means all messages for all windows on this thread.
+        unsafe {
+            while PeekMessageW(&mut msg, 0, 0, 0, PM_REMOVE) != 0 {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 }
 
 /// Build a minimal 16×16 RGBA icon (solid steel-blue square).

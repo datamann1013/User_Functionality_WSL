@@ -72,9 +72,10 @@ fn main() {
         profile::publish_machine_profile(&cfg, &first);
     }
 
-    // Windows system tray — only in persistent daemon mode
+    // Windows system tray — only in persistent daemon mode.
+    // setup() spawns its own thread with a message pump; returns immediately.
     #[cfg(target_os = "windows")]
-    let _tray = if !once { Some(tray::setup()) } else { None };
+    if !once { tray::setup(); }
 
     // ── Hot loop ─────────────────────────────────────────────────────────────
     // Only fast ops here: sysinfo (no subprocess) + nvidia-smi (hidden window).
