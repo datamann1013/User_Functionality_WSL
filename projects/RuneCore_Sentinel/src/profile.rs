@@ -56,6 +56,7 @@ fn build_profile_body(metrics: &SystemMetrics) -> serde_json::Value {
             gpus.iter().map(|g| serde_json::json!({
                 "name": g.name,
                 "vendor": g.vendor,
+                "gpu_type": g.gpu_type,
                 "total_memory_gb": g.total_memory_kb.map(|kb| kb as f64 / (1024.0 * 1024.0)),
                 "driver_version": g.driver_version,
             })).collect::<serde_json::Value>()

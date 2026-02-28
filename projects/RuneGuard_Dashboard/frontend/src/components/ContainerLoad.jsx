@@ -7,7 +7,7 @@ function Bar({ pct, color }) {
   const c = color ?? (clamped > 80 ? 'var(--offline)' : clamped > 50 ? 'var(--warning)' : 'var(--accent)')
   return (
     <span className="cpu-bar-bg">
-      <span className="cpu-bar-fill" style={{ width: `${clamped}%`, background: c }} />
+      <div className="cpu-bar-fill" style={{ width: `${clamped}%`, background: c }} />
     </span>
   )
 }
