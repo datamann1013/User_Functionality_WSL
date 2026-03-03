@@ -1,0 +1,640 @@
+/* ============================================================
+   RUNEMESH DROP — Steel Blue Theme
+   Matches RuneCore ecosystem design language (RuneGuard_Dashboard)
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+:root {
+  /* Core palette — aligned with RuneGuard_Dashboard */
+  --bg:           #111827;   /* body background                   */
+  --bg-deep:      #0f172a;   /* top-bar, deepest surfaces         */
+  --bg-raised:    #1a2332;   /* panel / card background           */
+  --bg-header:    #1f2937;   /* panel header — slightly lighter   */
+  --bg-input:     #1e293b;   /* input fields, drop zone           */
+  --bg-hover:     #263347;   /* hover surface                     */
+  --border:       #2d3748;
+  --border-hi:    #334155;   /* highlighted border                */
+
+  /* Accent */
+  --accent:       #3b82f6;
+  --accent-dim:   #1d4ed8;
+  --accent-glow:  rgba(59, 130, 246, 0.15);
+
+  /* Text */
+  --text:         #e5e7eb;   /* primary text                      */
+  --text-mid:     #9ca3af;   /* secondary text                    */
+  --text-muted:   #6b7280;   /* dimmed / labels                   */
+
+  /* Status */
+  --online:       #10b981;
+  --warn:         #f59e0b;
+  --error:        #ef4444;
+  --offline:      #4b5563;
+
+  /* Font */
+  --font: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ============================================================
+   APP SHELL
+   ============================================================ */
+.app {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+/* ============================================================
+   TOP BAR
+   ============================================================ */
+.top-bar {
+  height: 48px;
+  background: var(--bg-deep);
+  border-bottom: 2px solid var(--accent);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand-mark {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+}
+
+.brand-name {
+  color: var(--text);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.top-bar-spacer { flex: 1; }
+
+.top-bar-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.status-dot {
+  display: inline-flex;
+  align-items: center;
+}
+
+.status-dot::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--offline);
+}
+
+.status-dot.online::before { background: var(--online); }
+.status-dot.warn::before   { background: var(--warn); }
+.status-dot.error::before  { background: var(--error); }
+
+/* ============================================================
+   MAIN CONTENT
+   ============================================================ */
+.main-content {
+  flex: 1;
+  display: flex;
+  padding: 16px;
+  gap: 16px;
+  overflow: hidden;
+}
+
+/* ============================================================
+   PANELS — matches RuneGuard_Dashboard panel pattern
+   ============================================================ */
+.panel {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.panel-header {
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+/* timestamp shown in panel header — same as Dashboard's .panel-updated */
+.panel-updated {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.panel-body {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+/* Panel size variants */
+.send-panel    { flex: 1; min-width: 0; }
+.receive-panel { flex: 1; min-width: 0; }
+.recent-panel  { width: 300px; flex-shrink: 0; }
+
+/* ============================================================
+   UTILITY — SECTION + LABELS
+   Replaces inline style={{}} for form group headers
+   ============================================================ */
+.section {
+  margin-bottom: 16px;
+}
+
+.section-label {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+
+/* ============================================================
+   STATUS BADGES — matches RuneGuard_Dashboard badge pattern
+   ============================================================ */
+.badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.badge-online  { background: rgba(16, 185, 129, 0.1); color: var(--online); }
+.badge-offline { background: rgba(239, 68, 68, 0.1);  color: var(--error);  }
+.badge-unknown { background: rgba(107, 114, 128, 0.1); color: var(--text-muted); }
+
+/* ============================================================
+   LOADING / ERROR STATE MESSAGES
+   Matches RuneGuard_Dashboard .state-msg pattern
+   ============================================================ */
+.state-msg {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+  padding: 24px 0;
+}
+
+.state-msg.error {
+  color: var(--error);
+}
+
+/* ============================================================
+   DROP ZONE
+   ============================================================ */
+.drop-zone {
+  border: 2px dashed var(--border-hi);
+  background: var(--bg-input);
+  padding: 32px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-bottom: 0;
+}
+
+.drop-zone:hover, .drop-zone.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+}
+
+.drop-zone-icon {
+  font-size: 32px;
+  margin-bottom: 12px;
+  color: var(--text-muted);
+}
+
+.drop-zone-text {
+  font-size: 12px;
+  color: var(--text-mid);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+}
+
+.drop-zone-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ============================================================
+   BUTTONS
+   ============================================================ */
+.btn {
+  background: none;
+  border: 1px solid var(--border-hi);
+  color: var(--text-muted);
+  padding: 8px 16px;
+  font-family: var(--font);
+  font-size: 11px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+  font-weight: 700;
+}
+
+.btn-primary:hover {
+  background: var(--accent-dim);
+  border-color: var(--accent-dim);
+  color: white;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Row of buttons (replaces inline display:flex + gap) */
+.btn-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Full-width button (replaces inline width:100% + marginTop) */
+.btn-full {
+  width: 100%;
+  margin-top: 16px;
+}
+
+/* ============================================================
+   FORM INPUTS
+   ============================================================ */
+.input {
+  width: 100%;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-hi);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 12px;
+  transition: border-color 0.15s;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.input::placeholder {
+  color: var(--text-muted);
+}
+
+select.input {
+  appearance: none;
+  cursor: pointer;
+}
+
+/* ============================================================
+   FILE INFO
+   ============================================================ */
+.file-info {
+  background: var(--bg-input);
+  border: 1px solid var(--border-hi);
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.file-info-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.file-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.file-size {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+}
+
+/* ============================================================
+   QR CODE DISPLAY
+   ============================================================ */
+.qr-display {
+  text-align: center;
+  padding: 20px;
+  background: white;
+  margin-top: 16px;
+}
+
+.qr-display svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ============================================================
+   DOWNLOAD LINK (share row after upload)
+   ============================================================ */
+.download-link {
+  margin-top: 16px;
+  padding: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-hi);
+}
+
+.download-link-row {
+  display: flex;
+  gap: 8px;
+}
+
+.download-link-input {
+  flex: 1;
+  padding: 6px 10px;
+  background: var(--bg-deep);
+  border: 1px solid var(--border-hi);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 11px;
+}
+
+.copy-btn {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: white;
+  padding: 6px 12px;
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.copy-btn:hover {
+  background: var(--accent-dim);
+  border-color: var(--accent-dim);
+}
+
+/* ============================================================
+   RECEIVE — CODE ENTRY
+   ============================================================ */
+.code-entry {
+  /* no margin-top — panel-body padding is sufficient */
+}
+
+.code-entry-row {
+  display: flex;
+  gap: 8px;
+}
+
+.code-entry-input {
+  flex: 1;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-hi);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 12px;
+  transition: border-color 0.15s;
+}
+
+.code-entry-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.code-entry-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* ============================================================
+   DOWNLOAD PROGRESS
+   ============================================================ */
+.download-progress {
+  margin-top: 16px;
+}
+
+.progress-bar-track {
+  height: 4px;
+  background: var(--bg-deep);
+  overflow: hidden;
+}
+
+.progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.progress-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 6px;
+  text-align: center;
+}
+
+/* ============================================================
+   ERROR / SUCCESS MESSAGES
+   ============================================================ */
+.message {
+  padding: 12px;
+  margin-top: 12px;
+  font-size: 11px;
+}
+
+.message.error {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: var(--error);
+}
+
+.message.success {
+  background: rgba(16, 185, 129, 0.08);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: var(--online);
+}
+
+/* ============================================================
+   RECENT TRANSFERS LIST
+   ============================================================ */
+.transfers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.transfer-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.transfer-item:hover {
+  border-color: var(--accent);
+}
+
+.transfer-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.transfer-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.transfer-name {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transfer-meta {
+  font-size: 10px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.transfer-status {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.transfer-status.sent     { color: var(--accent); }
+.transfer-status.received { color: var(--online); }
+.transfer-status.pending  { color: var(--warn); }
+
+/* ============================================================
+   EMPTY STATE
+   ============================================================ */
+.empty-state {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--text-muted);
+}
+
+.empty-icon {
+  font-size: 28px;
+  margin-bottom: 12px;
+  opacity: 0.4;
+}
+
+.empty-text {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ============================================================
+   SCROLLBARS
+   ============================================================ */
+.panel-body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.panel-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.panel-body::-webkit-scrollbar-thumb {
+  background: var(--border-hi);
+}
+
+.panel-body::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width: 900px) {
+  body { overflow: auto; }
+  .app { height: auto; min-height: 100vh; }
+  .main-content { flex-direction: column; overflow: visible; }
+  .recent-panel { width: 100%; }
+}

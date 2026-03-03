@@ -1,3 +1,8 @@
+// On Windows: run as a GUI-subsystem binary so no console window appears
+// when launched detached (startup / tray). Launching from a terminal still
+// inherits stdout, so --debug output is still visible.
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 use std::time::Duration;
 use std::env;
 use serde_json;
