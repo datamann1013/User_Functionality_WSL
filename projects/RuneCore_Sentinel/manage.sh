@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# manage.sh — RuneSentry build / install / uninstall
+# manage.sh — RuneSentry build / install / run / uninstall
 #
 # Usage:
 #   ./manage.sh -c       Compile (cargo build --release)
 #   ./manage.sh -i       Install compiled binary → PATH + Windows startup
+#   ./manage.sh -r       Restart (kill running instance, start new one)
 #   ./manage.sh -d       Delete / uninstall (remove binary from PATH + startup entry)
-#   ./manage.sh -ic      Compile then install (most common workflow)
+#   ./manage.sh -ic      Compile, install, restart  [most common workflow]
 #
 # The installed binary is named RuneSentry and placed in ~/.cargo/bin so it is
 # already on PATH for users who have Rust installed.
@@ -84,9 +85,33 @@ do_install() {
     log "Done. RuneSentry is now:"
     log "  • Installed in PATH as '${BINARY_NAME}'"
     log "  • Registered to start on Windows login"
-    log ""
-    log "To start now:   RuneSentry"
-    log "To uninstall:   RuneSentry --delete   OR   ./manage.sh -d"
+    echo ""
+    do_restart
+}
+
+do_restart() {
+    # Kill any currently running instance (not an error if it isn't running)
+    if taskkill /F /IM "${BINARY_NAME}.exe" > /dev/null 2>&1; then
+        ok "Stopped existing ${BINARY_NAME} process"
+    else
+        log "No existing ${BINARY_NAME} process running"
+    fi
+
+    if [[ ! -f "$BINARY_DST" ]]; then
+        err "Binary not found at $BINARY_DST — run ./manage.sh -ic first"
+        exit 1
+    fi
+
+    local win_path
+    win_path="$(to_win_path "$BINARY_DST")"
+
+    # Start-Process is non-blocking by default (no -Wait) — returns immediately
+    # and leaves RuneSentry running detached with its tray icon.
+    if powershell.exe -NoProfile -Command "Start-Process -FilePath '${win_path}' -WindowStyle Hidden" > /dev/null 2>&1; then
+        ok "${BINARY_NAME} started (check system tray)"
+    else
+        warn "Could not auto-start ${BINARY_NAME} — run it manually: ${BINARY_NAME}"
+    fi
 }
 
 do_delete() {
@@ -121,14 +146,16 @@ usage() {
 
   Options:
     -c        Compile (cargo build --release)
-    -i        Install compiled binary to PATH + register Windows startup
+    -i        Install compiled binary to PATH + register Windows startup + restart
+    -r        Restart (kill running instance, start new one from install dir)
     -d        Delete / uninstall (remove binary and startup entry)
-    -ic       Compile then install  [most common]
+    -ic       Compile, install, restart  [most common]
 
   Examples:
-    ./manage.sh -ic          # build and install
+    ./manage.sh -ic          # build, install and restart
+    ./manage.sh -r           # restart without recompiling
     ./manage.sh -c           # just compile
-    ./manage.sh -i           # install an already-compiled binary
+    ./manage.sh -i           # install an already-compiled binary and restart
     ./manage.sh -d           # uninstall
     RuneSentry --delete      # self-uninstall (same as -d, with y/n prompt)
 
@@ -145,8 +172,9 @@ fi
 case "$1" in
     -c)   do_compile ;;
     -i)   do_install ;;
+    -r)   do_restart ;;
     -d)   do_delete  ;;
-    -ic)  do_compile; echo ""; do_install ;;
+    -ic|-icr) do_compile; echo ""; do_install ;;
     *)
         err "Unknown option: $1"
         usage

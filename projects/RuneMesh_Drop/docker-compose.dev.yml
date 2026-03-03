@@ -6,8 +6,16 @@ services:
       - "5100:5010"
     environment:
       - PORT=5010
+      # Port that external clients (phones, other devices) use to reach this service.
+      # Must match the host side of the ports mapping above (5100:5010 → EXTERNAL_PORT=5100).
+      - EXTERNAL_PORT=5100
       - RUNECORE_CORE_URL=http://runecore_core:11441
       - RUNECORE_ALLOW_INSECURE_REGISTRATION=true
+      # Comma-separated real host IPs for QR-code link generation (LAN, VPN, etc.)
+      # Set HOST_EXTERNAL_IPS in your shell or a .env file next to this compose file.
+      # Example: HOST_EXTERNAL_IPS=192.168.2.140,10.0.1.9
+      # When Sentinel is running these are discovered automatically via CoreMemory.
+      - HOST_EXTERNAL_IPS=${HOST_EXTERNAL_IPS:-}
     networks:
       runecore_dev:
         aliases:

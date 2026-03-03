@@ -71,6 +71,9 @@ async fn get_interfaces(req: HttpRequest) -> Result<impl Responder> {
     let mut candidates: Vec<String> = Vec::new();
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "5010".into());
+    // EXTERNAL_PORT is the host-mapped port that external devices use to reach this service.
+    // e.g. docker-compose maps 5100:5010 → external clients must connect on 5100, not 5010.
+    let ext_port = std::env::var("EXTERNAL_PORT").unwrap_or_else(|_| port.clone());
 
     // 1) environment override — highest priority, explicit admin setting
     if let Ok(ext) = std::env::var("RUNECORE_EXTERNAL_URL") {
@@ -82,18 +85,30 @@ async fn get_interfaces(req: HttpRequest) -> Result<impl Responder> {
         }
     }
 
-    // 2) Extract request base early (connection_info borrow must not outlive the async section)
+    // 2) Explicit host IPs injected via environment (comma-separated).
+    //    Set HOST_EXTERNAL_IPS=192.168.2.140,10.0.1.9 in your shell or .env file.
+    //    Takes effect immediately without needing Sentinel or CoreMemory running.
+    if let Ok(host_ips) = std::env::var("HOST_EXTERNAL_IPS") {
+        for ip in host_ips.split(',') {
+            let ip = ip.trim();
+            if !ip.is_empty() {
+                candidates.push(format!("http://{}:{}", ip, ext_port));
+            }
+        }
+    }
+
+    // 3) Extract request base early (connection_info borrow must not outlive the async section)
     let req_base = {
         let info = req.connection_info();
         format!("{}://{}", info.scheme(), info.host())
     };
 
-    // 3) Query CoreMemory (via Core proxy) for the real host LAN IPs published by Sentinel.
+    // 4) Query CoreMemory (via Core proxy) for the real host LAN IPs published by Sentinel.
     //    Sentinel runs on the host, so it records real IPv4 addresses (192.168.x.x, 10.x.x.x)
     //    — not the Docker bridge IPs this container would see via if_addrs.
     if let Ok(core_url) = std::env::var("RUNECORE_CORE_URL") {
         let query_url = format!(
-            "{}/api/proxy/CoreMemoryAPI/v1/memories/query",
+            "{}/api/proxy/CoreMemoryAPI/memories/query",
             core_url.trim_end_matches('/')
         );
         let body = serde_json::json!({"namespace": "machine_profile", "top_k": 1});
@@ -113,7 +128,7 @@ async fn get_interfaces(req: HttpRequest) -> Result<impl Responder> {
                     {
                         for iface in ifaces {
                             if let Some(ip) = iface.get("ip").and_then(|v| v.as_str()) {
-                                candidates.push(format!("http://{}:{}", ip, port));
+                                candidates.push(format!("http://{}:{}", ip, ext_port));
                             }
                         }
                     }
@@ -122,15 +137,15 @@ async fn get_interfaces(req: HttpRequest) -> Result<impl Responder> {
         }
     }
 
-    // 4) Host from request (typically localhost:port when accessed through docker port mapping)
+    // 5) Host from request (typically localhost:port when accessed through docker port mapping)
     candidates.push(req_base);
 
-    // 5) Container's own non-loopback IPv4 addresses — fallback when Sentinel/CoreMemory unavailable
+    // 6) Container's own non-loopback IPv4 addresses — fallback when Sentinel/CoreMemory unavailable
     if let Ok(addrs) = get_if_addrs() {
         for ifa in addrs {
             if ifa.is_loopback() { continue; }
             if let std::net::IpAddr::V4(ipv4) = ifa.ip() {
-                candidates.push(format!("http://{}:{}", ipv4, port));
+                candidates.push(format!("http://{}:{}", ipv4, ext_port));
             }
         }
     }
@@ -167,7 +182,7 @@ async fn get_signal(path: web::Path<String>, query: web::Query<HashMap<String, S
 }
 
 #[post("/upload")]
-async fn upload(req: HttpRequest, mut payload: Multipart, data: web::Data<std::sync::Mutex<AppStateData>>) -> Result<impl Responder> {
+async fn upload(req: HttpRequest, query: web::Query<HashMap<String, String>>, mut payload: Multipart, data: web::Data<std::sync::Mutex<AppStateData>>) -> Result<impl Responder> {
     ensure_dirs().map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
     // Handle only first file field for MVP
@@ -219,13 +234,8 @@ async fn upload(req: HttpRequest, mut payload: Multipart, data: web::Data<std::s
         }
 
         // allow client override via query param external_base or header X-EXTERNAL-BASE
-        let mut base = None;
-        if let Some(q) = req.query_string().split('&').find_map(|kv| {
-            let mut parts = kv.splitn(2, '=');
-            let k = parts.next()?; let v = parts.next()?; if k == "external_base" { Some(v) } else { None }
-        }) {
-            base = Some(q.to_string());
-        }
+        // web::Query decodes percent-encoding automatically (e.g. http%3A%2F%2F → http://)
+        let mut base = query.get("external_base").map(|s| s.to_string());
         if base.is_none() {
             if let Some(h) = req.headers().get("X-EXTERNAL-BASE") {
                 if let Ok(s) = h.to_str() { base = Some(s.to_string()); }
@@ -396,6 +406,7 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .app_data(data.clone())
             // API routes registered first so they are not shadowed by the file server
+            .service(get_interfaces)
             .service(upload)
             .service(download)
             .service(post_signal)
