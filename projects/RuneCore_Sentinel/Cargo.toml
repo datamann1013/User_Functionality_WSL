@@ -19,6 +19,7 @@ named_pipe = "0.4"
 serde_json = "1.0"
 base64 = "0.21"
 chrono = { version = "0.4", features = ["serde"] }
+if-addrs = "0.6"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 tray-icon = "0.19"

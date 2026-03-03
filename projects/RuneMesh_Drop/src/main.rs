@@ -70,7 +70,9 @@ fn base_url_from_req(req: &HttpRequest) -> String {
 async fn get_interfaces(req: HttpRequest) -> Result<impl Responder> {
     let mut candidates: Vec<String> = Vec::new();
 
-    // 1) environment override
+    let port = std::env::var("PORT").unwrap_or_else(|_| "5010".into());
+
+    // 1) environment override — highest priority, explicit admin setting
     if let Ok(ext) = std::env::var("RUNECORE_EXTERNAL_URL") {
         let trimmed = ext.trim_end_matches('/').to_string();
         if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
@@ -80,22 +82,55 @@ async fn get_interfaces(req: HttpRequest) -> Result<impl Responder> {
         }
     }
 
-    // 2) host from request (may be localhost:port)
-    let info = req.connection_info();
-    let scheme = info.scheme();
-    let host = info.host();
-    candidates.push(format!("{}://{}", scheme, host));
+    // 2) Extract request base early (connection_info borrow must not outlive the async section)
+    let req_base = {
+        let info = req.connection_info();
+        format!("{}://{}", info.scheme(), info.host())
+    };
 
-    // 3) local non-loopback IPv4 addresses (include port so QR links work cross-device)
-    let port = std::env::var("PORT").unwrap_or_else(|_| "5010".into());
+    // 3) Query CoreMemory (via Core proxy) for the real host LAN IPs published by Sentinel.
+    //    Sentinel runs on the host, so it records real IPv4 addresses (192.168.x.x, 10.x.x.x)
+    //    — not the Docker bridge IPs this container would see via if_addrs.
+    if let Ok(core_url) = std::env::var("RUNECORE_CORE_URL") {
+        let query_url = format!(
+            "{}/api/proxy/CoreMemoryAPI/v1/memories/query",
+            core_url.trim_end_matches('/')
+        );
+        let body = serde_json::json!({"namespace": "machine_profile", "top_k": 1});
+        if let Ok(client) = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(3))
+            .build()
+        {
+            if let Ok(resp) = client.post(&query_url).json(&body).send().await {
+                if let Ok(data) = resp.json::<serde_json::Value>().await {
+                    if let Some(ifaces) = data
+                        .get("results")
+                        .and_then(|r| r.as_array())
+                        .and_then(|r| r.first())
+                        .and_then(|first| first.get("metadata"))
+                        .and_then(|m| m.get("network_interfaces"))
+                        .and_then(|n| n.as_array())
+                    {
+                        for iface in ifaces {
+                            if let Some(ip) = iface.get("ip").and_then(|v| v.as_str()) {
+                                candidates.push(format!("http://{}:{}", ip, port));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 4) Host from request (typically localhost:port when accessed through docker port mapping)
+    candidates.push(req_base);
+
+    // 5) Container's own non-loopback IPv4 addresses — fallback when Sentinel/CoreMemory unavailable
     if let Ok(addrs) = get_if_addrs() {
         for ifa in addrs {
             if ifa.is_loopback() { continue; }
-            match ifa.ip() {
-                std::net::IpAddr::V4(ipv4) => {
-                    candidates.push(format!("http://{}:{}", ipv4, port));
-                }
-                _ => {}
+            if let std::net::IpAddr::V4(ipv4) = ifa.ip() {
+                candidates.push(format!("http://{}:{}", ipv4, port));
             }
         }
     }

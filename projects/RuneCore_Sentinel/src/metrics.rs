@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::process::Command;
 use std::str;
 use serde_json::Value as JsonValue;
+use if_addrs::get_if_addrs;
 
 // ── Subprocess helpers ────────────────────────────────────────────────────────
 //
@@ -36,6 +37,14 @@ fn run_nvidia_smi(args: &[&str]) -> std::io::Result<std::process::Output> {
 
 // ── Data types ────────────────────────────────────────────────────────────────
 
+/// A single non-loopback IPv4 network interface on the host machine.
+/// Collected once at startup; used by RuneMesh_Drop to build QR links with the real LAN IP.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NetworkInterface {
+    pub name: String,
+    pub ip: String,
+}
+
 /// Hardware facts that don't change at runtime.
 /// Collected ONCE at startup via PowerShell / system tools.
 /// Never called again in the hot loop.
@@ -46,6 +55,8 @@ pub struct StaticHardware {
     pub npu: Option<Vec<NpuInfo>>,
     pub disks: Option<Vec<DiskInfo>>,
     pub ram_slots: Option<Vec<RamSlotInfo>>,
+    /// Real host IPv4 addresses (non-loopback) — published to machine_profile
+    pub network_interfaces: Option<Vec<NetworkInterface>>,
 }
 
 /// Live telemetry sampled every loop iteration.
@@ -64,6 +75,7 @@ pub struct SystemMetrics {
     pub npu: Option<Vec<NpuInfo>>,
     pub disks: Option<Vec<DiskInfo>>,
     pub ram_slots: Option<Vec<RamSlotInfo>>,
+    pub network_interfaces: Option<Vec<NetworkInterface>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -109,10 +121,33 @@ pub struct RamSlotInfo {
 /// Called ONCE at startup.  Runs all slow PowerShell/subprocess probes.
 pub fn collect_static_hardware() -> StaticHardware {
     StaticHardware {
-        gpu_base:  detect_gpu_static(),
-        npu:       detect_npu(),
-        disks:     detect_disks(),
-        ram_slots: detect_ram_slots(),
+        gpu_base:           detect_gpu_static(),
+        npu:                detect_npu(),
+        disks:              detect_disks(),
+        ram_slots:          detect_ram_slots(),
+        network_interfaces: collect_network_interfaces(),
+    }
+}
+
+/// Enumerate non-loopback IPv4 interfaces on the host machine.
+/// These are the real LAN addresses (192.168.x.x, 10.x.x.x, etc.) that
+/// RuneMesh_Drop needs to build QR-code links scannable from other devices.
+pub fn collect_network_interfaces() -> Option<Vec<NetworkInterface>> {
+    match get_if_addrs() {
+        Ok(addrs) => {
+            let ifaces: Vec<NetworkInterface> = addrs.into_iter()
+                .filter(|ifa| !ifa.is_loopback())
+                .filter_map(|ifa| match ifa.ip() {
+                    std::net::IpAddr::V4(ipv4) => Some(NetworkInterface {
+                        name: ifa.name.clone(),
+                        ip:   ipv4.to_string(),
+                    }),
+                    _ => None,
+                })
+                .collect();
+            if ifaces.is_empty() { None } else { Some(ifaces) }
+        }
+        Err(_) => None,
     }
 }
 
@@ -148,9 +183,10 @@ pub fn sample_system_metrics(hw: &StaticHardware) -> SystemMetrics {
         cpu_frequency_mhz, per_core_frequency_mhz,
         total_memory: total_mem, used_memory: used_mem,
         gpu,
-        npu:       hw.npu.clone(),
-        disks:     hw.disks.clone(),
-        ram_slots: hw.ram_slots.clone(),
+        npu:                hw.npu.clone(),
+        disks:              hw.disks.clone(),
+        ram_slots:          hw.ram_slots.clone(),
+        network_interfaces: hw.network_interfaces.clone(),
     }
 }
 
@@ -624,6 +660,7 @@ mod tests {
             cpu_frequency_mhz: None, per_core_frequency_mhz: None,
             total_memory: 1024, used_memory: 512,
             gpu: None, npu: None, disks: None, ram_slots: None,
+            network_interfaces: None,
         };
         let bytes   = serde_cbor::to_vec(&m).expect("cbor serialize");
         let decoded: SystemMetrics = serde_cbor::from_slice(&bytes).expect("cbor deserialize");
