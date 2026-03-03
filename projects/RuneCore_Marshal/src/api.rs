@@ -17,8 +17,8 @@ use crate::registry::Registry;
 pub struct AppState {
     pub config: Arc<MarshalConfig>,
     pub registry: Registry,
-    /// Caller CN is extracted by the TLS layer and injected via extension.
-    /// In dev/test mode (no client cert), this may be None.
+    // Caller CN is extracted by the TLS layer and injected via extension.
+    // In dev/test mode (no client cert), this may be None.
 }
 
 /// Axum extension carrying the authenticated caller CN (from mTLS client cert)

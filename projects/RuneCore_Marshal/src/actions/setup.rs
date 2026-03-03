@@ -120,7 +120,6 @@ pub async fn execute(
 
 /// Start the ONNX service natively via run_native.ps1
 async fn ensure_onnx_service(cfg: &MarshalConfig, comp_cfg: &ComponentConfig) -> ActionResult {
-    use crate::actions::run_cmd;
     use std::path::Path;
 
     let onnx_dir = &cfg.paths.onnx_service_dir;
@@ -172,7 +171,7 @@ async fn ensure_onnx_service(cfg: &MarshalConfig, comp_cfg: &ComponentConfig) ->
 async fn stop_onnx_service(_cfg: &MarshalConfig) -> ActionResult {
     use crate::actions::run_cmd;
     // Find and kill the uvicorn process for onnx_app
-    let (stdout, _, _) = run_cmd(
+    let (_, _, _) = run_cmd(
         "powershell",
         &["-Command", "Get-Process uvicorn -ErrorAction SilentlyContinue | Stop-Process -Force"],
     ).await;

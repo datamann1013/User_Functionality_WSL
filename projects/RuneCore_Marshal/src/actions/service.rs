@@ -1,6 +1,6 @@
 /// Windows service management via sc.exe and NSSM.
-use crate::actions::{ActionError, ActionResult, run_cmd};
-use log::{info, warn};
+use crate::actions::run_cmd;
+use log::info;
 
 #[derive(Debug, PartialEq)]
 pub enum WinServiceState {

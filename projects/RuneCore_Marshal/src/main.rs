@@ -1,9 +1,15 @@
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::{routing::{get, post}, Router};
-use axum_server::tls_rustls::RustlsConfig;
+use axum::{middleware::AddExtension, routing::{get, post}, Router};
+use axum_server::accept::Accept;
+use axum_server::tls_rustls::{RustlsAcceptor, RustlsConfig};
+use futures_util::future::BoxFuture;
 use log::{info, warn, error};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio_rustls::server::TlsStream;
+use tower::Layer;
 use tower_http::trace::TraceLayer;
 
 mod actions;
@@ -29,18 +35,18 @@ async fn main() {
     );
 
     // Register with RuneCore_Core (best-effort)
-    match register_with_core(&cfg) {
+    match register_with_core(&cfg).await {
         Ok(_)  => info!("Registered with RuneCore_Core"),
         Err(e) => warn!("Core registration failed (non-fatal): {}", e),
     }
 
     // Build TLS config (mTLS — client cert required)
-    let rustls_cfg = match tls::load_server_tls(
+    let server_config = match tls::load_server_tls(
         &cfg.server.cert_path,
         &cfg.server.key_path,
         &cfg.server.ca_path,
     ) {
-        Ok(c) => RustlsConfig::from_config(Arc::new(c)),
+        Ok(c) => Arc::new(c),
         Err(e) => {
             error!("Failed to load TLS config: {}", e);
             error!("Place marshal.crt, marshal.key, ca.crt in the certs/ directory.");
@@ -48,13 +54,15 @@ async fn main() {
         }
     };
 
+    let rustls_cfg = RustlsConfig::from_config(server_config);
+
     let registry = Registry::new();
     let state = AppState {
         config: Arc::new(cfg.clone()),
         registry: registry.clone(),
     };
 
-    // Build Axum router
+    // Build Axum router — CallerCn injected per-connection by MtlsAcceptor
     let app = Router::new()
         .route("/health", get(api::health))
         .route("/api/setup", post(api::post_setup))
@@ -63,34 +71,58 @@ async fn main() {
         .route("/api/services/:name/ensure", post(api::ensure_service))
         .route("/api/services/:name/stop",   post(api::stop_service))
         .layer(TraceLayer::new_for_http())
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            extract_caller_cn_middleware,
-        ))
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], cfg.server.port));
     info!("Listening on https://{}", addr);
 
-    axum_server::bind_rustls(addr, rustls_cfg)
+    let acceptor = MtlsAcceptor::new(RustlsAcceptor::new(rustls_cfg));
+
+    axum_server::bind(addr)
+        .acceptor(acceptor)
         .serve(app.into_make_service())
         .await
         .expect("Server failed to start");
 }
 
-/// Axum middleware: extract client cert CN from TLS connection info
-/// and inject as a `CallerCn` extension for RBAC checks.
-async fn extract_caller_cn_middleware(
-    mut req: axum::http::Request<axum::body::Body>,
-    next: axum::middleware::Next,
-) -> axum::response::Response {
-    // axum-server injects connection info as an extension
-    let cn: Option<String> = req
-        .extensions()
-        .get::<axum_server::tls_rustls::PeerCertificates>()
-        .and_then(|certs| certs.first())
-        .and_then(|der| tls::extract_cn_from_der(der.as_ref()));
+/// Custom acceptor: performs the TLS handshake, then extracts the client cert CN
+/// and injects it as a `CallerCn` extension so RBAC handlers can read it.
+#[derive(Clone)]
+struct MtlsAcceptor {
+    inner: RustlsAcceptor,
+}
 
-    req.extensions_mut().insert(CallerCn(cn));
-    next.run(req).await
+impl MtlsAcceptor {
+    fn new(inner: RustlsAcceptor) -> Self {
+        Self { inner }
+    }
+}
+
+impl<I, S> Accept<I, S> for MtlsAcceptor
+where
+    I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    S: Send + 'static,
+{
+    type Stream = TlsStream<I>;
+    type Service = AddExtension<S, CallerCn>;
+    type Future = BoxFuture<'static, io::Result<(Self::Stream, Self::Service)>>;
+
+    fn accept(&self, stream: I, service: S) -> Self::Future {
+        let acceptor = self.inner.clone();
+
+        Box::pin(async move {
+            let (tls_stream, service) = acceptor.accept(stream, service).await?;
+
+            // After the TLS handshake, peer_certificates() gives us the client cert chain
+            let server_conn = tls_stream.get_ref().1;
+            let cn: Option<String> = server_conn
+                .peer_certificates()
+                .and_then(|certs| certs.first())
+                .and_then(|der| tls::extract_cn_from_der(der.as_ref()));
+
+            let service = axum::Extension(CallerCn(cn)).layer(service);
+
+            Ok((tls_stream, service))
+        })
+    }
 }

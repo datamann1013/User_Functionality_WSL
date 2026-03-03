@@ -76,7 +76,7 @@ pub struct ServiceRegistration {
     pub public_key_pem: Option<String>,
 }
 
-pub fn register_with_core(cfg: &MarshalConfig) -> Result<(), String> {
+pub async fn register_with_core(cfg: &MarshalConfig) -> Result<(), String> {
     let info = ServiceRegistration {
         name: cfg.core.service_name.clone(),
         version: Some(env!("CARGO_PKG_VERSION").to_string()),
@@ -89,13 +89,14 @@ pub fn register_with_core(cfg: &MarshalConfig) -> Result<(), String> {
         "{}/api/v1/services/register",
         cfg.core.url.trim_end_matches('/')
     );
-    let client = reqwest::blocking::Client::builder()
+    let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .timeout(std::time::Duration::from_secs(5))
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: reqwest::Error| e.to_string())?;
 
-    let resp = client.post(&url).json(&info).send().map_err(|e| e.to_string())?;
+    let resp = client.post(&url).json(&info).send().await
+        .map_err(|e: reqwest::Error| e.to_string())?;
     if resp.status().is_success() {
         Ok(())
     } else {

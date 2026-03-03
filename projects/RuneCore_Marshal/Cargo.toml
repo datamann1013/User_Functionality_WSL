@@ -7,6 +7,10 @@ edition = "2021"
 name = "runecore_marshal"
 path = "src/main.rs"
 
+[[bin]]
+name = "marshal_tray"
+path = "src/bin/marshal_tray.rs"
+
 [dependencies]
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -15,6 +19,7 @@ tokio = { version = "1", features = ["full"] }
 axum = { version = "0.7", features = ["json", "macros"] }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["trace", "cors"] }
+futures-util = "0.3"
 
 # TLS / mTLS
 rustls = { version = "0.23", features = ["ring"] }
@@ -40,3 +45,7 @@ which = "6"
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
+
+# Tray icon (marshal_tray binary only)
+tray-icon = "0.15"
+winit = "0.29"

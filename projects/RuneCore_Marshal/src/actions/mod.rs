@@ -3,7 +3,7 @@ pub mod sentinel;
 pub mod service;
 pub mod setup;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// Unified error type for all actions
 #[derive(Debug, Serialize)]
