@@ -1,0 +1,48 @@
+[server]
+port = 11443
+# Paths to Marshal's own TLS cert/key (signed by RuneCore CA)
+cert_path = "certs/marshal.crt"
+key_path  = "certs/marshal.key"
+# RuneCore CA cert — used to verify client certs
+ca_path   = "certs/ca.crt"
+
+[core]
+# RuneCore_Core for service registration + heartbeat
+url          = "https://127.0.0.1:11440"
+service_name = "RuneCore_Marshal"
+# CoreMemory for reading machine profiles
+core_memory_url = "http://127.0.0.1:5010"
+
+[paths]
+# Absolute path to the Sentinel binary
+sentinel_binary  = "C:/RuneCore/sentinel/runecore_sentinel.exe"
+# Sentinel Windows service name (as registered with sc.exe / NSSM)
+sentinel_service = "RuneCore-Sentinel"
+# Executable names — must be on PATH or absolute paths
+docker_exe = "docker"
+nssm_exe   = "nssm"
+# Base port for dynamically-spawned Ollama containers
+ollama_base_port = 11435
+# Directory for ONNX service (used to launch run_native.ps1)
+onnx_service_dir = "C:/RuneCore/onnx_service"
+
+# RBAC roles — each caller_cn maps to an allowed set of actions.
+# Caller CN is extracted from the mTLS client certificate.
+# Unknown CNs are denied all access (EMAS02).
+# Known CNs attempting an unlisted action receive 403 (EMAS01).
+
+[[roles]]
+caller_cn       = "ollama_wrapper"
+allowed_actions = ["setup", "service.ensure", "service.stop", "service.status"]
+
+[[roles]]
+caller_cn       = "runecore_mind_backend"
+allowed_actions = ["service.status"]
+
+[[roles]]
+caller_cn       = "runeguard_dashboard"
+allowed_actions = ["service.status"]
+
+[[roles]]
+caller_cn       = "runecore_marshal"   # allow self-health-check
+allowed_actions = ["service.status"]
