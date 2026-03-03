@@ -91,6 +91,18 @@ services:
     environment:
       - OLLAMA_HOST=http://ollama:11434
       - PORT=5002
+      # ONNX backend — set to http://onnx_service:5006 when running with --profile npu
+      # For native DirectML access: http://host.docker.internal:5006
+      - ONNX_SERVICE_URL=${ONNX_SERVICE_URL:-}
+      - ONNX_REQUEST_TIMEOUT=120
+      # Marshal — native host action daemon (runs on Windows host at port 11443)
+      # Set MARSHAL_URL=https://host.docker.internal:11443 to enable.
+      # Certs are volume-mounted from runecore_certs volume (populated by RuneCore_Core CA).
+      - MARSHAL_URL=${MARSHAL_URL:-}
+      - MARSHAL_CERT_PATH=/certs/ollama_wrapper.crt
+      - MARSHAL_KEY_PATH=/certs/ollama_wrapper.key
+      - MARSHAL_CA_PATH=/certs/ca.crt
+      - MARSHAL_AUTO_SETUP=${MARSHAL_AUTO_SETUP:-false}
     ports:
       - "5002:5002"
     networks:
@@ -98,11 +110,54 @@ services:
       runecore_ai_net:
         aliases:
           - ollama_wrapper
+    volumes:
+      # Mount RuneCore CA certs for mTLS calls to Marshal
+      # Populate this volume from RuneCore_Core's CA after issuing an ollama_wrapper cert
+      - runecore_certs:/certs:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
       interval: 10s
       timeout: 3s
       retries: 3
+
+  # ONNX inference service for NPU/DirectML models.
+  # Only starts when the "npu" profile is active:
+  #   docker compose --profile npu up -d
+  #
+  # NOTE: This container uses CPU-only onnxruntime (DirectML not available in Linux containers).
+  # For actual NPU/DirectML acceleration, run the service natively:
+  #   cd onnx_service && .\run_native.ps1
+  # Then set ONNX_SERVICE_URL=http://host.docker.internal:5006 in the ollama_wrapper env above.
+  onnx_service:
+    build:
+      context: ./onnx_service
+      dockerfile: Dockerfile
+    container_name: runecore-onnx-service
+    profiles:
+      - npu
+    ports:
+      - "5006:5006"
+    networks:
+      runecore_ai_net:
+        aliases:
+          - onnx_service
+    environment:
+      - PORT=5006
+      - ONNX_MODEL_DIR=/models
+      - ONNX_DEVICE=cpu
+      # Set to auto-load a model on startup, e.g. phi3-mini-onnx
+      - ONNX_MODEL_NAME=${ONNX_MODEL_NAME:-}
+    volumes:
+      - onnx_models:/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5006/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
 
 networks:
   runecore_ai_net:
@@ -113,3 +168,8 @@ volumes:
     name: runecore_ollama_data
   backend_data:
     name: runecore_ai_backend_data
+  onnx_models:
+    name: runecore_onnx_models
+  runecore_certs:
+    name: runecore_certs
+    external: true   # populated by RuneCore_Core CA — must exist before starting with Marshal

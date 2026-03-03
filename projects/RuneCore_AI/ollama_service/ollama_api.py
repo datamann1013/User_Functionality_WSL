@@ -46,6 +46,26 @@ _ollama_cache = {"status": None, "last_check": 0}
 _active_pulls = {}
 _active_pulls_lock = threading.Lock()
 
+# ONNX backend integration
+ONNX_SERVICE_URL = os.environ.get("ONNX_SERVICE_URL", "")
+ONNX_REQUEST_TIMEOUT = int(os.environ.get("ONNX_REQUEST_TIMEOUT", "120"))
+_onnx_models: dict = {}
+_onnx_models_lock = threading.Lock()
+_onnx_available = False
+
+# Marshal integration — native host action daemon
+MARSHAL_URL = os.environ.get("MARSHAL_URL", "")
+MARSHAL_CERT_PATH = os.environ.get("MARSHAL_CERT_PATH", "")
+MARSHAL_KEY_PATH  = os.environ.get("MARSHAL_KEY_PATH", "")
+MARSHAL_CA_PATH   = os.environ.get("MARSHAL_CA_PATH", "")
+MARSHAL_AUTO_SETUP = os.environ.get("MARSHAL_AUTO_SETUP", "").lower() in ("1", "true", "yes")
+CORE_MEMORY_URL = os.environ.get("CORE_MEMORY_URL", "")
+
+# Routing table populated by Marshal's /api/setup response
+# key: component name (e.g. "ollama-gpu0"), value: endpoint URL
+_marshal_endpoints: dict = {}
+_marshal_endpoints_lock = threading.Lock()
+
 
 def get_ollama_status():
     """Cached Ollama status check"""
@@ -76,6 +96,70 @@ def get_ollama_status():
             }
         _ollama_cache["last_check"] = now
     return _ollama_cache["status"]
+
+
+def _fetch_onnx_models() -> list:
+    """Fetch models from the ONNX service and update the internal registry.
+
+    Sets _onnx_available based on connectivity. Safe to call from a background thread.
+    Returns list of model dicts or empty list if ONNX service is unavailable.
+    """
+    global _onnx_available
+    if not ONNX_SERVICE_URL:
+        return []
+    try:
+        r = requests.get(f"{ONNX_SERVICE_URL}/api/models", timeout=5)
+        if r.status_code == 200:
+            raw = r.json().get("models", [])
+            models = []
+            for m in raw:
+                entry = m if isinstance(m, dict) else {"name": m}
+                entry["backend"] = "onnx"
+                models.append(entry)
+            with _onnx_models_lock:
+                _onnx_models.clear()
+                for m in models:
+                    _onnx_models[m["name"]] = m
+            _onnx_available = True
+            logger.info("ONNX service: %d model(s) registered", len(models))
+            return models
+        logger.warning("ONNX service /api/models returned %s", r.status_code)
+        _onnx_available = False
+        return []
+    except Exception as e:
+        logger.warning("ONNX service unavailable: %s", e)
+        _onnx_available = False
+        return []
+
+
+def _is_onnx_model(model_name: str) -> bool:
+    """Return True if model_name is served by the ONNX backend."""
+    with _onnx_models_lock:
+        return model_name in _onnx_models
+
+
+def _route_chat_to_onnx(model_name: str, messages: list, temperature: float = 0.7, max_tokens: int = 512) -> dict:
+    """Send a chat request to the ONNX service.
+
+    Returns dict: {response, model_id, backend}.
+    Raises requests.RequestException on network failure, HTTPError on non-200.
+    """
+    payload = {
+        "model": model_name,
+        "messages": messages,
+        "stream": False,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    r = requests.post(
+        f"{ONNX_SERVICE_URL}/api/chat",
+        json=payload,
+        timeout=ONNX_REQUEST_TIMEOUT,
+    )
+    r.raise_for_status()
+    result = r.json()
+    content = result.get("message", {}).get("content", "")
+    return {"response": content, "model_id": model_name, "backend": "onnx"}
 
 
 def _spawn_ollama_pull(name):
@@ -281,15 +365,49 @@ def health():
 
 @app.route("/api/models", methods=["GET"])
 def get_models():
-    """Get available models"""
+    """Get available models from Ollama and ONNX service."""
     status = get_ollama_status()
+    # Ollama models as dicts (frontend already normalizes via m?.name)
+    unified = [{"name": n, "backend": "ollama"} for n in status["models_available"]]
+    # Merge ONNX models — skip errored or still-downloading entries
+    with _onnx_models_lock:
+        for entry in _onnx_models.values():
+            if entry.get("status") not in ("error", "downloading", "queued"):
+                unified.append(dict(entry))
     return jsonify(
         {
-            "models": status["models_available"],
+            "models": unified,
             "running": status["running"],
             "last_check": status["last_check"],
+            "onnx_available": _onnx_available,
         }
     )
+
+
+@app.route("/api/onnx/refresh", methods=["POST"])
+def onnx_refresh():
+    """Manually refresh the ONNX model cache from the ONNX service."""
+    models = _fetch_onnx_models()
+    return jsonify({"onnx_models": len(models), "available": _onnx_available})
+
+
+@app.route("/api/marshal/setup", methods=["POST"])
+def marshal_setup():
+    """Trigger Marshal auto-setup manually (same as startup auto-setup).
+
+    Useful from CLI or web UI to re-run hardware setup after config changes.
+    """
+    if not MARSHAL_URL:
+        return jsonify({"error": "MARSHAL_URL not configured"}), 503
+    threading.Thread(target=_call_marshal_setup, daemon=True).start()
+    return jsonify({"status": "started", "marshal_url": MARSHAL_URL})
+
+
+@app.route("/api/marshal/endpoints", methods=["GET"])
+def marshal_endpoints():
+    """Return the current hardware endpoint routing table from Marshal."""
+    with _marshal_endpoints_lock:
+        return jsonify({"endpoints": dict(_marshal_endpoints), "marshal_available": bool(MARSHAL_URL)})
 
 
 @app.route("/api/pull", methods=["POST"])
@@ -400,6 +518,35 @@ def agent():
 
         if not messages:
             return jsonify({"error": "messages required"}), 400
+
+        # ONNX routing — check before hitting Ollama
+        if _is_onnx_model(model_name):
+            if mcp_tools:
+                return jsonify({
+                    "error": f"Model '{model_name}' is an ONNX model and does not support tool calling yet.",
+                    "backend": "onnx",
+                }), 400
+            try:
+                result = _route_chat_to_onnx(model_name, messages, temperature=temperature)
+                if stream:
+                    def _onnx_stream():
+                        yield json.dumps({"delta": result["response"], "done": False}) + "\n"
+                        yield json.dumps({"delta": "", "done": True}) + "\n"
+                    return FlaskResponse(
+                        _onnx_stream(),
+                        mimetype="application/x-ndjson",
+                        headers={"X-Accel-Buffering": "no"},
+                    )
+                return jsonify({
+                    "role": "assistant",
+                    "content": result["response"],
+                    "tool_calls": None,
+                    "done": True,
+                    "backend": "onnx",
+                })
+            except Exception as e:
+                logger.error("ONNX agent call failed for %s: %s", model_name, e)
+                return jsonify({"error": f"ONNX backend error: {str(e)}"}), 502
 
         # Translate MCP tools → Ollama format
         ollama_tools = _mcp_to_ollama_tools(mcp_tools) if mcp_tools else None
@@ -582,6 +729,24 @@ def chat():
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": message})
 
+        # ONNX routing — check before hitting Ollama
+        if _is_onnx_model(model_name):
+            try:
+                result = _route_chat_to_onnx(model_name, messages, temperature=temperature, max_tokens=max_tokens)
+                return jsonify({
+                    "response": result["response"],
+                    "agent_id": agent_id,
+                    "model_id": model_name,
+                    "model_name": model_name,
+                    "timestamp": datetime.now().isoformat(),
+                    "mode": "onnx_powered",
+                    "tokens_used": len(result["response"].split()),
+                    "backend": "onnx",
+                })
+            except Exception as e:
+                logger.error("ONNX chat failed for %s: %s", model_name, e)
+                return jsonify({"error": f"ONNX backend error: {str(e)}"}), 502
+
         ollama_payload = {
             "model": model_name,
             "messages": messages,
@@ -660,7 +825,126 @@ def chat():
         return jsonify({"error": f"Chat failed: {str(e)}"}), 500
 
 
+def _get_marshal_session():
+    """Build a requests Session with mTLS certs for calling Marshal.
+
+    Returns None if Marshal is not configured.
+    """
+    if not MARSHAL_URL:
+        return None
+    session = requests.Session()
+    if MARSHAL_CERT_PATH and MARSHAL_KEY_PATH:
+        session.cert = (MARSHAL_CERT_PATH, MARSHAL_KEY_PATH)
+    if MARSHAL_CA_PATH:
+        session.verify = MARSHAL_CA_PATH
+    else:
+        session.verify = False  # Dev fallback — no CA cert configured
+    return session
+
+
+def _fetch_machine_profile() -> dict:
+    """Fetch the machine hardware profile from CoreMemory.
+
+    Returns the parsed metadata dict, or empty dict on failure.
+    """
+    if not CORE_MEMORY_URL:
+        return {}
+    try:
+        url = f"{CORE_MEMORY_URL.rstrip('/')}/v1/memories"
+        r = requests.get(url, params={"namespace": "machine_profile"}, timeout=5)
+        if r.status_code == 200:
+            items = r.json().get("memories", [])
+            if items:
+                return items[0].get("metadata", {})
+    except Exception as e:
+        logger.warning("Failed to fetch machine profile from CoreMemory: %s", e)
+    return {}
+
+
+def _build_setup_spec(profile: dict) -> dict:
+    """Build a Marshal SetupSpec from a Sentinel machine profile.
+
+    Always includes sentinel.ensure. Adds onnx_service if NPU present,
+    and one ollama_gpu entry per discrete GPU found.
+    """
+    components = [{"type": "sentinel", "action": "ensure"}]
+
+    npu_list = profile.get("npu") or []
+    gpu_list = profile.get("gpu") or []
+
+    # NPU present → request ONNX orchestrator service
+    if npu_list:
+        components.append({
+            "type": "onnx_service",
+            "action": "ensure",
+            "config": {"device": "npu"},
+        })
+
+    # One Ollama container per discrete GPU
+    base_port = 11435
+    for i, gpu in enumerate(gpu_list):
+        if gpu.get("gpu_type") == "discrete":
+            components.append({
+                "type": "ollama_gpu",
+                "action": "ensure",
+                "config": {
+                    "name": f"ollama-gpu{i}",
+                    "port": base_port + i,
+                    "gpu_uuid": gpu.get("device_id", ""),
+                },
+            })
+
+    return {"components": components}
+
+
+def _call_marshal_setup():
+    """Fetch machine profile, build setup spec, and call Marshal /api/setup.
+
+    Updates _marshal_endpoints with the returned endpoint map.
+    Called from a background thread on startup.
+    """
+    global _marshal_endpoints
+    session = _get_marshal_session()
+    if not session:
+        return
+
+    profile = _fetch_machine_profile()
+    if not profile:
+        logger.info("Marshal auto-setup: no machine profile available, sending sentinel-only spec")
+
+    spec = _build_setup_spec(profile)
+    logger.info("Marshal auto-setup: calling %s/api/setup with %d components", MARSHAL_URL, len(spec["components"]))
+
+    try:
+        r = session.post(
+            f"{MARSHAL_URL.rstrip('/')}/api/setup",
+            json=spec,
+            timeout=30,
+        )
+        if r.status_code in (200, 207):
+            result = r.json()
+            endpoints = result.get("endpoints", {})
+            with _marshal_endpoints_lock:
+                _marshal_endpoints.update(endpoints)
+            logger.info("Marshal setup complete: %s", result.get("actions_taken", []))
+            if result.get("errors"):
+                logger.warning("Marshal setup errors: %s", result["errors"])
+        else:
+            logger.warning("Marshal /api/setup returned %s: %s", r.status_code, r.text[:200])
+    except Exception as e:
+        logger.warning("Marshal auto-setup failed (non-fatal): %s", e)
+
+
+# On module import (each Gunicorn worker startup): fetch ONNX model list in background
+if ONNX_SERVICE_URL:
+    threading.Thread(target=_fetch_onnx_models, daemon=True).start()
+
+# Marshal auto-setup: ensure Sentinel is running and configure hardware services
+if MARSHAL_URL and MARSHAL_AUTO_SETUP:
+    threading.Thread(target=_call_marshal_setup, daemon=True).start()
+
+
 if __name__ == "__main__":
-    logger.info("🤖 Ollama Service Starting (merged entrypoint)")
+    logger.info("Ollama Service Starting (merged entrypoint)")
     port = int(os.environ.get("PORT", 5002))
     app.run(host="0.0.0.0", port=port, debug=False)  # nosec B104

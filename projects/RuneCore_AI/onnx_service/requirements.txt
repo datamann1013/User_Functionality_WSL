@@ -1,0 +1,13 @@
+fastapi>=0.111
+uvicorn[standard]>=0.29
+requests>=2.31
+pydantic>=2.0
+# ONNX Runtime — one of these depending on environment:
+#   onnxruntime           (CPU, Linux/Mac/Windows — used in Docker container)
+#   onnxruntime-directml  (Windows native only — used with run_native.ps1)
+# The Dockerfile installs onnxruntime (CPU). For DirectML, run_native.ps1 reinstalls.
+onnxruntime>=1.18.0
+optimum[onnxruntime]>=1.19.0
+transformers>=4.40.0
+huggingface-hub>=0.22.0
+numpy>=1.26
