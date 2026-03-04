@@ -325,3 +325,4 @@ projects/RuneCore_AI/ollama_data/
 .claude/*
 .opencode*
 .playwright*
+projects/RuneCore_Marshal/certs_dev/

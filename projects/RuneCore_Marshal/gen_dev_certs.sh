@@ -11,6 +11,9 @@
 
 set -e
 
+# Prevent Git Bash from converting /CN=... paths to Windows paths (e.g. C:/Program Files/Git/CN=...)
+export MSYS_NO_PATHCONV=1
+
 OUT="certs_dev"
 DEPLOY="C:/RuneCore/marshal/certs"
 

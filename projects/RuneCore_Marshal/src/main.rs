@@ -32,6 +32,13 @@ use registry::Registry;
 // that reqwest::blocking works without panicking inside an async context.
 
 fn main() {
+    // reqwest 0.12 with rustls-tls silently activates aws-lc-rs alongside our ring
+    // feature, causing rustls 0.23 to panic on ambiguity. Explicitly install ring
+    // as the process-level CryptoProvider before any TLS code runs.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install ring as the rustls CryptoProvider");
+
     let args: Vec<String> = std::env::args().collect();
 
     if args.len() > 1 && args[1] == "--bootstrap" {
