@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import ErrorBoundary from "./ErrorBoundary";
 
 const API_BASE = process.env.REACT_APP_API_URL || "";
 

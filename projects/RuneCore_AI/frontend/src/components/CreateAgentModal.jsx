@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { logFrontendError } from "../utils/errorLogger";
+import ErrorBoundary from "./ErrorBoundary";
 
-const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
+const CreateAgentModal = ({ isOpen, onClose, onAgentCreated, availableDevices = [] }) => {
   const [formData, setFormData] = useState({
     name: "",
     avatar_image: null,
     model_name: "llama3.2:1b",
+    placement: "auto",
     temperature: 70,
     top_p: 90,
     system_prompt: "You are a helpful AI assistant.",
@@ -368,6 +370,7 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
+      <ErrorBoundary onClose={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>Create New Agent</h2>
@@ -452,6 +455,32 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
             {errors.model_download && (
               <span className="error-text">{errors.model_download}</span>
             )}
+          </div>
+
+          {/* Hardware Placement */}
+          <div className="form-group">
+            <label htmlFor="placement">Hardware Placement</label>
+            <select
+              id="placement"
+              value={formData.placement}
+              onChange={(e) => handleInputChange("placement", e.target.value)}
+            >
+              <option value="auto">Auto (smart: small→NPU, fits→GPU, rest→CPU)</option>
+              <option value="cpu">CPU</option>
+              {availableDevices.includes("dgpu") && (
+                <option value="dgpu">dGPU — Discrete GPU</option>
+              )}
+              {availableDevices.includes("igpu") && (
+                <option value="igpu">iGPU — Integrated GPU (DirectML)</option>
+              )}
+              {availableDevices.includes("npu") && (
+                <option value="npu">NPU — ONNX / DirectML</option>
+              )}
+            </select>
+            <small>
+              Where to run inference for this agent.
+              {availableDevices.length === 0 && " Run Hardware Optimisation to unlock GPU/NPU options."}
+            </small>
           </div>
 
           {/* System Prompt */}
@@ -569,6 +598,7 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated }) => {
           </div>
         </form>
       </div>
+      </ErrorBoundary>
     </div>
   );
 };

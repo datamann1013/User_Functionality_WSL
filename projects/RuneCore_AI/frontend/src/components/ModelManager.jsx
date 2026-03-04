@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import ErrorBoundary from "./ErrorBoundary";
 
 const MAX_POLL_ITERATIONS = 150; // 150 × 2s = 5 min max
 

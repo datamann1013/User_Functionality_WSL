@@ -12,6 +12,7 @@ import CreateAgentModal from "./components/CreateAgentModal";
 import EditAgentModal from "./components/EditAgentModal";
 import ModelManager from "./components/ModelManager";
 import UserProfileModal from "./components/UserProfileModal";
+import HardwarePanel from "./components/HardwarePanel";
 
 // API base URL
 const API_BASE = process.env.REACT_APP_API_URL || "";
@@ -118,6 +119,9 @@ function App() {
   const [agentToEdit, setAgentToEdit] = useState(null);
   const [showModelManager, setShowModelManager] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showHardwarePanel, setShowHardwarePanel] = useState(false);
+  const [hardwareDevices, setHardwareDevices] = useState([]);
+  const [hardwareOptimised, setHardwareOptimised] = useState(false);
   const [cacheStatus, setCacheStatus] = useState(null);
 
   // Model retry/cancel helpers: when backend reports a model pull timeout we
@@ -717,6 +721,21 @@ function App() {
     loadCacheStatus();
     const cacheIv = setInterval(loadCacheStatus, 5000);
 
+    // Fetch hardware status once on connect to populate device list for placement picker
+    const loadHardwareStatus = async () => {
+      if (connecting) return;
+      try {
+        const r = await fetch(`${API_BASE}/api/hardware/status`);
+        if (r.ok) {
+          const d = await r.json();
+          setHardwareDevices(d.devices || []);
+        }
+      } catch (e) {
+        // Non-fatal — hardware panel will show empty state
+      }
+    };
+    loadHardwareStatus();
+
     return () => {
       clearInterval(refreshInterval);
       clearInterval(cacheIv);
@@ -866,6 +885,13 @@ function App() {
           MODELS
         </button>
         <button
+          className={`top-bar-btn${hardwareOptimised ? " top-bar-btn--active" : ""}`}
+          onClick={() => setShowHardwarePanel(true)}
+          title="Hardware placement optimisation"
+        >
+          {hardwareOptimised ? "HW ✓" : "HARDWARE"}
+        </button>
+        <button
           className="top-bar-btn"
           onClick={() => setShowProfileModal(true)}
           title="User profile"
@@ -949,6 +975,11 @@ function App() {
                         />
                         <span className="agent-model-label">
                           {agent.model_name || "no model"}
+                          {agent.placement && agent.placement !== "auto" && (
+                            <span className={`placement-badge placement-badge--${agent.placement}`}>
+                              {agent.placement.toUpperCase()}
+                            </span>
+                          )}
                         </span>
                       </div>
                     </div>
@@ -1212,6 +1243,7 @@ function App() {
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         onAgentCreated={handleAgentCreated}
+        availableDevices={hardwareDevices.map((d) => d.type)}
       />
 
       <EditAgentModal
@@ -1223,6 +1255,7 @@ function App() {
         agent={agentToEdit}
         onAgentUpdated={handleAgentUpdated}
         onAgentDeleted={handleAgentDeleted}
+        availableDevices={hardwareDevices.map((d) => d.type)}
       />
 
       <ModelManager
@@ -1233,6 +1266,15 @@ function App() {
       <UserProfileModal
         isOpen={showProfileModal}
         onClose={() => setShowProfileModal(false)}
+      />
+
+      <HardwarePanel
+        isOpen={showHardwarePanel}
+        onClose={() => setShowHardwarePanel(false)}
+        devices={hardwareDevices}
+        setDevices={setHardwareDevices}
+        optimised={hardwareOptimised}
+        setOptimised={setHardwareOptimised}
       />
     </div>
   );

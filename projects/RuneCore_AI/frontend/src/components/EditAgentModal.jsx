@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { logFrontendError } from "../utils/errorLogger";
+import ErrorBoundary from "./ErrorBoundary";
 
 const EditAgentModal = ({
   isOpen,
@@ -7,10 +8,12 @@ const EditAgentModal = ({
   agent,
   onAgentUpdated,
   onAgentDeleted,
+  availableDevices = [],
 }) => {
   const [formData, setFormData] = useState({
     name: "",
     model_name: "",
+    placement: "auto",
     temperature: 0.7,
     top_p: 0.9,
     system_prompt: "",
@@ -30,6 +33,7 @@ const EditAgentModal = ({
       setFormData({
         name: agent.name || "",
         model_name: agent.model_name || "llama3.2:1b",
+        placement: agent.placement || "auto",
         temperature: agent.temperature || 0.7,
         top_p: agent.top_p || 0.9,
         system_prompt: agent.system_prompt || "",
@@ -45,7 +49,11 @@ const EditAgentModal = ({
       const response = await fetch(`${API_BASE}/api/models`);
       if (response.ok) {
         const data = await response.json();
-        setAvailableModels(data.models || ["llama3.2:1b"]);
+        const raw = data.models || [];
+        const models = raw
+          .map((m) => (typeof m === "string" ? m : m?.name || null))
+          .filter(Boolean);
+        setAvailableModels(models.length > 0 ? models : ["llama3.2:1b"]);
       }
     } catch (error) {
       logFrontendError("FRONTEND_MODEL_ERROR", "Failed to fetch models", error);
@@ -159,6 +167,7 @@ const EditAgentModal = ({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
+      <ErrorBoundary onClose={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>Edit Agent</h2>
@@ -210,6 +219,32 @@ const EditAgentModal = ({
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="placement">Hardware Placement</label>
+            <select
+              id="placement"
+              name="placement"
+              value={formData.placement}
+              onChange={handleInputChange}
+            >
+              <option value="auto">Auto (smart: small→NPU, fits→GPU, rest→CPU)</option>
+              <option value="cpu">CPU</option>
+              {availableDevices.includes("dgpu") && (
+                <option value="dgpu">dGPU — Discrete GPU</option>
+              )}
+              {availableDevices.includes("igpu") && (
+                <option value="igpu">iGPU — Integrated GPU (DirectML)</option>
+              )}
+              {availableDevices.includes("npu") && (
+                <option value="npu">NPU — ONNX / DirectML</option>
+              )}
+            </select>
+            <small className="param-hint">
+              Where to run inference for this agent.
+              {availableDevices.length === 0 && " Run Hardware Optimisation to unlock GPU/NPU options."}
+            </small>
           </div>
 
           <div className="form-row">
@@ -334,6 +369,7 @@ const EditAgentModal = ({
           </div>
         )}
       </div>
+      </ErrorBoundary>
     </div>
   );
 };

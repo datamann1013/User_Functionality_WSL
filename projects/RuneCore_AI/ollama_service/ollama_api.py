@@ -66,6 +66,14 @@ CORE_MEMORY_URL = os.environ.get("CORE_MEMORY_URL", "")
 _marshal_endpoints: dict = {}
 _marshal_endpoints_lock = threading.Lock()
 
+# Cached machine profile — updated by _fetch_machine_profile()
+_machine_profile: dict = {}
+_machine_profile_lock = threading.Lock()
+
+# Auto-placement result cache: model_name → (placement_tag, expires_ts)
+_auto_place_cache: dict = {}
+_auto_place_cache_lock = threading.Lock()
+
 
 def get_ollama_status():
     """Cached Ollama status check"""
@@ -715,6 +723,7 @@ def chat():
         temperature = float(data.get("temperature", 0.7))
         top_p = float(data.get("top_p", 0.9))
         max_tokens = int(data.get("max_tokens", 2048))
+        placement = data.get("placement", "auto")
 
         # Accept either a pre-built messages array (preferred) or a legacy
         # single message string for backwards compatibility.
@@ -729,8 +738,13 @@ def chat():
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": message})
 
-        # ONNX routing — check before hitting Ollama
-        if _is_onnx_model(model_name):
+        # Resolve "auto" to a concrete placement using model size heuristic
+        if placement == "auto":
+            placement = _auto_place(model_name)
+            logger.info("Resolved auto-placement for %s → %s", model_name, placement)
+
+        # NPU routing (explicit tag or ONNX model name match)
+        if placement == "npu" or _is_onnx_model(model_name):
             try:
                 result = _route_chat_to_onnx(model_name, messages, temperature=temperature, max_tokens=max_tokens)
                 return jsonify({
@@ -742,10 +756,28 @@ def chat():
                     "mode": "onnx_powered",
                     "tokens_used": len(result["response"].split()),
                     "backend": "onnx",
+                    "placement": "npu",
                 })
             except Exception as e:
                 logger.error("ONNX chat failed for %s: %s", model_name, e)
                 return jsonify({"error": f"ONNX backend error: {str(e)}"}), 502
+
+        # Determine Ollama target host and extra options based on placement
+        extra_options: dict = {}
+        if placement == "dgpu":
+            with _marshal_endpoints_lock:
+                target_host = _marshal_endpoints.get("ollama-gpu0", OLLAMA_HOST)
+            logger.info("Routing %s to dGPU endpoint: %s", model_name, target_host)
+        elif placement == "igpu":
+            with _marshal_endpoints_lock:
+                target_host = _marshal_endpoints.get("ollama-igpu0", OLLAMA_HOST)
+            logger.info("Routing %s to iGPU endpoint: %s", model_name, target_host)
+        elif placement == "cpu":
+            target_host = OLLAMA_HOST
+            extra_options["num_gpu"] = 0
+            logger.info("Routing %s to CPU (num_gpu=0)", model_name)
+        else:
+            target_host = OLLAMA_HOST
 
         ollama_payload = {
             "model": model_name,
@@ -755,6 +787,7 @@ def chat():
                 "temperature": temperature,
                 "top_p": top_p,
                 "num_predict": max_tokens,
+                **extra_options,
             },
         }
 
@@ -765,12 +798,12 @@ def chat():
         for attempt in range(max_retries):
             try:
                 logger.info(
-                    "[OLLAMA_RETRY] attempt %s/%s -> %s/api/chat model=%s msgs=%s",
-                    attempt + 1, max_retries, OLLAMA_HOST, model_name, len(messages),
+                    "[OLLAMA_RETRY] attempt %s/%s -> %s/api/chat model=%s msgs=%s placement=%s",
+                    attempt + 1, max_retries, target_host, model_name, len(messages), placement,
                 )
                 start_ts = datetime.now()
                 response = requests.post(
-                    f"{OLLAMA_HOST}/api/chat",
+                    f"{target_host}/api/chat",
                     json=ollama_payload,
                     timeout=max(request_timeout, 10),
                 )
@@ -809,6 +842,7 @@ def chat():
                     "timestamp": datetime.now().isoformat(),
                     "mode": "ollama_powered",
                     "tokens_used": result.get("eval_count", len(ai_response.split())),
+                    "placement": placement,
                 }
             )
         else:
@@ -846,6 +880,7 @@ def _fetch_machine_profile() -> dict:
     """Fetch the machine hardware profile from CoreMemory.
 
     Returns the parsed metadata dict, or empty dict on failure.
+    Also updates the module-level _machine_profile cache.
     """
     if not CORE_MEMORY_URL:
         return {}
@@ -855,7 +890,11 @@ def _fetch_machine_profile() -> dict:
         if r.status_code == 200:
             items = r.json().get("memories", [])
             if items:
-                return items[0].get("metadata", {})
+                profile = items[0].get("metadata", {})
+                with _machine_profile_lock:
+                    global _machine_profile
+                    _machine_profile = profile
+                return profile
     except Exception as e:
         logger.warning("Failed to fetch machine profile from CoreMemory: %s", e)
     return {}
@@ -933,6 +972,223 @@ def _call_marshal_setup():
             logger.warning("Marshal /api/setup returned %s: %s", r.status_code, r.text[:200])
     except Exception as e:
         logger.warning("Marshal auto-setup failed (non-fatal): %s", e)
+
+
+def _estimate_model_params_b(model_name: str):
+    """Estimate model parameter count in billions.
+
+    First tries Ollama /api/show (field: details.parameter_size), then falls
+    back to parsing the name suffix (e.g. "llama3.2:1b" → 1.0).
+    Returns float or None if unknown.
+    """
+    try:
+        r = requests.post(f"{OLLAMA_HOST}/api/show", json={"name": model_name}, timeout=5)
+        if r.status_code == 200:
+            ps = r.json().get("details", {}).get("parameter_size", "")
+            m = re.match(r"([\d.]+)\s*[Bb]", str(ps))
+            if m:
+                return float(m.group(1))
+    except Exception:
+        pass
+    # Fallback: parse suffix from name
+    m = re.search(r"[:\-_](\d+(?:\.\d+)?)\s*b(?:\b|$)", model_name.lower())
+    if m:
+        return float(m.group(1))
+    return None
+
+
+def _fit_to_dgpu(param_b) -> str:
+    """Return "dgpu" if the model likely fits in discrete GPU VRAM, else "cpu"."""
+    with _marshal_endpoints_lock:
+        has_dgpu = "ollama-gpu0" in _marshal_endpoints
+    if not has_dgpu or param_b is None:
+        return "cpu"
+    # ~2 bytes/param (fp16) + 20% overhead
+    needed_gb = param_b * 2.0 * 1.2
+    with _machine_profile_lock:
+        for gpu in _machine_profile.get("gpu", []):
+            if gpu.get("gpu_type") == "discrete":
+                vram_gb = gpu.get("total_memory_gb") or (gpu.get("total_memory_kb", 0) / 1024 / 1024)
+                if vram_gb and needed_gb <= vram_gb:
+                    return "dgpu"
+    return "cpu"
+
+
+def _auto_place(model_name: str) -> str:
+    """Determine the best hardware placement for model_name.
+
+    Logic:
+      ≤ 3B params AND NPU available  → "npu"
+      fits in dGPU VRAM              → "dgpu"
+      otherwise                      → "cpu"
+
+    Result cached per model for 5 minutes.
+    """
+    with _auto_place_cache_lock:
+        cached = _auto_place_cache.get(model_name)
+        if cached and cached[1] > _time.time():
+            return cached[0]
+
+    param_b = _estimate_model_params_b(model_name)
+
+    if param_b is not None and param_b <= 3.0 and _onnx_available:
+        tag = "npu"
+    else:
+        tag = _fit_to_dgpu(param_b)
+
+    with _auto_place_cache_lock:
+        _auto_place_cache[model_name] = (tag, _time.time() + 300)
+
+    logger.info("Auto-place %s → %s (%.1fB params)", model_name, tag, param_b or 0)
+    return tag
+
+
+def _verify_endpoints() -> dict:
+    """Verify that all known inference endpoints respond to a test request.
+
+    Tests default Ollama and each Marshal Ollama endpoint.
+    ONNX availability is taken from the existing _onnx_available flag.
+    Returns dict: {name: {"verified": bool, "error": str|None, "endpoint": str}}
+    """
+    verify_payload = {
+        "model": DEFAULT_MODEL,
+        "messages": [{"role": "user", "content": "Reply with the single word READY."}],
+        "stream": False,
+        "options": {"num_predict": 10},
+    }
+
+    to_check = {"ollama_default": OLLAMA_HOST}
+    with _marshal_endpoints_lock:
+        for name, url in _marshal_endpoints.items():
+            if name.startswith("ollama"):
+                to_check[name] = url
+
+    results = {}
+    for name, base_url in to_check.items():
+        try:
+            r = requests.post(
+                f"{base_url.rstrip('/')}/api/chat",
+                json=verify_payload,
+                timeout=15,
+            )
+            if r.status_code == 200 and "error" not in r.json():
+                results[name] = {"verified": True, "error": None, "endpoint": base_url}
+            else:
+                results[name] = {"verified": False, "error": f"HTTP {r.status_code}", "endpoint": base_url}
+        except Exception as e:
+            results[name] = {"verified": False, "error": str(e), "endpoint": base_url}
+
+    if ONNX_SERVICE_URL:
+        results["onnx_service"] = {
+            "verified": _onnx_available,
+            "error": None if _onnx_available else "ONNX service unavailable",
+            "endpoint": ONNX_SERVICE_URL,
+        }
+
+    return results
+
+
+@app.route("/api/hardware/status", methods=["GET"])
+def hardware_status():
+    """Return current hardware routing state and detected device list."""
+    with _marshal_endpoints_lock:
+        endpoints = dict(_marshal_endpoints)
+    with _machine_profile_lock:
+        profile = dict(_machine_profile)
+
+    devices = [{"type": "cpu", "name": profile.get("cpu_model", "CPU"), "available": True}]
+
+    for i, gpu in enumerate(profile.get("gpu", [])):
+        if gpu.get("gpu_type") == "discrete":
+            ep_key = f"ollama-gpu{i}"
+            vram = gpu.get("total_memory_gb") or round(gpu.get("total_memory_kb", 0) / 1024 / 1024, 1)
+            devices.append({
+                "type": "dgpu",
+                "name": gpu.get("name", "Discrete GPU"),
+                "vendor": gpu.get("vendor"),
+                "vram_gb": vram,
+                "available": ep_key in endpoints,
+                "endpoint": endpoints.get(ep_key),
+            })
+        elif gpu.get("gpu_type") == "integrated":
+            devices.append({
+                "type": "igpu",
+                "name": gpu.get("name", "Integrated GPU"),
+                "vendor": gpu.get("vendor"),
+                "available": "ollama-igpu0" in endpoints,
+                "endpoint": endpoints.get("ollama-igpu0"),
+            })
+
+    for npu in profile.get("npu", []):
+        devices.append({
+            "type": "npu",
+            "name": npu.get("name", "NPU"),
+            "available": _onnx_available,
+            "endpoint": ONNX_SERVICE_URL or None,
+        })
+
+    return jsonify({
+        "devices": devices,
+        "onnx_available": _onnx_available,
+        "marshal_available": bool(MARSHAL_URL),
+        "marshal_endpoints": endpoints,
+        "profile_available": bool(profile),
+    })
+
+
+@app.route("/api/hardware/optimise", methods=["POST"])
+def hardware_optimise():
+    """Read hardware profile, call Marshal setup, verify endpoints.
+
+    Returns list of available devices with verification status.
+    """
+    actions_taken = []
+
+    # Fetch fresh profile and update cache
+    profile = _fetch_machine_profile()
+    if not profile:
+        actions_taken.append("No machine profile available in CoreMemory (is Sentinel running?)")
+
+    if MARSHAL_URL:
+        spec = _build_setup_spec(profile)
+        actions_taken.append(f"Sending setup spec ({len(spec['components'])} component(s)) to Marshal")
+        session = _get_marshal_session()
+        try:
+            r = session.post(
+                f"{MARSHAL_URL.rstrip('/')}/api/setup",
+                json=spec,
+                timeout=60,
+            )
+            if r.status_code in (200, 207):
+                result = r.json()
+                with _marshal_endpoints_lock:
+                    _marshal_endpoints.update(result.get("endpoints", {}))
+                actions_taken.extend(result.get("actions_taken", []))
+                if result.get("errors"):
+                    actions_taken.append(f"Marshal errors: {result['errors']}")
+            else:
+                actions_taken.append(f"Marshal setup returned HTTP {r.status_code}: {r.text[:120]}")
+        except Exception as e:
+            actions_taken.append(f"Marshal unreachable: {e}")
+    else:
+        actions_taken.append("Marshal not configured — using local Ollama only")
+
+    if ONNX_SERVICE_URL:
+        _fetch_onnx_models()
+
+    verification = _verify_endpoints()
+    devices = [
+        {"name": name, "endpoint": v["endpoint"], "verified": v["verified"], "error": v["error"]}
+        for name, v in verification.items()
+    ]
+
+    return jsonify({
+        "status": "ok",
+        "devices": devices,
+        "actions_taken": actions_taken,
+        "marshal_available": bool(MARSHAL_URL),
+        "profile_available": bool(profile),
+    })
 
 
 # On module import (each Gunicorn worker startup): fetch ONNX model list in background

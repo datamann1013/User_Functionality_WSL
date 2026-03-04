@@ -103,6 +103,8 @@ services:
       - MARSHAL_KEY_PATH=/certs/ollama_wrapper.key
       - MARSHAL_CA_PATH=/certs/ca.crt
       - MARSHAL_AUTO_SETUP=${MARSHAL_AUTO_SETUP:-false}
+      # CoreMemory — used to fetch Sentinel hardware profile for hardware optimisation
+      - CORE_MEMORY_URL=http://runecore_core:11441/api/proxy/CoreMemoryAPI
     ports:
       - "5002:5002"
     networks:
@@ -172,4 +174,5 @@ volumes:
     name: runecore_onnx_models
   runecore_certs:
     name: runecore_certs
-    external: true   # populated by RuneCore_Core CA — must exist before starting with Marshal
+    # external: true — switched to auto-created volume; Marshal cert provisioning is Phase 2.
+    # When Marshal certs are issued, pre-create the volume and restore external: true.

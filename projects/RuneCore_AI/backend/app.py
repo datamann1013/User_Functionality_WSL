@@ -490,6 +490,26 @@ def update_user_profile():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/hardware/status", methods=["GET"])
+def hardware_status():
+    """Proxy to ollama_service hardware status."""
+    try:
+        r = requests.get(f"{OLLAMA_SERVICE_URL}/api/hardware/status", timeout=10)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e), "devices": [], "profile_available": False}), 503
+
+
+@app.route("/api/hardware/optimise", methods=["POST"])
+def hardware_optimise():
+    """Proxy to ollama_service hardware optimise endpoint."""
+    try:
+        r = requests.post(f"{OLLAMA_SERVICE_URL}/api/hardware/optimise", timeout=120)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e), "status": "error"}), 503
+
+
 @app.route("/api/agents", methods=["GET"])
 def get_agents():
     """Agent list retrieval. Prefer database-backed list when available."""
@@ -537,6 +557,7 @@ def create_agent():
             max_tokens = int(data.get("max_tokens", 2048))
             metadata = data.get("metadata", {}) or {}
             avatar = data.get("avatar_image") if isinstance(data.get("avatar_image"), str) else None
+            placement = data.get("placement", "auto")
 
         if not name:
             return jsonify({"error": "Name is required", "error_code": "E_MISSING_NAME"}), 400
@@ -546,6 +567,7 @@ def create_agent():
             "name": name,
             "avatar_image": avatar,
             "model_name": model_name,
+            "placement": placement,
             "temperature": temperature,
             "top_p": top_p,
             "system_prompt": system_prompt,
@@ -1168,10 +1190,13 @@ def chat():
             messages.extend(history_pairs)
             messages.append({"role": "user", "content": message})
 
+            placement = agent_config.get("placement", "auto") if agent_config else "auto"
+
             payload = {
                 "messages": messages,
                 "agent_id": agent_id,
                 "model_name": model_name,
+                "placement": placement,
                 "temperature": temperature,
                 "top_p": top_p,
                 "max_tokens": max_tokens,
