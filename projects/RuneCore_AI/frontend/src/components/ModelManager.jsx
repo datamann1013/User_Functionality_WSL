@@ -234,6 +234,7 @@ const ModelManager = ({ isOpen, onClose }) => {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
+      <ErrorBoundary onClose={onClose}>
       <div className="modal-content large-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>Model Management</h2>
@@ -371,6 +372,7 @@ const ModelManager = ({ isOpen, onClose }) => {
           <button onClick={onClose} className="cancel-btn">Close</button>
         </div>
       </div>
+      </ErrorBoundary>
     </div>
   );
 };

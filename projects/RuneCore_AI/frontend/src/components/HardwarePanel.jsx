@@ -18,25 +18,27 @@ const DEVICE_COLORS = {
 };
 
 function DeviceRow({ device }) {
-  const color = DEVICE_COLORS[device.type] || "#6b7280";
-  const label = DEVICE_LABELS[device.type] || device.type.toUpperCase();
+  const type = device?.type || "";
+  const color = DEVICE_COLORS[type] || "#6b7280";
+  const label = DEVICE_LABELS[type] || (type ? type.toUpperCase() : "UNKNOWN");
+  const vramGb = typeof device?.vram_gb === "number" ? device.vram_gb : 0;
 
   return (
     <div className="hw-device-row">
       <div className="hw-device-indicator" style={{ backgroundColor: color }} />
       <div className="hw-device-info">
         <span className="hw-device-label">{label}</span>
-        <span className="hw-device-name">{device.name || "Unknown"}</span>
-        {device.vram_gb > 0 && (
-          <span className="hw-device-meta">{device.vram_gb.toFixed(1)} GB VRAM</span>
+        <span className="hw-device-name">{device?.name || "Unknown"}</span>
+        {vramGb > 0 && (
+          <span className="hw-device-meta">{vramGb.toFixed(1)} GB VRAM</span>
         )}
       </div>
       <div className="hw-device-status">
-        {device.verified !== undefined ? (
+        {device?.verified !== undefined ? (
           device.verified
             ? <span className="hw-status-ok">✓ Verified</span>
             : <span className="hw-status-err" title={device.error || ""}>✗ {device.error ? "Error" : "Unavailable"}</span>
-        ) : device.available
+        ) : device?.available
           ? <span className="hw-status-ok">● Available</span>
           : <span className="hw-status-warn">○ Not started</span>
         }
@@ -110,6 +112,7 @@ export default function HardwarePanel({ isOpen, onClose, devices, setDevices, op
 
   return (
     <div className="modal-overlay" onClick={onClose}>
+      <ErrorBoundary onClose={onClose}>
       <div className="modal-container hw-panel" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2 className="modal-title">Hardware Optimisation</h2>
@@ -141,7 +144,7 @@ export default function HardwarePanel({ isOpen, onClose, devices, setDevices, op
               <div className="hw-section-title">Actions</div>
               <div className="hw-log">
                 {actionLog.map((line, i) => (
-                  <div key={i} className="hw-log-line">› {line}</div>
+                  <div key={i} className="hw-log-line">› {typeof line === "string" ? line : JSON.stringify(line)}</div>
                 ))}
               </div>
             </div>
@@ -187,6 +190,7 @@ export default function HardwarePanel({ isOpen, onClose, devices, setDevices, op
           <button className="cancel-btn" onClick={onClose}>Close</button>
         </div>
       </div>
+      </ErrorBoundary>
     </div>
   );
 }

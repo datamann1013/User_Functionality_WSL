@@ -1,6 +1,7 @@
+use std::collections::VecDeque;
 use std::io;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::{middleware::AddExtension, routing::{get, post}, Router};
 use axum_server::accept::Accept;
@@ -22,7 +23,7 @@ mod rbac;
 mod registry;
 mod tls;
 
-use api::{AppState, CallerCn};
+use api::{AppState, ActionLog, CallerCn, push_log};
 use config::{MarshalConfig, register_with_core};
 use registry::Registry;
 
@@ -103,12 +104,61 @@ async fn async_main() {
     let rustls_cfg = RustlsConfig::from_config(server_config);
 
     let registry = Registry::new();
+    let action_log: ActionLog = Arc::new(Mutex::new(VecDeque::new()));
+
     let state = AppState {
         config: Arc::new(cfg.clone()),
         registry: registry.clone(),
+        action_log: action_log.clone(),
     };
 
-    // Build Axum router — CallerCn injected per-connection by MtlsAcceptor
+    // ── Auto-start Sentinel ──────────────────────────────────────────────────
+    if cfg.auto_start_sentinel {
+        let cfg_s = cfg.clone();
+        let reg_s  = registry.clone();
+        let log_s  = action_log.clone();
+        tokio::spawn(async move {
+            info!("Auto-starting Sentinel...");
+            push_log(&log_s, "startup: ensuring Sentinel...");
+            let result = actions::sentinel::ensure(&cfg_s).await;
+
+            // Update registry
+            let mut entry = registry::ComponentEntry::new("sentinel", "windows_service");
+            if let Some(ref err) = result.error {
+                entry.set_error(err.detail.clone());
+                push_log(&log_s, format!("sentinel -> error: {}", err.detail));
+            } else {
+                entry.set_status(registry::ComponentStatus::Running);
+                push_log(&log_s, format!("sentinel -> {}", result.outcome));
+            }
+            reg_s.upsert(entry);
+        });
+    }
+
+    // ── Local plain-HTTP status server (for tray window) ────────────────────
+    // Binds to 127.0.0.1 only — no TLS, no auth. Returns registry + action log.
+    {
+        let local_state = state.clone();
+        let tray_port   = cfg.tray_status_port;
+        tokio::spawn(async move {
+            let local_app = Router::new()
+                .route("/", get(api::local_status))
+                .with_state(local_state);
+            let bind_addr = format!("127.0.0.1:{}", tray_port);
+            match tokio::net::TcpListener::bind(&bind_addr).await {
+                Ok(listener) => {
+                    info!("Tray status server on http://{}", bind_addr);
+                    if let Err(e) = axum::serve(listener, local_app).await {
+                        warn!("Tray status server error: {}", e);
+                    }
+                }
+                Err(e) => warn!("Failed to bind tray status port {}: {}", tray_port, e),
+            }
+        });
+    }
+
+    // ── mTLS Axum router ─────────────────────────────────────────────────────
+    // CallerCn injected per-connection by MtlsAcceptor
     let app = Router::new()
         .route("/health", get(api::health))
         .route("/api/setup", post(api::post_setup))

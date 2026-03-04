@@ -93,6 +93,7 @@ const UserProfileModal = ({ isOpen, onClose }) => {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
+      <ErrorBoundary onClose={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>User Profile</h2>
@@ -193,6 +194,7 @@ const UserProfileModal = ({ isOpen, onClose }) => {
           </div>
         </div>
       </div>
+      </ErrorBoundary>
     </div>
   );
 };

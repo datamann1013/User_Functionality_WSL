@@ -55,4 +55,7 @@ winit = "0.29"
 
 # DPAPI key encryption (Windows only)
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["dpapi", "wincrypt", "winbase"] }
+winapi = { version = "0.3", features = [
+    "dpapi", "wincrypt", "winbase",
+    "winuser", "wingdi", "libloaderapi", "errhandlingapi",
+] }

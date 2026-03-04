@@ -39,7 +39,16 @@ pub struct MarshalConfig {
     pub paths: PathsConfig,
     #[serde(default)]
     pub roles: Vec<RoleConfig>,
+    /// Auto-start Sentinel on Marshal startup (default: true)
+    #[serde(default = "default_true")]
+    pub auto_start_sentinel: bool,
+    /// Local plain-HTTP port for the tray status window (default: 11444)
+    #[serde(default = "default_tray_port")]
+    pub tray_status_port: u16,
 }
+
+fn default_true() -> bool { true }
+fn default_tray_port() -> u16 { 11444 }
 
 impl MarshalConfig {
     pub fn load() -> Self {

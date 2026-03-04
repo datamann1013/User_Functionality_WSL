@@ -4,7 +4,8 @@ use axum::{
     response::Json,
 };
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 
 use crate::actions::service as svc;
 use crate::actions::setup::{self, SetupRequest};
@@ -12,11 +13,14 @@ use crate::config::MarshalConfig;
 use crate::rbac::{self, RbacResult};
 use crate::registry::Registry;
 
+pub type ActionLog = Arc<Mutex<VecDeque<String>>>;
+
 /// Shared application state for Axum handlers
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<MarshalConfig>,
     pub registry: Registry,
+    pub action_log: ActionLog,
     // Caller CN is extracted by the TLS layer and injected via extension.
     // In dev/test mode (no client cert), this may be None.
 }
@@ -61,6 +65,20 @@ fn rbac_check(
     }
 }
 
+/// Append a timestamped entry to the action log (keeps last 50).
+pub fn push_log(log: &ActionLog, msg: impl Into<String>) {
+    if let Ok(mut guard) = log.lock() {
+        guard.push_front(format!(
+            "[{}] {}",
+            chrono::Utc::now().format("%H:%M:%S"),
+            msg.into()
+        ));
+        if guard.len() > 50 {
+            guard.pop_back();
+        }
+    }
+}
+
 // ── Handlers ─────────────────────────────────────────────────────────────────
 
 /// GET /health — public (no RBAC)
@@ -75,6 +93,27 @@ pub async fn health(State(state): State<AppState>) -> Json<Value> {
     }))
 }
 
+/// GET / — local plain-HTTP status endpoint (no TLS, no RBAC, localhost-only)
+/// Used by the tray status window.
+pub async fn local_status(State(state): State<AppState>) -> Json<Value> {
+    let mut components = state.registry.list();
+    // Sort by name for stable display
+    components.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let recent_actions: Vec<String> = state
+        .action_log
+        .lock()
+        .map(|g| g.iter().cloned().collect())
+        .unwrap_or_default();
+
+    Json(json!({
+        "service": "RuneCore_Marshal",
+        "version": env!("CARGO_PKG_VERSION"),
+        "components": components,
+        "recent_actions": recent_actions,
+    }))
+}
+
 /// POST /api/setup — declarative setup spec
 pub async fn post_setup(
     State(state): State<AppState>,
@@ -83,8 +122,17 @@ pub async fn post_setup(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     rbac_check(&state.config, &caller.0, "setup")?;
 
+    let caller_cn = caller.0.as_deref().unwrap_or("unknown");
+    push_log(&state.action_log, format!("setup request from {}", caller_cn));
+
     let response = setup::execute(req, &state.config, &state.registry).await;
-    let status = if response.errors.is_empty() { StatusCode::OK } else { StatusCode::MULTI_STATUS };
+
+    let n = response.actions_taken.len();
+    let errs = response.errors.len();
+    push_log(
+        &state.action_log,
+        format!("setup done: {} action(s), {} error(s)", n, errs),
+    );
 
     Ok(Json(serde_json::to_value(&response).unwrap_or_default()))
 }
@@ -128,13 +176,26 @@ pub async fn ensure_service(
 
     // Special case: sentinel
     if name == "sentinel" {
+        push_log(&state.action_log, "ensure: sentinel");
         let result = crate::actions::sentinel::ensure(&state.config).await;
+        push_log(
+            &state.action_log,
+            format!(
+                "sentinel -> {}{}",
+                result.outcome,
+                result.error.as_ref().map(|e| format!(": {}", e.detail)).unwrap_or_default()
+            ),
+        );
         return Ok(Json(serde_json::to_value(&result).unwrap_or_default()));
     }
 
     // Generic Windows service start
+    push_log(&state.action_log, format!("ensure: {}", name));
     match svc::start_service(&name).await {
-        Ok(_) => Ok(Json(json!({"component": name, "outcome": "started"}))),
+        Ok(_) => {
+            push_log(&state.action_log, format!("{} -> started", name));
+            Ok(Json(json!({"component": name, "outcome": "started"})))
+        }
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": e, "code": "EMAA01"})),
@@ -155,7 +216,10 @@ pub async fn stop_service(
     let container_status = crate::actions::docker::container_status(docker, &name).await;
     if container_status != "not_found" {
         match crate::actions::docker::stop_container(docker, &name).await {
-            Ok(_) => return Ok(Json(json!({"component": name, "outcome": "stopped"}))),
+            Ok(_) => {
+                push_log(&state.action_log, format!("{} -> stopped (docker)", name));
+                return Ok(Json(json!({"component": name, "outcome": "stopped"})));
+            }
             Err(e) => return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": e, "code": "EMAA02"})),
@@ -164,8 +228,12 @@ pub async fn stop_service(
     }
 
     // Otherwise treat as Windows service
+    push_log(&state.action_log, format!("stop: {}", name));
     match svc::stop_service(&name).await {
-        Ok(_) => Ok(Json(json!({"component": name, "outcome": "stopped"}))),
+        Ok(_) => {
+            push_log(&state.action_log, format!("{} -> stopped", name));
+            Ok(Json(json!({"component": name, "outcome": "stopped"})))
+        }
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": e, "code": "EMAA01"})),

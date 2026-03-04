@@ -46,3 +46,9 @@ allowed_actions = ["service.status"]
 [[roles]]
 caller_cn       = "runecore_marshal"   # allow self-health-check
 allowed_actions = ["service.status"]
+
+# Auto-start Sentinel when Marshal starts (default: true)
+auto_start_sentinel = true
+
+# Port for the local plain-HTTP status endpoint used by the tray window
+tray_status_port = 11444
