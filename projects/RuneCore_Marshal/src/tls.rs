@@ -7,6 +7,10 @@ use std::sync::Arc;
 
 /// Load server TLS config with mutual TLS (client cert required).
 /// Returns a rustls ServerConfig that axum-server can use.
+///
+/// Key loading order:
+///   1. `<key_path>.dpapi` — DPAPI-encrypted blob (Windows only, written by bootstrap)
+///   2. `<key_path>`       — plain PEM (dev fallback or non-Windows)
 pub fn load_server_tls(
     cert_path: &str,
     key_path: &str,
@@ -19,18 +23,18 @@ pub fn load_server_tls(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("Failed to parse server cert: {e}"))?;
 
-    // Load private key — try PKCS8 first, then RSA
-    let key_file_content = std::fs::read(key_path)
-        .map_err(|e| format!("Cannot read key {key_path}: {e}"))?;
+    // Load private key — DPAPI-encrypted variant takes priority on Windows
+    let key_bytes = load_key_bytes(key_path)?;
+
     let private_key = {
-        let mut reader = BufReader::new(key_file_content.as_slice());
+        let mut reader = BufReader::new(key_bytes.as_slice());
         let pkcs8: Vec<_> = pkcs8_private_keys(&mut reader)
             .collect::<Result<Vec<_>, _>>()
             .unwrap_or_default();
         if !pkcs8.is_empty() {
             rustls::pki_types::PrivateKeyDer::Pkcs8(pkcs8.into_iter().next().unwrap())
         } else {
-            let mut reader = BufReader::new(key_file_content.as_slice());
+            let mut reader = BufReader::new(key_bytes.as_slice());
             let rsa: Vec<_> = rsa_private_keys(&mut reader)
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|e| format!("Failed to parse private key: {e}"))?;
@@ -64,6 +68,35 @@ pub fn load_server_tls(
         .map_err(|e| format!("Failed to build TLS config: {e}"))?;
 
     Ok(config)
+}
+
+/// Load the raw PEM bytes for the private key.
+/// On Windows, checks for `<key_path>.dpapi` first and decrypts with DPAPI.
+/// Falls back to reading `key_path` as plain PEM.
+fn load_key_bytes(key_path: &str) -> Result<Vec<u8>, String> {
+    let dpapi_path = format!("{}.dpapi", key_path);
+
+    if std::path::Path::new(&dpapi_path).exists() {
+        #[cfg(target_os = "windows")]
+        {
+            log::info!("Loading DPAPI-encrypted private key from {}", dpapi_path);
+            let encrypted = std::fs::read(&dpapi_path)
+                .map_err(|e| format!("Cannot read {dpapi_path}: {e}"))?;
+            return crate::dpapi::unprotect(&encrypted)
+                .map_err(|e| format!("DPAPI decryption failed: {e}"));
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            return Err(format!(
+                "DPAPI key file found at {} but DPAPI is not supported on this platform",
+                dpapi_path
+            ));
+        }
+    }
+
+    // Plain PEM — dev fallback
+    std::fs::read(key_path)
+        .map_err(|e| format!("Cannot read key {key_path}: {e}"))
 }
 
 /// Extract the Common Name (CN) from a DER-encoded X.509 certificate.

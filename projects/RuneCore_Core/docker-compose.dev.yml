@@ -4,7 +4,7 @@ services:
     build: .
     ports:
       - '11440:11440'
-      # 11441 is the internal HTTP proxy port — not exposed to host, internal containers only
+      - '11441:11441'  # Plain HTTP — native service bootstrap + internal container proxy
     environment:
       - RUNECORE_MODE=development
       - RUNECORE_CA_PASSPHRASE=runecore-dev

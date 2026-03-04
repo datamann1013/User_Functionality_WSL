@@ -11,6 +11,7 @@ mod db;
 mod cli;
 mod proxy;
 mod crl;
+mod pki_native;
 mod raft_consensus;
 mod raft_network;
 mod raft_storage;
@@ -163,10 +164,13 @@ async fn main() -> anyhow::Result<()> {
             .route("/api/v1/services", get(get_services))
             .route("/api/v1/services/query", get(proxy::query_service))
             .route("/api/v1/services/heartbeat", post(heartbeat_service))
+            .route("/api/v1/pki/ca", get(get_ca_cert))
             .route("/api/v1/pki/sign", post(sign_csr))
             .route("/api/v1/pki/renew", post(renew_certificate))
             .route("/api/v1/pki/revoke", post(revoke_certificate))
             .route("/api/v1/pki/crl", get(get_crl))
+            .route("/api/v1/pki/native/register", post(native_register))
+            .route("/api/v1/pki/native/issue", post(native_issue))
             .route("/api/v1/raft/message", post(raft_message_handler))
             .route("/api/proxy/*path", axum::routing::any(proxy_route_handler))
             .with_state(state.clone())
@@ -618,6 +622,111 @@ async fn revoke_certificate(State(state): State<AppState>, Json(payload): Json<R
             "ok": false,
             "error": format!("revocation error: {}", e)
         })),
+    }
+}
+
+/// GET /api/v1/pki/ca — return CA cert PEM (public, no auth required).
+/// Native services call this before they have a client cert.
+async fn get_ca_cert(State(state): State<AppState>) -> impl axum::response::IntoResponse {
+    let ca_cert_path = std::path::Path::new(&state.data_dir).join("ca_cert.pem");
+    match fs::read_to_string(&ca_cert_path) {
+        Ok(pem) => {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                axum::http::header::CONTENT_TYPE,
+                "application/x-pem-file".parse().unwrap(),
+            );
+            (headers, pem).into_response()
+        }
+        Err(e) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("CA cert not available: {}", e),
+        ).into_response(),
+    }
+}
+
+/// POST /api/v1/pki/native/register
+/// Body: { cn, binary_hash }
+/// Response: { ok, bootstrap_token }
+/// Called by install_service.ps1 to register a native service and get a bootstrap token.
+#[derive(Deserialize)]
+struct NativeRegisterRequest {
+    cn: String,
+    binary_hash: String,
+}
+
+async fn native_register(
+    State(state): State<AppState>,
+    Json(payload): Json<NativeRegisterRequest>,
+) -> Json<serde_json::Value> {
+    let registry = pki_native::NativePkiRegistry::new(&state.data_dir);
+    match registry.register(&payload.cn, &payload.binary_hash) {
+        Ok(token) => {
+            tracing::info!(
+                "native PKI: registered '{}' hash={}",
+                payload.cn,
+                &payload.binary_hash[..8.min(payload.binary_hash.len())]
+            );
+            Json(serde_json::json!({ "ok": true, "bootstrap_token": token }))
+        }
+        Err(e) => Json(serde_json::json!({ "ok": false, "error": e.to_string() })),
+    }
+}
+
+/// POST /api/v1/pki/native/issue
+/// Body: { cn, csr_pem, token, days_valid? }
+/// Response: { ok, cert_pem, ca_cert_pem }
+/// Called by runecore_marshal --bootstrap to exchange a token for a signed cert.
+#[derive(Deserialize)]
+struct NativeIssueRequest {
+    cn: String,
+    csr_pem: String,
+    token: String,
+    days_valid: Option<u32>,
+}
+
+async fn native_issue(
+    State(state): State<AppState>,
+    Json(payload): Json<NativeIssueRequest>,
+) -> Json<serde_json::Value> {
+    let registry = pki_native::NativePkiRegistry::new(&state.data_dir);
+    match registry.validate_and_consume_token(&payload.cn, &payload.token) {
+        Ok(binary_hash) => {
+            let days = payload.days_valid.unwrap_or(365);
+            tracing::info!(
+                "native PKI: issuing cert for '{}' (hash={}, days={})",
+                payload.cn,
+                &binary_hash[..8.min(binary_hash.len())],
+                days
+            );
+            match ca::sign_csr_with_role(
+                &state.data_dir,
+                &state.ca_passphrase,
+                &payload.csr_pem,
+                days,
+                "client",
+            ) {
+                Ok(cert_pem) => {
+                    let ca_pem = fs::read_to_string(
+                        std::path::Path::new(&state.data_dir).join("ca_cert.pem"),
+                    )
+                    .unwrap_or_default();
+                    Json(serde_json::json!({
+                        "ok": true,
+                        "cert_pem": String::from_utf8_lossy(&cert_pem),
+                        "ca_cert_pem": ca_pem,
+                    }))
+                }
+                Err(e) => Json(serde_json::json!({
+                    "ok": false,
+                    "error": format!("signing error: {}", e)
+                })),
+            }
+        }
+        Err(e) => {
+            tracing::warn!("native PKI: cert issuance denied for '{}': {}", payload.cn, e);
+            Json(serde_json::json!({ "ok": false, "error": e.to_string() }))
+        }
     }
 }
 

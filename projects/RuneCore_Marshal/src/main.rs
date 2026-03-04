@@ -14,7 +14,10 @@ use tower_http::trace::TraceLayer;
 
 mod actions;
 mod api;
+mod bootstrap;
 mod config;
+#[cfg(target_os = "windows")]
+mod dpapi;
 mod rbac;
 mod registry;
 mod tls;
@@ -23,8 +26,44 @@ use api::{AppState, CallerCn};
 use config::{MarshalConfig, register_with_core};
 use registry::Registry;
 
-#[tokio::main]
-async fn main() {
+// ── Entry point ───────────────────────────────────────────────────────────────
+//
+// Bootstrap mode runs synchronously BEFORE the tokio runtime is created so
+// that reqwest::blocking works without panicking inside an async context.
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() > 1 && args[1] == "--bootstrap" {
+        match bootstrap::parse_args(&args[2..]) {
+            Ok(bargs) => {
+                if let Err(e) = bootstrap::run(bargs) {
+                    eprintln!("Bootstrap failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            Err(e) => {
+                eprintln!("Bootstrap args error: {}", e);
+                eprintln!(
+                    "Usage: runecore_marshal --bootstrap \
+                     --token TOKEN --core-url URL \
+                     [--install-dir DIR] [--cn CN] [--days N]"
+                );
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
+    // Normal operation — start the async runtime
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to build tokio runtime")
+        .block_on(async_main());
+}
+
+async fn async_main() {
     env_logger::init();
     info!("RuneCore_Marshal v{} starting", env!("CARGO_PKG_VERSION"));
 
@@ -49,7 +88,7 @@ async fn main() {
         Ok(c) => Arc::new(c),
         Err(e) => {
             error!("Failed to load TLS config: {}", e);
-            error!("Place marshal.crt, marshal.key, ca.crt in the certs/ directory.");
+            error!("Run install_service.ps1 to provision certs from RuneCore_Core.");
             std::process::exit(1);
         }
     };
