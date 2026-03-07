@@ -1129,14 +1129,25 @@ def _verify_endpoints() -> dict:
         onnx_url = _marshal_endpoints.get("onnx_service", onnx_url)
 
     if onnx_url:
-        try:
-            r = requests.get(f"{onnx_url.rstrip('/')}/health", timeout=10)
-            if r.status_code == 200:
-                results["onnx_service"] = {"verified": True, "error": None, "endpoint": onnx_url}
-            else:
-                results["onnx_service"] = {"verified": False, "error": f"HTTP {r.status_code}", "endpoint": onnx_url}
-        except Exception as e:
-            results["onnx_service"] = {"verified": False, "error": str(e), "endpoint": onnx_url}
+        # ONNX may take longer to start (uvicorn boot, first-run venv setup).
+        # Retry up to 6 times with 10s gaps = 60s max wait.
+        onnx_ok = False
+        onnx_err = "timeout waiting for service"
+        for attempt in range(6):
+            try:
+                r = requests.get(f"{onnx_url.rstrip('/')}/health", timeout=10)
+                if r.status_code == 200:
+                    onnx_ok = True
+                    onnx_err = None
+                    break
+                else:
+                    onnx_err = f"HTTP {r.status_code}"
+            except Exception as e:
+                onnx_err = str(e)
+            if attempt < 5:
+                import time as _time
+                _time.sleep(10)
+        results["onnx_service"] = {"verified": onnx_ok, "error": onnx_err, "endpoint": onnx_url}
 
     return results
 
