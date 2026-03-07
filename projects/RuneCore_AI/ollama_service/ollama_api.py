@@ -964,16 +964,18 @@ def _build_setup_spec(profile: dict) -> dict:
 
     # One native Ollama per integrated GPU (DirectML, Windows-native)
     igpu_port = 11436
-    for i, gpu in enumerate(gpu_list):
+    igpu_idx = 0
+    for gpu in gpu_list:
         if gpu.get("gpu_type") == "integrated":
             components.append({
                 "type": "ollama_igpu",
                 "action": "ensure",
                 "config": {
-                    "name": f"ollama-igpu{i}",
-                    "port": igpu_port + i,
+                    "name": f"ollama-igpu{igpu_idx}",
+                    "port": igpu_port + igpu_idx,
                 },
             })
+            igpu_idx += 1
 
     return {"components": components}
 
@@ -1015,6 +1017,11 @@ def _call_marshal_setup():
             logger.info("Marshal setup complete: %s", result.get("actions_taken", []))
             if result.get("errors"):
                 logger.warning("Marshal setup errors: %s", result["errors"])
+            # Wire ONNX URL dynamically if Marshal started the service
+            if "onnx_service" in endpoints:
+                global ONNX_SERVICE_URL
+                ONNX_SERVICE_URL = endpoints["onnx_service"]
+                threading.Thread(target=_fetch_onnx_models, daemon=True).start()
         else:
             logger.warning("Marshal /api/setup returned %s: %s", r.status_code, r.text[:200])
     except Exception as e:
@@ -1116,12 +1123,20 @@ def _verify_endpoints() -> dict:
         except Exception as e:
             results[name] = {"verified": False, "error": str(e), "endpoint": base_url}
 
-    if ONNX_SERVICE_URL:
-        results["onnx_service"] = {
-            "verified": _onnx_available,
-            "error": None if _onnx_available else "ONNX service unavailable",
-            "endpoint": ONNX_SERVICE_URL,
-        }
+    # Check ONNX — prefer dynamic URL (set after Marshal starts it), fall back to env var
+    onnx_url = ONNX_SERVICE_URL
+    with _marshal_endpoints_lock:
+        onnx_url = _marshal_endpoints.get("onnx_service", onnx_url)
+
+    if onnx_url:
+        try:
+            r = requests.get(f"{onnx_url.rstrip('/')}/health", timeout=10)
+            if r.status_code == 200:
+                results["onnx_service"] = {"verified": True, "error": None, "endpoint": onnx_url}
+            else:
+                results["onnx_service"] = {"verified": False, "error": f"HTTP {r.status_code}", "endpoint": onnx_url}
+        except Exception as e:
+            results["onnx_service"] = {"verified": False, "error": str(e), "endpoint": onnx_url}
 
     return results
 
@@ -1216,6 +1231,11 @@ def hardware_optimise():
                 actions_taken.extend(result.get("actions_taken", []))
                 if result.get("errors"):
                     actions_taken.append(f"Marshal errors: {result['errors']}")
+                # If Marshal started the ONNX service, wire it in dynamically
+                if "onnx_service" in rewritten:
+                    global ONNX_SERVICE_URL
+                    ONNX_SERVICE_URL = rewritten["onnx_service"]
+                    actions_taken.append(f"ONNX service endpoint: {ONNX_SERVICE_URL}")
             else:
                 actions_taken.append(f"Marshal setup returned HTTP {r.status_code}: {r.text[:120]}")
         except Exception as e:
