@@ -70,7 +70,12 @@ fn base_url_from_req(req: &HttpRequest) -> String {
 async fn get_interfaces(req: HttpRequest) -> Result<impl Responder> {
     let mut candidates: Vec<String> = Vec::new();
 
-    // 1) environment override
+    let port = std::env::var("PORT").unwrap_or_else(|_| "5010".into());
+    // EXTERNAL_PORT is the host-mapped port that external devices use to reach this service.
+    // e.g. docker-compose maps 5100:5010 → external clients must connect on 5100, not 5010.
+    let ext_port = std::env::var("EXTERNAL_PORT").unwrap_or_else(|_| port.clone());
+
+    // 1) environment override — highest priority, explicit admin setting
     if let Ok(ext) = std::env::var("RUNECORE_EXTERNAL_URL") {
         let trimmed = ext.trim_end_matches('/').to_string();
         if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
@@ -80,21 +85,67 @@ async fn get_interfaces(req: HttpRequest) -> Result<impl Responder> {
         }
     }
 
-    // 2) host from request (may be localhost:port)
-    let info = req.connection_info();
-    let scheme = info.scheme();
-    let host = info.host();
-    candidates.push(format!("{}://{}", scheme, host));
+    // 2) Explicit host IPs injected via environment (comma-separated).
+    //    Set HOST_EXTERNAL_IPS=192.168.2.140,10.0.1.9 in your shell or .env file.
+    //    Takes effect immediately without needing Sentinel or CoreMemory running.
+    if let Ok(host_ips) = std::env::var("HOST_EXTERNAL_IPS") {
+        for ip in host_ips.split(',') {
+            let ip = ip.trim();
+            if !ip.is_empty() {
+                candidates.push(format!("http://{}:{}", ip, ext_port));
+            }
+        }
+    }
 
-    // 3) local non-loopback IPv4 addresses
+    // 3) Extract request base early (connection_info borrow must not outlive the async section)
+    let req_base = {
+        let info = req.connection_info();
+        format!("{}://{}", info.scheme(), info.host())
+    };
+
+    // 4) Query CoreMemory (via Core proxy) for the real host LAN IPs published by Sentinel.
+    //    Sentinel runs on the host, so it records real IPv4 addresses (192.168.x.x, 10.x.x.x)
+    //    — not the Docker bridge IPs this container would see via if_addrs.
+    if let Ok(core_url) = std::env::var("RUNECORE_CORE_URL") {
+        let query_url = format!(
+            "{}/api/proxy/CoreMemoryAPI/memories/query",
+            core_url.trim_end_matches('/')
+        );
+        let body = serde_json::json!({"namespace": "machine_profile", "top_k": 1});
+        if let Ok(client) = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(3))
+            .build()
+        {
+            if let Ok(resp) = client.post(&query_url).json(&body).send().await {
+                if let Ok(data) = resp.json::<serde_json::Value>().await {
+                    if let Some(ifaces) = data
+                        .get("results")
+                        .and_then(|r| r.as_array())
+                        .and_then(|r| r.first())
+                        .and_then(|first| first.get("metadata"))
+                        .and_then(|m| m.get("network_interfaces"))
+                        .and_then(|n| n.as_array())
+                    {
+                        for iface in ifaces {
+                            if let Some(ip) = iface.get("ip").and_then(|v| v.as_str()) {
+                                candidates.push(format!("http://{}:{}", ip, ext_port));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 5) Host from request (typically localhost:port when accessed through docker port mapping)
+    candidates.push(req_base);
+
+    // 6) Container's own non-loopback IPv4 addresses — fallback when Sentinel/CoreMemory unavailable
     if let Ok(addrs) = get_if_addrs() {
         for ifa in addrs {
             if ifa.is_loopback() { continue; }
-            match ifa.ip() {
-                std::net::IpAddr::V4(ipv4) => {
-                    candidates.push(format!("http://{}", ipv4));
-                }
-                _ => {}
+            if let std::net::IpAddr::V4(ipv4) = ifa.ip() {
+                candidates.push(format!("http://{}:{}", ipv4, ext_port));
             }
         }
     }
@@ -131,7 +182,7 @@ async fn get_signal(path: web::Path<String>, query: web::Query<HashMap<String, S
 }
 
 #[post("/upload")]
-async fn upload(req: HttpRequest, mut payload: Multipart, data: web::Data<std::sync::Mutex<AppStateData>>) -> Result<impl Responder> {
+async fn upload(req: HttpRequest, query: web::Query<HashMap<String, String>>, mut payload: Multipart, data: web::Data<std::sync::Mutex<AppStateData>>) -> Result<impl Responder> {
     ensure_dirs().map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
     // Handle only first file field for MVP
@@ -155,11 +206,14 @@ async fn upload(req: HttpRequest, mut payload: Multipart, data: web::Data<std::s
 
         // write to disk in a blocking task (clone path for move into closure)
         let write_path = filepath.clone();
+        // web::block returns Result<Result<T, io::Error>, BlockingError> — propagate both
         web::block(move || {
             let mut f = std::fs::File::create(&write_path)?;
             f.write_all(&buf)?;
             Ok::<(), std::io::Error>(())
-        }).await.map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+        }).await
+            .map_err(|e| actix_web::error::ErrorInternalServerError(e))?
+            .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
         // create token and expire
         let token = Uuid::new_v4().to_string();
@@ -180,13 +234,8 @@ async fn upload(req: HttpRequest, mut payload: Multipart, data: web::Data<std::s
         }
 
         // allow client override via query param external_base or header X-EXTERNAL-BASE
-        let mut base = None;
-        if let Some(q) = req.query_string().split('&').find_map(|kv| {
-            let mut parts = kv.splitn(2, '=');
-            let k = parts.next()?; let v = parts.next()?; if k == "external_base" { Some(v) } else { None }
-        }) {
-            base = Some(q.to_string());
-        }
+        // web::Query decodes percent-encoding automatically (e.g. http%3A%2F%2F → http://)
+        let mut base = query.get("external_base").map(|s| s.to_string());
         if base.is_none() {
             if let Some(h) = req.headers().get("X-EXTERNAL-BASE") {
                 if let Ok(s) = h.to_str() { base = Some(s.to_string()); }
@@ -201,7 +250,10 @@ async fn upload(req: HttpRequest, mut payload: Multipart, data: web::Data<std::s
         };
 
         let download_url = format!("{}/download/{}?token={}", base.trim_end_matches('/'), file_id, token);
-        let qr_svg = QrCode::new(&format!("{}", download_url)).unwrap().render::<svg::Color>().build();
+        let qr_svg = match QrCode::new(download_url.as_bytes()) {
+            Ok(code) => code.render::<svg::Color>().build(),
+            Err(e) => return Ok(HttpResponse::InternalServerError().body(format!("QR generation failed: {}", e))),
+        };
 
         let resp = serde_json::json!({
             "file_id": file_id,
@@ -218,7 +270,7 @@ async fn upload(req: HttpRequest, mut payload: Multipart, data: web::Data<std::s
 }
 
 #[get("/download/{file_id}")]
-async fn download(req: HttpRequest, path: web::Path<String>, query: web::Query<HashMap<String, String>>, data: web::Data<std::sync::Mutex<AppStateData>>) -> Result<actix_files::NamedFile> {
+async fn download(_req: HttpRequest, path: web::Path<String>, query: web::Query<HashMap<String, String>>, data: web::Data<std::sync::Mutex<AppStateData>>) -> Result<actix_files::NamedFile> {
     let file_id = path.into_inner();
     let token_q = query.get("token");
 
@@ -285,8 +337,14 @@ async fn register_with_core(req_body: String) -> impl Responder {
     }
 
     let core_url = std::env::var("RUNECORE_CORE_URL").unwrap_or_else(|_| "http://localhost:5000/api/modules/register".into());
-    let register_name = "RuneDrop";
-    let register_body = serde_json::json!({"name": register_name, "version": "0.1.0", "port": std::env::var("PORT").unwrap_or_else(|_| "5010".into()), "capabilities": ["file_sharing"]});
+    let register_name = "RuneMesh_Drop";
+    let register_body = serde_json::json!({
+        "name": register_name,
+        "version": "0.1.0",
+        "port": std::env::var("PORT").unwrap_or_else(|_| "5010".into()),
+        "rest_url": format!("http://mesh_drop:{}", std::env::var("PORT").unwrap_or_else(|_| "5010".into())),
+        "capabilities": ["file_transfer", "qr_code"]
+    });
 
     match build_reqwest_client(insecure) {
         Ok(client) => {
@@ -305,7 +363,7 @@ async fn register_with_core(req_body: String) -> impl Responder {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    println!("Starting RuneDrop service (RuneCore_Drop) ...");
+    println!("Starting RuneMesh_Drop service ...");
     ensure_dirs()?;
     let state = load_meta();
 
@@ -313,8 +371,14 @@ async fn main() -> std::io::Result<()> {
 
     // Try to register with core (best-effort)
     let core_url = std::env::var("RUNECORE_CORE_URL").unwrap_or_else(|_| "http://localhost:5000/api/modules/register".into());
-    let register_name = "RuneDrop";
-    let register_body = serde_json::json!({"name": register_name, "version": "0.1.0", "port": std::env::var("PORT").unwrap_or_else(|_| "5010".into()), "capabilities": ["file_sharing"]});
+    let register_name = "RuneMesh_Drop";
+    let register_body = serde_json::json!({
+        "name": register_name,
+        "version": "0.1.0",
+        "port": std::env::var("PORT").unwrap_or_else(|_| "5010".into()),
+        "rest_url": format!("http://mesh_drop:{}", std::env::var("PORT").unwrap_or_else(|_| "5010".into())),
+        "capabilities": ["file_transfer", "qr_code"]
+    });
 
     // fire-and-forget registration
     let core_url_clone = core_url.clone();
@@ -341,14 +405,16 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(data.clone())
-            // serve the frontend static files at /frontend
-            .service(actix_files::Files::new("/frontend", "./frontend").index_file("index.html"))
+            // API routes registered first so they are not shadowed by the file server
+            .service(get_interfaces)
             .service(upload)
             .service(download)
             .service(post_signal)
             .service(get_signal)
-        .service(health)
-        .service(register_with_core)
+            .service(health)
+            .service(register_with_core)
+            // Static file server last — serves the Vite-built frontend for all other paths
+            .service(actix_files::Files::new("/", "./frontend-dist").index_file("index.html"))
     })
     .bind(bind)?
     .run()

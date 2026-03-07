@@ -98,6 +98,16 @@ fn build_profile_body(metrics: &SystemMetrics) -> serde_json::Value {
         })
         .unwrap_or(serde_json::Value::Array(vec![]));
 
+    // Build network interface array — real host LAN IPs used by RuneMesh_Drop for QR links
+    let net_arr: serde_json::Value = metrics.network_interfaces.as_ref()
+        .map(|ifaces| {
+            ifaces.iter().map(|n| serde_json::json!({
+                "name": n.name,
+                "ip": n.ip,
+            })).collect::<serde_json::Value>()
+        })
+        .unwrap_or(serde_json::Value::Array(vec![]));
+
     let metadata = serde_json::json!({
         "schema_version": "1",
         "hostname": metrics.host,
@@ -110,6 +120,7 @@ fn build_profile_body(metrics: &SystemMetrics) -> serde_json::Value {
         "npu": npu_arr,
         "disks": disk_arr,
         "ram_slots": ram_arr,
+        "network_interfaces": net_arr,
         "sampled_at_ms": metrics.ts,
     });
 

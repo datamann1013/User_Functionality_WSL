@@ -1,33 +1,72 @@
-# RuneDrop (projects/RuneCore_Drop)
+# RuneMesh_Drop
 
-RuneDrop is the planned file-sharing module for RuneCore (folder name: `RuneCore_Drop`, module name: `RuneDrop`).
+File transfer module for RuneCore ecosystem (folder: `RuneMesh_Drop`, module: `RuneMesh_Drop`).
 
-This repository contains a minimal Rust-based prototype (Actix-web) implementing an HTTP relay upload/download flow with short-lived tokens and QR generation. It is an MVP — P2P (WebRTC) will be added in a follow-up iteration.
+## MVP Status
 
-Features implemented in this prototype:
-- POST /upload — multipart/form-data file upload. Returns file_id, token, download URL and a QR (SVG) that encodes the download URL.
-- GET /download/{file_id}?token=... — download the uploaded file (attachment)
-- GET /health — basic health check
-- Best-effort auto-registration with RuneCore core at startup (environment variable `RUNECORE_CORE_URL`)
- - Signaling endpoints for P2P (polling-based):
-	 - POST /signal/{file_id} — append a JSON string message (offer/answer/ice)
-	 - GET /signal/{file_id}?from=N — get messages from index N onward
+This is the **MVP** implementation with:
+- Rust/Actix-web backend with HTTP upload/download + QR code generation
+- New React/Vite frontend with matching Steel Blue theme
+- Core registration as `RuneMesh_Drop` with `file_transfer` and `qr_code` capabilities
+- Behind Core proxy (port 11441) - not directly exposed
 
-Frontend
-- A minimal React-based single-file frontend is included at `frontend/index.html` (no build step): it supports both HTTP relay flow and P2P via WebRTC datachannel using the signaling endpoints. Upload returns an SVG QR which the frontend displays.
+## Features
 
-Configuration
-- PORT — service port (default 5010)
-- RUNECORE_CORE_URL — core registration endpoint (default http://localhost:5000/api/modules/register)
+### Backend (Rust/Actix-web)
+- `POST /upload` — multipart/form-data file upload. Returns file_id, token, download URL and QR (SVG)
+- `GET /download/{file_id}?token=...` — download the uploaded file
+- `GET /interfaces` — network interface detection for QR URL generation
+- `GET /health` — basic health check
+- Auto-registration with RuneCore Core at startup
+- Signaling endpoints for P2P (stub, not fully implemented)
 
-Storage
-- Files are stored in `./storage/uploads/` inside the container. Metadata persisted to `./storage/metadata.json`.
+### Frontend (React/Vite)
+- Send File panel with drag-and-drop zone
+- Network interface selector
+- QR code display (SVG rendered)
+- Copyable download link
+- Receive File panel with manual code/URL entry
+- Recent transfers list (localStorage persisted)
 
-Notes
-- The prototype uses TLS only if fronted by a reverse-proxy or the core provides certificates. The crate opts to accept invalid certs during the initial registration call to the core to allow local CA setups; change this behavior for production.
-- Token expiry default: 48 hours. The frontend should keep the QR displayed while the user intends the file to be available.
+## Configuration
 
-Next steps (can implement next):
-- Add P2P support (WebRTC signaling + datachannel) so transfers can be direct between devices when possible.
-- Add React frontend for drag-and-drop and QR/pairing UI (currently the endpoint returns SVG QR which a frontend can display).
-- Implement at-rest encryption option and TLS integration with the core-provided certs.
+- `PORT` — service port (default 5010)
+- `RUNECORE_CORE_URL` — core registration endpoint (default http://localhost:5000/api/modules/register)
+- `RUNECORE_ALLOW_INSECURE_REGISTRATION` — allow insecure TLS for dev (set to "true")
+
+## Docker Compose (Dev)
+
+```yaml
+services:
+  mesh_drop:
+    build: .
+    environment:
+      - PORT=5010
+      - RUNECORE_CORE_URL=http://runecore_core:11441
+      - RUNECORE_ALLOW_INSECURE_REGISTRATION=true
+    networks:
+      runecore_dev:
+        aliases:
+          - mesh_drop
+```
+
+## Access
+
+- Direct: http://localhost:5100 (mapped port)
+- Via Core proxy: http://localhost:11441/api/proxy/RuneMesh_Drop/...
+
+## Storage
+
+- Files: `./storage/uploads/` inside container
+- Metadata: `./storage/metadata.json`
+
+## Token
+
+- Default expiry: 48 hours
+- Token validation required for download
+
+## Future (Not in MVP)
+
+- P2P via WebRTC
+- mDNS/UPnP for device discovery
+- End-to-end encryption
