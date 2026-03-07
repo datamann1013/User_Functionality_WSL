@@ -24,6 +24,10 @@ pub struct PathsConfig {
     pub nssm_exe: String,
     pub ollama_base_port: u16,
     pub onnx_service_dir: String,
+    /// Path to the native Ollama binary for iGPU service.
+    /// If empty, Marshal will search common install locations.
+    #[serde(default)]
+    pub ollama_native_binary: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

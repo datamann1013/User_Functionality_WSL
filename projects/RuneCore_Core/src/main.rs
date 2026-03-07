@@ -474,11 +474,15 @@ async fn register_service(State(state): State<AppState>, headers: HeaderMap, bod
 struct SignCsrRequest {
     csr_pem: String,
     days_valid: Option<u32>,
+    /// Role determines EKU: "server" → serverAuth, "client" → clientAuth, anything else → both.
+    /// Defaults to "client" for backwards compatibility.
+    role: Option<String>,
 }
 
 async fn sign_csr(State(state): State<AppState>, Json(payload): Json<SignCsrRequest>) -> Json<serde_json::Value> {
     let days = payload.days_valid.unwrap_or(7);
-    match ca::sign_csr(&state.data_dir, &state.ca_passphrase, &payload.csr_pem, days) {
+    let role = payload.role.as_deref().unwrap_or("client");
+    match ca::sign_csr_with_role(&state.data_dir, &state.ca_passphrase, &payload.csr_pem, days, role) {
         Ok(cert_pem) => Json(serde_json::json!({"ok": true, "cert_pem": String::from_utf8_lossy(&cert_pem)})),
         Err(e) => Json(serde_json::json!({"ok": false, "error": format!("signing error: {}", e)})),
     }

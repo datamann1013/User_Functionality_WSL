@@ -96,7 +96,8 @@ pub async fn proxy_handler(
         }
     };
 
-    if service.status != "running" && service.status != "limb_mode" {
+    let ok_status = matches!(service.status.as_str(), "running" | "limb_mode" | "healthy");
+    if !ok_status {
         tracing::warn!("proxy: service '{}' is {} — rejecting", service_name, service.status);
         return Err((
             StatusCode::SERVICE_UNAVAILABLE,

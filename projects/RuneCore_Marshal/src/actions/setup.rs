@@ -15,7 +15,7 @@ use std::collections::HashMap;
 #[derive(Debug, Deserialize)]
 pub struct ComponentSpec {
     #[serde(rename = "type")]
-    pub kind: String,        // "sentinel" | "onnx_service" | "ollama_gpu"
+    pub kind: String,        // "sentinel" | "onnx_service" | "ollama_gpu" | "ollama_igpu"
     pub action: String,      // "ensure" | "stop"
     #[serde(default)]
     pub config: ComponentConfig,
@@ -90,6 +90,20 @@ pub async fn execute(
                     }
                     _ => ActionResult::err(
                         "ollama_gpu",
+                        ActionError::new("EMAA00", format!("Unknown action '{}'", spec.action)),
+                    ),
+                }
+            }
+
+            "ollama_igpu" => {
+                match spec.action.as_str() {
+                    "ensure" => {
+                        let port = spec.config.port.unwrap_or(11436);
+                        let name = spec.config.name.as_deref().unwrap_or("ollama-igpu0");
+                        ensure_ollama_igpu(cfg, name, port).await
+                    }
+                    _ => ActionResult::err(
+                        "ollama_igpu",
                         ActionError::new("EMAA00", format!("Unknown action '{}'", spec.action)),
                     ),
                 }
@@ -176,4 +190,99 @@ async fn stop_onnx_service(_cfg: &MarshalConfig) -> ActionResult {
         &["-Command", "Get-Process uvicorn -ErrorAction SilentlyContinue | Stop-Process -Force"],
     ).await;
     ActionResult::ok("onnx_service", "stopped", None)
+}
+
+/// Start a native Ollama instance for the integrated GPU using NSSM.
+///
+/// Ollama is run with `OLLAMA_HOST=0.0.0.0:{port}` so it listens on a
+/// separate port from the primary Ollama. On Windows, Ollama's DirectML
+/// backend picks up AMD integrated GPUs automatically.
+async fn ensure_ollama_igpu(cfg: &MarshalConfig, service_name: &str, port: u16) -> ActionResult {
+    use crate::actions::{run_cmd, service as svc};
+
+    let endpoint = format!("http://localhost:{port}");
+
+    // Fast path: if already running just return the endpoint
+    if svc::query_service(service_name).await == svc::WinServiceState::Running {
+        return ActionResult::ok(service_name, "already running", Some(endpoint));
+    }
+
+    // Find the Ollama binary — config path → PATH → common install locations
+    let ollama_bin = {
+        let cfg_path = cfg.paths.ollama_native_binary.trim();
+        if !cfg_path.is_empty() && std::path::Path::new(cfg_path).exists() {
+            cfg_path.to_string()
+        } else {
+            // Try PATH first
+            let (from_path, _, ok) = run_cmd("where", &["ollama"]).await;
+            if ok && !from_path.trim().is_empty() {
+                from_path.lines().next().unwrap_or("ollama").trim().to_string()
+            } else {
+                // Search common Windows install locations
+                let common = [
+                    r"C:\Program Files\Ollama\ollama.exe",
+                    r"C:\Program Files (x86)\Ollama\ollama.exe",
+                ];
+                // Also search all user profiles
+                let user_glob = std::fs::read_dir(r"C:\Users")
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|e| e.path().join(r"AppData\Local\Programs\Ollama\ollama.exe"))
+                    .find(|p| p.exists())
+                    .map(|p| p.to_string_lossy().into_owned());
+
+                let found = common.iter()
+                    .map(|s| s.to_string())
+                    .chain(user_glob)
+                    .find(|p| std::path::Path::new(p).exists());
+
+                match found {
+                    Some(p) => p,
+                    None => return ActionResult::err(
+                        service_name,
+                        ActionError::new("EMAA04",
+                            "Ollama binary not found. Set [paths] ollama_native_binary in marshal.toml"),
+                    ),
+                }
+            }
+        }
+    };
+
+    let nssm = &cfg.paths.nssm_exe;
+
+    // Install the service if not already registered
+    let ollama_dir = std::path::Path::new(&ollama_bin)
+        .parent()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| ".".to_string());
+
+    run_cmd(nssm, &["install", service_name, &ollama_bin, "serve"]).await;
+
+    // Set working dir, env and start type regardless of install outcome
+    // (nssm set is idempotent — safe to call on an already-installed service)
+    run_cmd(nssm, &["set", service_name, "AppDirectory", &ollama_dir]).await;
+    run_cmd(nssm, &["set", service_name, "AppEnvironmentExtra",
+        &format!("OLLAMA_HOST=0.0.0.0:{port}"),
+    ]).await;
+    run_cmd(nssm, &["set", service_name, "Start", "SERVICE_AUTO_START"]).await;
+
+    // Start (poll until Running, handles SERVICE_START_PENDING)
+    match svc::start_service(service_name).await {
+        Ok(_) => {
+            // Poll up to 5 s for service to reach Running state
+            for _ in 0..10 {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                if svc::query_service(service_name).await == svc::WinServiceState::Running {
+                    info!("iGPU Ollama '{}' running on port {}", service_name, port);
+                    return ActionResult::ok(service_name, "started", Some(endpoint));
+                }
+            }
+            ActionResult::ok(service_name, "started", Some(endpoint))
+        }
+        Err(e) => ActionResult::err(
+            service_name,
+            ActionError::new("EMAA05", format!("Failed to start iGPU Ollama: {e}")),
+        ),
+    }
 }

@@ -113,10 +113,10 @@ export default function HardwarePanel({ isOpen, onClose, devices, setDevices, op
   return (
     <div className="modal-overlay" onClick={onClose}>
       <ErrorBoundary onClose={onClose}>
-      <div className="modal-container hw-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-content hw-panel" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h2 className="modal-title">Hardware Optimisation</h2>
-          <button className="modal-close-btn" onClick={onClose}>✕</button>
+          <h2>Hardware Optimisation</h2>
+          <button className="modal-close" onClick={onClose}>×</button>
         </div>
 
         <div className="hw-panel-body">

@@ -67,10 +67,19 @@ pub async fn install_and_start_service(
     let (stdout, stderr, ok) = run_cmd(nssm_exe, &["start", service_name]).await;
     if ok {
         info!("Service {} installed and started via NSSM", service_name);
-        Ok(())
-    } else {
-        Err(format!("NSSM start failed: {} {}", stdout.trim(), stderr.trim()))
+        return Ok(());
     }
+    // NSSM exits non-zero when the service is still in SERVICE_START_PENDING,
+    // even though it will finish starting moments later.  Poll sc query for up
+    // to 5 s before declaring failure.
+    for _ in 0..10 {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        if query_service(service_name).await == WinServiceState::Running {
+            info!("Service {} confirmed running after NSSM start", service_name);
+            return Ok(());
+        }
+    }
+    Err(format!("NSSM start failed: {} {}", stdout.trim(), stderr.trim()))
 }
 
 /// Service status for API responses

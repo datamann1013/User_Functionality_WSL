@@ -22,10 +22,12 @@ except Exception:
         return None
 
 import json
+import ssl
 import subprocess
 import threading
 import re
 import time as _time
+from requests.adapters import HTTPAdapter
 
 # App setup
 app = Flask(__name__)
@@ -859,6 +861,33 @@ def chat():
         return jsonify({"error": f"Chat failed: {str(e)}"}), 500
 
 
+class _MtlsAdapter(HTTPAdapter):
+    """HTTPS adapter that presents a client cert and verifies against a specific CA,
+    but skips hostname matching. Needed when connecting to 'host.docker.internal'
+    which is not in the Marshal server cert's SAN (only localhost/127.0.0.1 are).
+    The CA chain is still fully verified — only the hostname check is relaxed."""
+
+    def __init__(self, ca_cert=None, client_cert=None, client_key=None, **kw):
+        self._ca_cert = ca_cert
+        self._client_cert = client_cert
+        self._client_key = client_key
+        super().__init__(**kw)
+
+    def init_poolmanager(self, *args, **kw):
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        if self._ca_cert:
+            ctx.load_verify_locations(self._ca_cert)
+            ctx.verify_mode = ssl.CERT_REQUIRED
+        else:
+            ctx.verify_mode = ssl.CERT_NONE
+        if self._client_cert and self._client_key:
+            ctx.load_cert_chain(self._client_cert, self._client_key)
+        kw["ssl_context"] = ctx
+        kw["assert_hostname"] = False  # disable urllib3's own hostname check
+        super().init_poolmanager(*args, **kw)
+
+
 def _get_marshal_session():
     """Build a requests Session with mTLS certs for calling Marshal.
 
@@ -867,12 +896,12 @@ def _get_marshal_session():
     if not MARSHAL_URL:
         return None
     session = requests.Session()
-    if MARSHAL_CERT_PATH and MARSHAL_KEY_PATH:
-        session.cert = (MARSHAL_CERT_PATH, MARSHAL_KEY_PATH)
-    if MARSHAL_CA_PATH:
-        session.verify = MARSHAL_CA_PATH
-    else:
-        session.verify = False  # Dev fallback — no CA cert configured
+    adapter = _MtlsAdapter(
+        ca_cert=MARSHAL_CA_PATH or None,
+        client_cert=MARSHAL_CERT_PATH or None,
+        client_key=MARSHAL_KEY_PATH or None,
+    )
+    session.mount("https://", adapter)
     return session
 
 
@@ -885,12 +914,12 @@ def _fetch_machine_profile() -> dict:
     if not CORE_MEMORY_URL:
         return {}
     try:
-        url = f"{CORE_MEMORY_URL.rstrip('/')}/v1/memories"
-        r = requests.get(url, params={"namespace": "machine_profile"}, timeout=5)
+        url = f"{CORE_MEMORY_URL.rstrip('/')}/memories/query"
+        r = requests.post(url, json={"query": "machine profile", "namespace": "machine_profile", "top_k": 1}, timeout=5)
         if r.status_code == 200:
-            items = r.json().get("memories", [])
-            if items:
-                profile = items[0].get("metadata", {})
+            results = r.json().get("results", [])
+            if results:
+                profile = results[0].get("metadata", {})
                 with _machine_profile_lock:
                     global _machine_profile
                     _machine_profile = profile
@@ -919,7 +948,7 @@ def _build_setup_spec(profile: dict) -> dict:
             "config": {"device": "npu"},
         })
 
-    # One Ollama container per discrete GPU
+    # One Ollama container per discrete GPU (Docker NVIDIA runtime)
     base_port = 11435
     for i, gpu in enumerate(gpu_list):
         if gpu.get("gpu_type") == "discrete":
@@ -930,6 +959,19 @@ def _build_setup_spec(profile: dict) -> dict:
                     "name": f"ollama-gpu{i}",
                     "port": base_port + i,
                     "gpu_uuid": gpu.get("device_id", ""),
+                },
+            })
+
+    # One native Ollama per integrated GPU (DirectML, Windows-native)
+    igpu_port = 11436
+    for i, gpu in enumerate(gpu_list):
+        if gpu.get("gpu_type") == "integrated":
+            components.append({
+                "type": "ollama_igpu",
+                "action": "ensure",
+                "config": {
+                    "name": f"ollama-igpu{i}",
+                    "port": igpu_port + i,
                 },
             })
 
@@ -962,7 +1004,12 @@ def _call_marshal_setup():
         )
         if r.status_code in (200, 207):
             result = r.json()
-            endpoints = result.get("endpoints", {})
+            raw_eps = result.get("endpoints", {})
+            endpoints = {
+                k: v.replace("http://localhost:", "http://host.docker.internal:", 1)
+                   .replace("https://localhost:", "https://host.docker.internal:", 1)
+                for k, v in raw_eps.items()
+            }
             with _marshal_endpoints_lock:
                 _marshal_endpoints.update(endpoints)
             logger.info("Marshal setup complete: %s", result.get("actions_taken", []))
@@ -1050,13 +1097,6 @@ def _verify_endpoints() -> dict:
     ONNX availability is taken from the existing _onnx_available flag.
     Returns dict: {name: {"verified": bool, "error": str|None, "endpoint": str}}
     """
-    verify_payload = {
-        "model": DEFAULT_MODEL,
-        "messages": [{"role": "user", "content": "Reply with the single word READY."}],
-        "stream": False,
-        "options": {"num_predict": 10},
-    }
-
     to_check = {"ollama_default": OLLAMA_HOST}
     with _marshal_endpoints_lock:
         for name, url in _marshal_endpoints.items():
@@ -1066,12 +1106,10 @@ def _verify_endpoints() -> dict:
     results = {}
     for name, base_url in to_check.items():
         try:
-            r = requests.post(
-                f"{base_url.rstrip('/')}/api/chat",
-                json=verify_payload,
-                timeout=15,
-            )
-            if r.status_code == 200 and "error" not in r.json():
+            # /api/tags is a lightweight liveness check — returns 200 regardless of
+            # whether any models are loaded, unlike /api/chat which 404s with no model.
+            r = requests.get(f"{base_url.rstrip('/')}/api/tags", timeout=10)
+            if r.status_code == 200:
                 results[name] = {"verified": True, "error": None, "endpoint": base_url}
             else:
                 results[name] = {"verified": False, "error": f"HTTP {r.status_code}", "endpoint": base_url}
@@ -1095,6 +1133,10 @@ def hardware_status():
         endpoints = dict(_marshal_endpoints)
     with _machine_profile_lock:
         profile = dict(_machine_profile)
+
+    # Populate cache on first call so the panel shows real hardware immediately
+    if not profile:
+        profile = _fetch_machine_profile()
 
     devices = [{"type": "cpu", "name": profile.get("cpu_model", "CPU"), "available": True}]
 
@@ -1161,8 +1203,16 @@ def hardware_optimise():
             )
             if r.status_code in (200, 207):
                 result = r.json()
+                # Marshal returns localhost URLs — rewrite to host.docker.internal
+                # so Docker containers can reach services running on the host.
+                raw_eps = result.get("endpoints", {})
+                rewritten = {
+                    k: v.replace("http://localhost:", "http://host.docker.internal:", 1)
+                       .replace("https://localhost:", "https://host.docker.internal:", 1)
+                    for k, v in raw_eps.items()
+                }
                 with _marshal_endpoints_lock:
-                    _marshal_endpoints.update(result.get("endpoints", {}))
+                    _marshal_endpoints.update(rewritten)
                 actions_taken.extend(result.get("actions_taken", []))
                 if result.get("errors"):
                     actions_taken.append(f"Marshal errors: {result['errors']}")
@@ -1176,9 +1226,22 @@ def hardware_optimise():
     if ONNX_SERVICE_URL:
         _fetch_onnx_models()
 
+    def _infer_type(name: str) -> str:
+        if name == "ollama_default": return "cpu"
+        if name.startswith("ollama-gpu"): return "dgpu"
+        if name.startswith("ollama-igpu"): return "igpu"
+        if name == "onnx_service": return "npu"
+        return "cpu"
+
     verification = _verify_endpoints()
     devices = [
-        {"name": name, "endpoint": v["endpoint"], "verified": v["verified"], "error": v["error"]}
+        {
+            "name": name,
+            "type": _infer_type(name),
+            "endpoint": v["endpoint"],
+            "verified": v["verified"],
+            "error": v["error"],
+        }
         for name, v in verification.items()
     ]
 

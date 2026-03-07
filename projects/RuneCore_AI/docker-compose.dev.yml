@@ -98,7 +98,7 @@ services:
       # Marshal — native host action daemon (runs on Windows host at port 11443)
       # Set MARSHAL_URL=https://host.docker.internal:11443 to enable.
       # Certs are volume-mounted from runecore_certs volume (populated by RuneCore_Core CA).
-      - MARSHAL_URL=${MARSHAL_URL:-}
+      - MARSHAL_URL=https://host.docker.internal:11443
       - MARSHAL_CERT_PATH=/certs/ollama_wrapper.crt
       - MARSHAL_KEY_PATH=/certs/ollama_wrapper.key
       - MARSHAL_CA_PATH=/certs/ca.crt
