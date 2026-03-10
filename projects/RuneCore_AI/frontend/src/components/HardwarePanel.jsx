@@ -1,194 +1,190 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 import ErrorBoundary from "./ErrorBoundary";
 
-const API_BASE = process.env.REACT_APP_API_URL || "";
-
-const DEVICE_LABELS = {
-  cpu:  "CPU",
-  dgpu: "dGPU",
-  igpu: "iGPU",
-  npu:  "NPU / ONNX",
-};
-
-const DEVICE_COLORS = {
+const TYPE_COLOR = {
   cpu:  "#6b7280",
   dgpu: "#f97316",
   igpu: "#3b82f6",
   npu:  "#22c55e",
 };
 
-function DeviceRow({ device }) {
-  const type = device?.type || "";
-  const color = DEVICE_COLORS[type] || "#6b7280";
-  const label = DEVICE_LABELS[type] || (type ? type.toUpperCase() : "UNKNOWN");
-  const vramGb = typeof device?.vram_gb === "number" ? device.vram_gb : 0;
+const TYPE_LABEL = {
+  cpu:  "CPU",
+  dgpu: "dGPU",
+  igpu: "iGPU",
+  npu:  "NPU",
+};
 
+// Which section does a step belong to?
+function stepSection(id) {
+  if (id === "profile") return "hardware";
+  if (id.startsWith("svc_") || id === "no_marshal") return "services";
+  return "endpoints";
+}
+
+function StepIcon({ status }) {
+  if (status === "running") return <span className="hw-step-spinner" aria-label="running" />;
+  if (status === "done")    return <span className="hw-step-ok">✓</span>;
+  if (status === "error")   return <span className="hw-step-err">✗</span>;
+  if (status === "warn")    return <span className="hw-step-warn">⚠</span>;
+  return <span className="hw-step-pending">○</span>;
+}
+
+function StepRow({ step }) {
+  return (
+    <div className={`hw-step-row hw-step-row--${step.status}`}>
+      <StepIcon status={step.status} />
+      <span className="hw-step-label">{step.label}</span>
+      {step.message && <span className="hw-step-msg">{step.message}</span>}
+    </div>
+  );
+}
+
+function DeviceRow({ device }) {
+  const color = TYPE_COLOR[device.type] || "#6b7280";
+  const label = TYPE_LABEL[device.type] || (device.type || "").toUpperCase();
   return (
     <div className="hw-device-row">
       <div className="hw-device-indicator" style={{ backgroundColor: color }} />
       <div className="hw-device-info">
         <span className="hw-device-label">{label}</span>
-        <span className="hw-device-name">{device?.name || "Unknown"}</span>
-        {vramGb > 0 && (
-          <span className="hw-device-meta">{vramGb.toFixed(1)} GB VRAM</span>
-        )}
+        <span className="hw-device-name">{device.name || device.endpoint}</span>
       </div>
       <div className="hw-device-status">
-        {device?.verified !== undefined ? (
-          device.verified
-            ? <span className="hw-status-ok">✓ Verified</span>
-            : <span className="hw-status-err" title={device.error || ""}>✗ {device.error ? "Error" : "Unavailable"}</span>
-        ) : device?.available
-          ? <span className="hw-status-ok">● Available</span>
-          : <span className="hw-status-warn">○ Not started</span>
-        }
+        {device.verified
+          ? <span className="hw-status-ok">✓ Verified</span>
+          : <span className="hw-status-err" title={device.error || ""}>
+              {device.error ? `✗ ${device.error}` : "✗ Unverified"}
+            </span>}
       </div>
     </div>
   );
 }
 
-export default function HardwarePanel({ isOpen, onClose, devices, setDevices, optimised, setOptimised }) {
-  const [state, setState] = useState("idle"); // idle | running | done | error
-  const [actionLog, setActionLog] = useState([]);
-  const [resultDevices, setResultDevices] = useState([]);
-  const [errorMsg, setErrorMsg] = useState("");
-
-  // Reset panel state when closed
-  useEffect(() => {
-    if (!isOpen) {
-      setState("idle");
-      setActionLog([]);
-      setResultDevices([]);
-      setErrorMsg("");
-    }
-  }, [isOpen]);
-
+export default function HardwarePanel({
+  isOpen, onClose,
+  hwStatus, hwSteps, hwDevices,
+  onStart,
+  devices,   // detected hardware from /status (shown before optimise)
+}) {
   if (!isOpen) return null;
 
-  const handleOptimise = async () => {
-    setState("running");
-    setActionLog(["Fetching hardware profile..."]);
-    setResultDevices([]);
-    setErrorMsg("");
+  const running  = hwStatus === "running";
+  const done     = hwStatus === "done";
+  const hasError = hwStatus === "error";
+  const active   = running || done || hasError;
 
-    try {
-      const r = await fetch(`${API_BASE}/api/hardware/optimise`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-      const data = await r.json();
-
-      if (!r.ok) {
-        setState("error");
-        setErrorMsg(data.error || `HTTP ${r.status}`);
-        return;
-      }
-
-      setActionLog(data.actions_taken || []);
-      setResultDevices(data.devices || []);
-
-      // Update parent device list with fresh data
-      if (data.devices && data.devices.length > 0) {
-        // Re-fetch status to get the full device list (optimise returns verification data)
-        try {
-          const sr = await fetch(`${API_BASE}/api/hardware/status`);
-          if (sr.ok) {
-            const sd = await sr.json();
-            setDevices(sd.devices || []);
-          }
-        } catch (_) {}
-      }
-
-      setOptimised(true);
-      setState("done");
-    } catch (e) {
-      setState("error");
-      setErrorMsg(String(e));
-    }
-  };
-
-  const displayDevices = state === "done" ? resultDevices : devices;
-  const verifiedCount = resultDevices.filter((d) => d.verified).length;
+  const hwStepsSection = hwSteps.filter(s => stepSection(s.id) === "hardware");
+  const svcSteps       = hwSteps.filter(s => stepSection(s.id) === "services");
+  const verifySteps    = hwSteps.filter(s => stepSection(s.id) === "endpoints");
+  const verifiedCount  = hwDevices.filter(d => d.verified).length;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
       <ErrorBoundary onClose={onClose}>
-      <div className="modal-content hw-panel" onClick={(e) => e.stopPropagation()}>
+      <div className="modal-content hw-panel" onClick={e => e.stopPropagation()}>
+
         <div className="modal-header">
           <h2>Hardware Optimisation</h2>
           <button className="modal-close" onClick={onClose}>×</button>
         </div>
 
         <div className="hw-panel-body">
-          {/* Detected hardware section */}
-          <div className="hw-section">
-            <div className="hw-section-title">
-              {state === "done" ? "Verified Services" : "Detected Hardware"}
-            </div>
-            {displayDevices.length === 0 ? (
-              <div className="hw-empty">
-                {state === "running"
-                  ? "Scanning hardware..."
-                  : "No hardware profile available. Ensure Sentinel is running."}
-              </div>
-            ) : (
-              <div className="hw-device-list">
-                {displayDevices.map((d, i) => <DeviceRow key={i} device={d} />)}
-              </div>
-            )}
-          </div>
 
-          {/* Action log */}
-          {actionLog.length > 0 && (
+          {/* Idle: show detected hardware + description */}
+          {!active && (
+            <>
+              {devices && devices.length > 0 && (
+                <div className="hw-section">
+                  <div className="hw-section-title">Detected Hardware</div>
+                  <div className="hw-device-list">
+                    {devices.map((d, i) => (
+                      <div key={i} className="hw-device-row">
+                        <div className="hw-device-indicator"
+                             style={{ backgroundColor: TYPE_COLOR[d.type] || "#6b7280" }} />
+                        <div className="hw-device-info">
+                          <span className="hw-device-label">{TYPE_LABEL[d.type] || d.type}</span>
+                          <span className="hw-device-name">{d.name || "Unknown"}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="hw-description">
+                Reads your hardware profile, starts the required inference services,
+                and verifies each endpoint. Agents set to <strong>Auto</strong> will
+                route to the best device for each request.
+              </div>
+            </>
+          )}
+
+          {/* Progress steps */}
+          {active && (
+            <>
+              {hwStepsSection.length > 0 && (
+                <div className="hw-section">
+                  <div className="hw-section-title">Hardware</div>
+                  <div className="hw-steps">
+                    {hwStepsSection.map(s => <StepRow key={s.id} step={s} />)}
+                  </div>
+                </div>
+              )}
+
+              {svcSteps.length > 0 && (
+                <div className="hw-section">
+                  <div className="hw-section-title">Services</div>
+                  <div className="hw-steps">
+                    {svcSteps.map(s => <StepRow key={s.id} step={s} />)}
+                  </div>
+                </div>
+              )}
+
+              {verifySteps.length > 0 && (
+                <div className="hw-section">
+                  <div className="hw-section-title">Endpoints</div>
+                  <div className="hw-steps">
+                    {verifySteps.map(s => <StepRow key={s.id} step={s} />)}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Final verified device list */}
+          {done && hwDevices.length > 0 && (
             <div className="hw-section">
-              <div className="hw-section-title">Actions</div>
-              <div className="hw-log">
-                {actionLog.map((line, i) => (
-                  <div key={i} className="hw-log-line">› {typeof line === "string" ? line : JSON.stringify(line)}</div>
-                ))}
+              <div className="hw-section-title">Ready</div>
+              <div className="hw-device-list">
+                {hwDevices.map((d, i) => <DeviceRow key={i} device={d} />)}
+              </div>
+              <div className="hw-result-banner">
+                {verifiedCount} of {hwDevices.length} endpoint{hwDevices.length !== 1 ? "s" : ""} verified.
               </div>
             </div>
           )}
 
-          {/* Result banner */}
-          {state === "done" && (
-            <div className="hw-result-banner">
-              Hardware optimised — {verifiedCount} of {resultDevices.length} endpoint{resultDevices.length !== 1 ? "s" : ""} verified.
-            </div>
+          {hasError && (
+            <div className="hw-error-banner">Optimisation failed — check service logs.</div>
           )}
 
-          {state === "error" && (
-            <div className="hw-error-banner">
-              Error: {errorMsg}
-            </div>
-          )}
-
-          {/* Description */}
-          {state === "idle" && (
-            <div className="hw-description">
-              Reads your hardware profile, starts the required inference services via Marshal,
-              and verifies each endpoint. After optimisation, agents set to <strong>Auto</strong> will
-              automatically route to the best device based on model size.
-            </div>
-          )}
         </div>
 
         <div className="hw-panel-footer">
-          {state === "idle" || state === "error" ? (
-            <button className="hw-optimise-btn" onClick={handleOptimise}>
+          {!running && !done ? (
+            <button className="hw-optimise-btn" onClick={onStart}>
               ⚡ Optimise for this hardware
             </button>
-          ) : state === "running" ? (
-            <button className="hw-optimise-btn" disabled>
-              Running...
-            </button>
+          ) : running ? (
+            <button className="hw-optimise-btn" disabled>Running...</button>
           ) : (
-            <button className="hw-optimise-btn hw-optimise-btn--rerun" onClick={handleOptimise}>
-              ↺ Re-run optimisation
+            <button className="hw-optimise-btn hw-optimise-btn--rerun" onClick={onStart}>
+              ↺ Re-run
             </button>
           )}
           <button className="cancel-btn" onClick={onClose}>Close</button>
         </div>
+
       </div>
       </ErrorBoundary>
     </div>

@@ -502,9 +502,19 @@ def hardware_status():
 
 @app.route("/api/hardware/optimise", methods=["POST"])
 def hardware_optimise():
-    """Proxy to ollama_service hardware optimise endpoint."""
+    """Start hardware optimise background task."""
     try:
-        r = requests.post(f"{OLLAMA_SERVICE_URL}/api/hardware/optimise", timeout=120)
+        r = requests.post(f"{OLLAMA_SERVICE_URL}/api/hardware/optimise", timeout=10)
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e), "status": "error"}), 503
+
+
+@app.route("/api/hardware/optimise/status", methods=["GET"])
+def hardware_optimise_status():
+    """Poll hardware optimise task progress."""
+    try:
+        r = requests.get(f"{OLLAMA_SERVICE_URL}/api/hardware/optimise/status", timeout=10)
         return jsonify(r.json()), r.status_code
     except Exception as e:
         return jsonify({"error": str(e), "status": "error"}), 503

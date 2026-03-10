@@ -1097,59 +1097,186 @@ def _auto_place(model_name: str) -> str:
     return tag
 
 
-def _verify_endpoints() -> dict:
-    """Verify that all known inference endpoints respond to a test request.
+# ── Hardware optimise: background task ───────────────────────────────────────
 
-    Tests default Ollama and each Marshal Ollama endpoint.
-    ONNX availability is taken from the existing _onnx_available flag.
-    Returns dict: {name: {"verified": bool, "error": str|None, "endpoint": str}}
-    """
-    to_check = {"ollama_default": OLLAMA_HOST}
-    with _marshal_endpoints_lock:
-        for name, url in _marshal_endpoints.items():
-            if name.startswith("ollama"):
-                to_check[name] = url
+_hw_task: dict = {"status": "idle", "steps": [], "devices": [], "error": None}
+_hw_task_lock = threading.Lock()
 
-    results = {}
-    for name, base_url in to_check.items():
+_COMP_LABELS: dict = {
+    "sentinel":    "Sentinel",
+    "onnx_service": "ONNX / NPU service",
+    "ollama_gpu":  "GPU Ollama",
+    "ollama_igpu": "iGPU Ollama",
+}
+
+
+def _hw_step(sid: str, label: str, status: str, message: str = "") -> None:
+    """Upsert a step in the global hardware task state."""
+    with _hw_task_lock:
+        for s in _hw_task["steps"]:
+            if s["id"] == sid:
+                s["status"] = status
+                s["message"] = message
+                return
+        _hw_task["steps"].append({"id": sid, "label": label, "status": status, "message": message})
+
+
+def _verify_one_ollama(url: str):
+    try:
+        r = requests.get(f"{url.rstrip('/')}/api/tags", timeout=10)
+        return r.status_code == 200, (None if r.status_code == 200 else f"HTTP {r.status_code}")
+    except Exception as e:
+        return False, str(e)
+
+
+def _verify_one_onnx(url: str, on_wait=None):
+    """Retry up to ~60 s — ONNX needs time to start (uvicorn + first-run venv)."""
+    import time as _t
+    last_err = "service not responding"
+    for attempt in range(7):
         try:
-            # /api/tags is a lightweight liveness check — returns 200 regardless of
-            # whether any models are loaded, unlike /api/chat which 404s with no model.
-            r = requests.get(f"{base_url.rstrip('/')}/api/tags", timeout=10)
+            r = requests.get(f"{url.rstrip('/')}/health", timeout=10)
             if r.status_code == 200:
-                results[name] = {"verified": True, "error": None, "endpoint": base_url}
-            else:
-                results[name] = {"verified": False, "error": f"HTTP {r.status_code}", "endpoint": base_url}
+                return True, None
+            last_err = f"HTTP {r.status_code}"
         except Exception as e:
-            results[name] = {"verified": False, "error": str(e), "endpoint": base_url}
+            last_err = str(e)
+        if attempt < 6:
+            if on_wait:
+                on_wait(attempt + 1)
+            _t.sleep(10)
+    return False, last_err
 
-    # Check ONNX — prefer dynamic URL (set after Marshal starts it), fall back to env var
-    onnx_url = ONNX_SERVICE_URL
-    with _marshal_endpoints_lock:
-        onnx_url = _marshal_endpoints.get("onnx_service", onnx_url)
 
-    if onnx_url:
-        # ONNX may take longer to start (uvicorn boot, first-run venv setup).
-        # Retry up to 6 times with 10s gaps = 60s max wait.
-        onnx_ok = False
-        onnx_err = "timeout waiting for service"
-        for attempt in range(6):
+def _run_optimise_bg() -> None:
+    global ONNX_SERVICE_URL, _onnx_available
+
+    try:
+        # ── Phase 1: Hardware profile ─────────────────────────────────────────
+        _hw_step("profile", "Hardware profile", "running")
+        profile = _fetch_machine_profile()
+        if profile:
+            gpu_n = len(profile.get("gpu", []))
+            npu_n = len(profile.get("npu", []))
+            _hw_step("profile", "Hardware profile", "done",
+                     f"{gpu_n} GPU(s), {npu_n} NPU(s) detected")
+        else:
+            _hw_step("profile", "Hardware profile", "warn",
+                     "No profile — is Sentinel running?")
+
+        # ── Phase 2: Marshal setup ────────────────────────────────────────────
+        rewritten_eps: dict = {}
+        if MARSHAL_URL:
+            spec = _build_setup_spec(profile or {})
+
+            # Register a pending step for each component
+            comp_step_map: list[tuple[str, str, str]] = []  # (step_id, cname, label)
+            for comp in spec["components"]:
+                ctype = comp["type"]
+                cname = comp.get("config", {}).get("name", ctype)
+                sid = f"svc_{cname}"
+                label = _COMP_LABELS.get(ctype, cname)
+                comp_step_map.append((sid, cname, label))
+                _hw_step(sid, label, "running", "configuring...")
+
+            session = _get_marshal_session()
             try:
-                r = requests.get(f"{onnx_url.rstrip('/')}/health", timeout=10)
-                if r.status_code == 200:
-                    onnx_ok = True
-                    onnx_err = None
-                    break
-                else:
-                    onnx_err = f"HTTP {r.status_code}"
-            except Exception as e:
-                onnx_err = str(e)
-            if attempt < 5:
-                import time as _time
-                _time.sleep(10)
-        results["onnx_service"] = {"verified": onnx_ok, "error": onnx_err, "endpoint": onnx_url}
+                r = session.post(
+                    f"{MARSHAL_URL.rstrip('/')}/api/setup",
+                    json=spec, timeout=60,
+                )
+                if r.status_code in (200, 207):
+                    result = r.json()
+                    raw_eps = result.get("endpoints", {})
+                    rewritten_eps = {
+                        k: v.replace("http://localhost:", "http://host.docker.internal:", 1)
+                           .replace("https://localhost:", "https://host.docker.internal:", 1)
+                        for k, v in raw_eps.items()
+                    }
+                    with _marshal_endpoints_lock:
+                        _marshal_endpoints.update(rewritten_eps)
 
-    return results
+                    if "onnx_service" in rewritten_eps:
+                        ONNX_SERVICE_URL = rewritten_eps["onnx_service"]
+
+                    # Map Marshal's actions_taken back to steps
+                    touched: set = set()
+                    for action in result.get("actions_taken", []):
+                        if ": " in action:
+                            cname_r, msg = action.split(": ", 1)
+                            sid_r = f"svc_{cname_r}"
+                            lbl_r = _COMP_LABELS.get(cname_r, cname_r)
+                            _hw_step(sid_r, lbl_r, "done", msg)
+                            touched.add(cname_r)
+
+                    for err in result.get("errors", []):
+                        cname_r = err.get("component", "?")
+                        sid_r = f"svc_{cname_r}"
+                        lbl_r = _COMP_LABELS.get(cname_r, cname_r)
+                        _hw_step(sid_r, lbl_r, "error", err.get("detail", "error"))
+                        touched.add(cname_r)
+
+                    # Any step still running that Marshal didn't mention → mark done
+                    for sid, cname, label in comp_step_map:
+                        if cname not in touched:
+                            _hw_step(sid, label, "done", "ok")
+                else:
+                    for sid, _, label in comp_step_map:
+                        _hw_step(sid, label, "error", f"Marshal HTTP {r.status_code}")
+            except Exception as e:
+                for sid, _, label in comp_step_map:
+                    _hw_step(sid, label, "error", f"unreachable: {e}")
+        else:
+            _hw_step("no_marshal", "Service setup", "warn", "Marshal not configured — local Ollama only")
+
+        # ── Phase 3: Verify each endpoint ────────────────────────────────────
+        to_verify: list[tuple[str, str, str, str]] = [
+            ("ollama_default", OLLAMA_HOST, "cpu", "CPU"),
+        ]
+        with _marshal_endpoints_lock:
+            eps = dict(_marshal_endpoints)
+        for name, url in eps.items():
+            if name.startswith("ollama-gpu"):
+                to_verify.append((name, url, "dgpu", f"dGPU ({name})"))
+            elif name.startswith("ollama-igpu"):
+                to_verify.append((name, url, "igpu", f"iGPU ({name})"))
+
+        onnx_url = eps.get("onnx_service") or ONNX_SERVICE_URL
+        if onnx_url:
+            to_verify.append(("onnx_service", onnx_url, "npu", "NPU / ONNX"))
+
+        devices = []
+        for name, url, dtype, dlabel in to_verify:
+            sid = f"verify_{name}"
+            _hw_step(sid, dlabel, "running", "verifying...")
+
+            if dtype == "npu":
+                def _on_wait(attempt, sid=sid, dlabel=dlabel):
+                    _hw_step(sid, dlabel, "running",
+                             f"waiting for service to start... ({attempt * 10}s)")
+                ok, err = _verify_one_onnx(url, on_wait=_on_wait)
+                if ok:
+                    _onnx_available = True
+            else:
+                ok, err = _verify_one_ollama(url)
+
+            _hw_step(sid, dlabel, "done" if ok else "error", err or "")
+            devices.append({"name": name, "type": dtype, "verified": ok,
+                            "error": err, "endpoint": url})
+
+        with _hw_task_lock:
+            _hw_task["status"] = "done"
+            _hw_task["devices"] = devices
+
+    except Exception as e:
+        logger.exception("Hardware optimise task failed: %s", e)
+        with _hw_task_lock:
+            _hw_task["status"] = "error"
+            _hw_task["error"] = str(e)
+            for s in _hw_task["steps"]:
+                if s["status"] == "running":
+                    s["status"] = "error"
+                    s["message"] = "aborted"
 
 
 @app.route("/api/hardware/status", methods=["GET"])
@@ -1206,83 +1333,28 @@ def hardware_status():
 
 @app.route("/api/hardware/optimise", methods=["POST"])
 def hardware_optimise():
-    """Read hardware profile, call Marshal setup, verify endpoints.
+    """Start hardware optimise as a background task. Returns 202 immediately."""
+    with _hw_task_lock:
+        if _hw_task["status"] == "running":
+            return jsonify({"status": "already_running"}), 409
+        _hw_task["status"] = "running"
+        _hw_task["steps"] = []
+        _hw_task["devices"] = []
+        _hw_task["error"] = None
+    threading.Thread(target=_run_optimise_bg, daemon=True).start()
+    return jsonify({"status": "started"}), 202
 
-    Returns list of available devices with verification status.
-    """
-    actions_taken = []
 
-    # Fetch fresh profile and update cache
-    profile = _fetch_machine_profile()
-    if not profile:
-        actions_taken.append("No machine profile available in CoreMemory (is Sentinel running?)")
-
-    if MARSHAL_URL:
-        spec = _build_setup_spec(profile)
-        actions_taken.append(f"Sending setup spec ({len(spec['components'])} component(s)) to Marshal")
-        session = _get_marshal_session()
-        try:
-            r = session.post(
-                f"{MARSHAL_URL.rstrip('/')}/api/setup",
-                json=spec,
-                timeout=60,
-            )
-            if r.status_code in (200, 207):
-                result = r.json()
-                # Marshal returns localhost URLs — rewrite to host.docker.internal
-                # so Docker containers can reach services running on the host.
-                raw_eps = result.get("endpoints", {})
-                rewritten = {
-                    k: v.replace("http://localhost:", "http://host.docker.internal:", 1)
-                       .replace("https://localhost:", "https://host.docker.internal:", 1)
-                    for k, v in raw_eps.items()
-                }
-                with _marshal_endpoints_lock:
-                    _marshal_endpoints.update(rewritten)
-                actions_taken.extend(result.get("actions_taken", []))
-                if result.get("errors"):
-                    actions_taken.append(f"Marshal errors: {result['errors']}")
-                # If Marshal started the ONNX service, wire it in dynamically
-                if "onnx_service" in rewritten:
-                    global ONNX_SERVICE_URL
-                    ONNX_SERVICE_URL = rewritten["onnx_service"]
-                    actions_taken.append(f"ONNX service endpoint: {ONNX_SERVICE_URL}")
-            else:
-                actions_taken.append(f"Marshal setup returned HTTP {r.status_code}: {r.text[:120]}")
-        except Exception as e:
-            actions_taken.append(f"Marshal unreachable: {e}")
-    else:
-        actions_taken.append("Marshal not configured — using local Ollama only")
-
-    if ONNX_SERVICE_URL:
-        _fetch_onnx_models()
-
-    def _infer_type(name: str) -> str:
-        if name == "ollama_default": return "cpu"
-        if name.startswith("ollama-gpu"): return "dgpu"
-        if name.startswith("ollama-igpu"): return "igpu"
-        if name == "onnx_service": return "npu"
-        return "cpu"
-
-    verification = _verify_endpoints()
-    devices = [
-        {
-            "name": name,
-            "type": _infer_type(name),
-            "endpoint": v["endpoint"],
-            "verified": v["verified"],
-            "error": v["error"],
-        }
-        for name, v in verification.items()
-    ]
-
-    return jsonify({
-        "status": "ok",
-        "devices": devices,
-        "actions_taken": actions_taken,
-        "marshal_available": bool(MARSHAL_URL),
-        "profile_available": bool(profile),
-    })
+@app.route("/api/hardware/optimise/status", methods=["GET"])
+def hardware_optimise_status():
+    """Poll the current optimise task state."""
+    with _hw_task_lock:
+        return jsonify({
+            "status": _hw_task["status"],
+            "steps": list(_hw_task["steps"]),
+            "devices": list(_hw_task["devices"]),
+            "error": _hw_task.get("error"),
+        })
 
 
 # On module import (each Gunicorn worker startup): fetch ONNX model list in background

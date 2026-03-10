@@ -122,7 +122,44 @@ function App() {
   const [showHardwarePanel, setShowHardwarePanel] = useState(false);
   const [hardwareDevices, setHardwareDevices] = useState([]);
   const [hardwareOptimised, setHardwareOptimised] = useState(false);
+  const [hwStatus, setHwStatus] = useState("idle"); // idle | running | done | error
+  const [hwSteps, setHwSteps] = useState([]);
+  const [hwDevices, setHwDevices] = useState([]);
   const [cacheStatus, setCacheStatus] = useState(null);
+
+  // Poll hardware optimise task while running (continues even if panel is closed)
+  useEffect(() => {
+    if (hwStatus !== "running") return;
+    const iv = setInterval(async () => {
+      try {
+        const r = await fetch(`${API_BASE}/api/hardware/optimise/status`);
+        if (!r.ok) return;
+        const data = await r.json();
+        setHwSteps(data.steps || []);
+        if (data.status !== "running") {
+          setHwStatus(data.status);
+          if (data.devices && data.devices.length > 0) {
+            setHwDevices(data.devices);
+            setHardwareDevices(data.devices);
+          }
+          if (data.status === "done") setHardwareOptimised(true);
+          clearInterval(iv);
+        }
+      } catch (_) {}
+    }, 1500);
+    return () => clearInterval(iv);
+  }, [hwStatus]);
+
+  const handleStartOptimise = useCallback(async () => {
+    setHwStatus("running");
+    setHwSteps([]);
+    setHwDevices([]);
+    try {
+      await fetch(`${API_BASE}/api/hardware/optimise`, { method: "POST" });
+    } catch (e) {
+      setHwStatus("error");
+    }
+  }, []);
 
   // Model retry/cancel helpers: when backend reports a model pull timeout we
   // start a background retry loop and present a Cancel button to the user.
@@ -885,11 +922,11 @@ function App() {
           MODELS
         </button>
         <button
-          className={`top-bar-btn${hardwareOptimised ? " top-bar-btn--active" : ""}`}
+          className={`top-bar-btn${hwStatus === "running" ? " top-bar-btn--running" : hardwareOptimised ? " top-bar-btn--done" : ""}`}
           onClick={() => setShowHardwarePanel(true)}
           title="Hardware placement optimisation"
         >
-          {hardwareOptimised ? "HW ✓" : "HARDWARE"}
+          {hwStatus === "running" ? "HW ···" : hardwareOptimised ? "HW ✓" : "HARDWARE"}
         </button>
         <button
           className="top-bar-btn"
@@ -1272,9 +1309,10 @@ function App() {
         isOpen={showHardwarePanel}
         onClose={() => setShowHardwarePanel(false)}
         devices={hardwareDevices}
-        setDevices={setHardwareDevices}
-        optimised={hardwareOptimised}
-        setOptimised={setHardwareOptimised}
+        hwStatus={hwStatus}
+        hwSteps={hwSteps}
+        hwDevices={hwDevices}
+        onStart={handleStartOptimise}
       />
     </div>
   );

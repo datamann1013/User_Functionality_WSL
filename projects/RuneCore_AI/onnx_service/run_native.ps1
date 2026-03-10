@@ -22,6 +22,15 @@ $VenvPath = "$PSScriptRoot\.venv"
 $PipExe = "$VenvPath\Scripts\pip.exe"
 $UvicornExe = "$VenvPath\Scripts\uvicorn.exe"
 
+# Ensure Windows Firewall allows inbound traffic on the ONNX port
+# (required so Docker containers can reach this native service via host.docker.internal)
+$fwRule = "RuneCore ONNX Service Port $Port"
+if (-not (Get-NetFirewallRule -DisplayName $fwRule -ErrorAction SilentlyContinue)) {
+    New-NetFirewallRule -DisplayName $fwRule -Direction Inbound -Protocol TCP `
+        -LocalPort $Port -Action Allow | Out-Null
+    Write-Host "Firewall rule added for port $Port"
+}
+
 # Create venv if it doesn't exist
 if (-not (Test-Path $UvicornExe)) {
     Write-Host "Creating virtual environment at $VenvPath ..."
