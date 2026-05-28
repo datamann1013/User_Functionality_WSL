@@ -162,17 +162,22 @@ async fn ensure_onnx_service(cfg: &MarshalConfig, comp_cfg: &ComponentConfig) ->
 
     let spawn_result = tokio::process::Command::new("powershell")
         .args(&[
+            "-ExecutionPolicy", "Bypass",   // required when running as SYSTEM
             "-NonInteractive", "-NoProfile", "-WindowStyle", "Hidden",
             "-File", &script,
             "-ModelName", &model_arg,
             "-Device", &device_arg,
         ])
+        // Redirect stdin/stdout/stderr so the service session (Session 0)
+        // doesn't choke trying to inherit invalid console handles.
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn();
 
     match spawn_result {
         Ok(_) => {
-            // Give it a moment then check health
-            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            // ollama_api.py polls /health for up to 150 s — no need to wait here.
             ActionResult::ok("onnx_service", "started", Some("http://localhost:5006".into()))
         }
         Err(e) => ActionResult::err(

@@ -543,6 +543,7 @@ def create_agent():
             form = request.form
             name = form.get("name", "").strip()
             model_name = form.get("model_name", "llama3.2:1b")
+            placement = form.get("placement", "auto")
             temperature = float(form.get("temperature", 0.7))
             top_p = float(form.get("top_p", 0.9))
             system_prompt = form.get("system_prompt", "You are a helpful AI assistant.")

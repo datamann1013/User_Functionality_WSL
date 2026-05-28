@@ -401,6 +401,51 @@ def onnx_refresh():
     return jsonify({"onnx_models": len(models), "available": _onnx_available})
 
 
+@app.route("/api/onnx/download", methods=["POST"])
+def onnx_download():
+    """Proxy: start an ONNX model download from HuggingFace.
+
+    Body: {"model_id": "org/repo-onnx", "local_name": "my-model"}
+    Forwards to the ONNX service and returns its response.
+    """
+    if not ONNX_SERVICE_URL:
+        return jsonify({"error": "ONNX service not configured"}), 503
+    data = request.get_json() or {}
+    model_id = data.get("model_id", "").strip()
+    local_name = data.get("local_name", "").strip()
+    if not model_id or not local_name:
+        return jsonify({"error": "model_id and local_name are required"}), 400
+    try:
+        r = requests.post(
+            f"{ONNX_SERVICE_URL}/api/models/download",
+            json={"model_id": model_id, "local_name": local_name},
+            timeout=10,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        logger.error("ONNX download proxy failed: %s", e)
+        return jsonify({"error": str(e)}), 503
+
+
+@app.route("/api/onnx/download/<path:local_name>", methods=["GET"])
+def onnx_download_status(local_name):
+    """Proxy: check ONNX model download/load status.
+
+    Returns status from the ONNX service registry entry.
+    """
+    if not ONNX_SERVICE_URL:
+        return jsonify({"error": "ONNX service not configured"}), 503
+    try:
+        r = requests.get(
+            f"{ONNX_SERVICE_URL}/api/models/download/{local_name}",
+            timeout=5,
+        )
+        return jsonify(r.json()), r.status_code
+    except Exception as e:
+        logger.error("ONNX status proxy failed: %s", e)
+        return jsonify({"error": str(e)}), 503
+
+
 @app.route("/api/marshal/setup", methods=["POST"])
 def marshal_setup():
     """Trigger Marshal auto-setup manually (same as startup auto-setup).
@@ -747,22 +792,36 @@ def chat():
 
         # NPU routing (explicit tag or ONNX model name match)
         if placement == "npu" or _is_onnx_model(model_name):
-            try:
-                result = _route_chat_to_onnx(model_name, messages, temperature=temperature, max_tokens=max_tokens)
-                return jsonify({
-                    "response": result["response"],
-                    "agent_id": agent_id,
-                    "model_id": model_name,
-                    "model_name": model_name,
-                    "timestamp": datetime.now().isoformat(),
-                    "mode": "onnx_powered",
-                    "tokens_used": len(result["response"].split()),
-                    "backend": "onnx",
-                    "placement": "npu",
-                })
-            except Exception as e:
-                logger.error("ONNX chat failed for %s: %s", model_name, e)
-                return jsonify({"error": f"ONNX backend error: {str(e)}"}), 502
+            onnx_model = model_name if _is_onnx_model(model_name) else None
+
+            if placement == "npu" and not onnx_model:
+                # Model is not in the ONNX registry — fall back to Ollama.
+                # This happens when an agent is set to NPU but uses an Ollama
+                # model name (e.g. "llama3.2:1b") that has no ONNX counterpart.
+                logger.warning(
+                    "NPU placement requested for '%s' but model not in ONNX registry "
+                    "(models dir empty or model not downloaded). Falling back to auto-place.",
+                    model_name,
+                )
+                placement = _auto_place(model_name)
+                # Fall through to Ollama routing below — do NOT return here.
+            else:
+                try:
+                    result = _route_chat_to_onnx(onnx_model, messages, temperature=temperature, max_tokens=max_tokens)
+                    return jsonify({
+                        "response": result["response"],
+                        "agent_id": agent_id,
+                        "model_id": onnx_model,
+                        "model_name": onnx_model,
+                        "timestamp": datetime.now().isoformat(),
+                        "mode": "onnx_powered",
+                        "tokens_used": len(result["response"].split()),
+                        "backend": "onnx",
+                        "placement": "npu",
+                    })
+                except Exception as e:
+                    logger.error("ONNX chat failed for %s: %s", onnx_model, e)
+                    return jsonify({"error": f"ONNX backend error: {str(e)}"}), 502
 
         # Determine Ollama target host and extra options based on placement
         extra_options: dict = {}
@@ -1130,10 +1189,10 @@ def _verify_one_ollama(url: str):
 
 
 def _verify_one_onnx(url: str, on_wait=None):
-    """Retry up to ~60 s — ONNX needs time to start (uvicorn + first-run venv)."""
+    """Retry up to ~150 s — ONNX first run installs packages; subsequent runs are fast."""
     import time as _t
     last_err = "service not responding"
-    for attempt in range(7):
+    for attempt in range(15):
         try:
             r = requests.get(f"{url.rstrip('/')}/health", timeout=10)
             if r.status_code == 200:
@@ -1141,7 +1200,7 @@ def _verify_one_onnx(url: str, on_wait=None):
             last_err = f"HTTP {r.status_code}"
         except Exception as e:
             last_err = str(e)
-        if attempt < 6:
+        if attempt < 14:
             if on_wait:
                 on_wait(attempt + 1)
             _t.sleep(10)

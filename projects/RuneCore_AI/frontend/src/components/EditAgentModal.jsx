@@ -50,10 +50,15 @@ const EditAgentModal = ({
       if (response.ok) {
         const data = await response.json();
         const raw = data.models || [];
+        // Preserve backend field — needed to filter by placement
         const models = raw
-          .map((m) => (typeof m === "string" ? m : m?.name || null))
-          .filter(Boolean);
-        setAvailableModels(models.length > 0 ? models : ["llama3.2:1b"]);
+          .map((m) =>
+            typeof m === "string"
+              ? { name: m, backend: "ollama" }
+              : { name: m?.name, backend: m?.backend || "ollama" }
+          )
+          .filter((m) => m.name);
+        setAvailableModels(models.length > 0 ? models : [{ name: "llama3.2:1b", backend: "ollama" }]);
       }
     } catch (error) {
       logFrontendError("FRONTEND_MODEL_ERROR", "Failed to fetch models", error);
@@ -157,10 +162,21 @@ const EditAgentModal = ({
 
   const handleInputChange = (e) => {
     const { name, value, type } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: type === "number" ? parseFloat(value) : value,
-    }));
+    setFormData((prev) => {
+      const next = { ...prev, [name]: type === "number" ? parseFloat(value) : value };
+      if (name === "placement") {
+        const goingNPU = value === "npu";
+        const wasNPU = prev.placement === "npu";
+        if (goingNPU !== wasNPU) {
+          const curIsOnnx = availableModels.some(
+            (m) => m.name === prev.model_name && m.backend === "onnx"
+          );
+          if (goingNPU && !curIsOnnx) next.model_name = "";
+          if (!goingNPU && curIsOnnx) next.model_name = "";
+        }
+      }
+      return next;
+    });
   };
 
   if (!isOpen) return null;
@@ -213,12 +229,32 @@ const EditAgentModal = ({
               onChange={handleInputChange}
               required
             >
-              {availableModels.map((model) => (
-                <option key={model} value={model}>
-                  {model}
-                </option>
-              ))}
+              <option value="">Select a model</option>
+              {formData.placement === "npu" ? (
+                availableModels.filter((m) => m.backend === "onnx").length > 0 ? (
+                  availableModels
+                    .filter((m) => m.backend === "onnx")
+                    .map((m) => (
+                      <option key={m.name} value={m.name}>{m.name} ✓</option>
+                    ))
+                ) : (
+                  <option disabled value="">No ONNX models — download one in Model Manager</option>
+                )
+              ) : (
+                availableModels
+                  .filter((m) => m.backend !== "onnx")
+                  .map((m) => (
+                    <option key={m.name} value={m.name}>{m.name}</option>
+                  ))
+              )}
             </select>
+            <small className="param-hint">
+              {formData.placement === "npu"
+                ? availableModels.filter((m) => m.backend === "onnx").length === 0
+                  ? "No ONNX models available. Download one from Model Manager first."
+                  : "Only ONNX models can run on the NPU."
+                : "Ollama models for CPU/GPU inference."}
+            </small>
           </div>
 
           <div className="form-group">

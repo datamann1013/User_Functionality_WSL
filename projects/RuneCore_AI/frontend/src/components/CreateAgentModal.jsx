@@ -19,6 +19,13 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated, availableDevices = 
   const [errors, setErrors] = useState({});
   const [avatarPreview, setAvatarPreview] = useState(null);
   const [modelDownloading, setModelDownloading] = useState(null);
+  const [onnxDownloadStatus, setOnnxDownloadStatus] = useState(null); // null | "downloading" | "done" | "error"
+
+  // Suggested ONNX models for NPU inference (small, DirectML-compatible)
+  const SUGGESTED_ONNX_MODELS = [
+    { model_id: "microsoft/Phi-3-mini-4k-instruct-onnx", local_name: "phi3-mini-onnx", label: "Phi-3 Mini 3.8B (recommended)" },
+    { model_id: "Qwen/Qwen2.5-0.5B-Instruct-ONNX", local_name: "qwen2.5-0.5b-onnx", label: "Qwen 2.5 0.5B (fastest)" },
+  ];
 
   // Common model options (will be supplemented by API)
   const commonModels = [
@@ -44,22 +51,39 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated, availableDevices = 
       const response = await fetch(`${API_BASE}/api/models`);
       if (response.ok) {
         const data = await response.json();
-        // Backend may return objects {name, size, ...} or plain strings — normalize to strings
         const raw = data.models || [];
-        const models = raw.map((m) => (typeof m === "string" ? m : m?.name || null)).filter(Boolean);
+        // Preserve backend field — needed to filter by placement
+        const models = raw
+          .map((m) =>
+            typeof m === "string"
+              ? { name: m, backend: "ollama" }
+              : { name: m?.name, backend: m?.backend || "ollama" }
+          )
+          .filter((m) => m.name);
         setAvailableModels(models);
       }
     } catch (error) {
       logFrontendError("FRONTEND_MODEL_ERROR", "Failed to fetch models", error);
-      setAvailableModels(commonModels);
+      setAvailableModels(commonModels.map((name) => ({ name, backend: "ollama" })));
     }
   };
 
   const handleInputChange = (field, value) => {
-    setFormData((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
+    setFormData((prev) => {
+      const next = { ...prev, [field]: value };
+      if (field === "placement") {
+        const goingNPU = value === "npu";
+        const wasNPU = prev.placement === "npu";
+        if (goingNPU !== wasNPU) {
+          const curIsOnnx = availableModels.some(
+            (m) => m.name === prev.model_name && m.backend === "onnx"
+          );
+          if (goingNPU && !curIsOnnx) next.model_name = "";
+          if (!goingNPU && curIsOnnx) next.model_name = "";
+        }
+      }
+      return next;
+    });
 
     // Clear field error when user starts typing
     if (errors[field]) {
@@ -430,7 +454,7 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated, availableDevices = 
             )}
           </div>
 
-          {/* Model Selection */}
+          {/* Model Selection — options filtered by placement */}
           <div className="form-group">
             <label htmlFor="model">AI Model *</label>
             <select
@@ -440,15 +464,39 @@ const CreateAgentModal = ({ isOpen, onClose, onAgentCreated, availableDevices = 
               className={errors.model_name ? "error" : ""}
             >
               <option value="">Select a model</option>
-              {[...new Set([...commonModels, ...availableModels])].map(
-                (model) => (
-                  <option key={model} value={model}>
-                    {model} {availableModels.includes(model) ? "✓" : "⬇️"}
-                  </option>
+              {formData.placement === "npu" ? (
+                availableModels.filter((m) => m.backend === "onnx").length > 0 ? (
+                  availableModels
+                    .filter((m) => m.backend === "onnx")
+                    .map((m) => (
+                      <option key={m.name} value={m.name}>{m.name} ✓</option>
+                    ))
+                ) : (
+                  <option disabled value="">No ONNX models — download one in Model Manager</option>
                 )
+              ) : (
+                [
+                  ...new Set([
+                    ...commonModels,
+                    ...availableModels.filter((m) => m.backend !== "onnx").map((m) => m.name),
+                  ]),
+                ].map((name) => {
+                  const local = availableModels.some((m) => m.name === name && m.backend !== "onnx");
+                  return (
+                    <option key={name} value={name}>
+                      {name} {local ? "✓" : "⬇️"}
+                    </option>
+                  );
+                })
               )}
             </select>
-            <small>✓ = Available locally, ⬇️ = Needs download</small>
+            <small>
+              {formData.placement === "npu"
+                ? availableModels.filter((m) => m.backend === "onnx").length === 0
+                  ? "No ONNX models available. Download one from Model Manager first."
+                  : "✓ = Available locally (ONNX format)"
+                : "✓ = Available locally, ⬇️ = Needs download"}
+            </small>
             {errors.model_name && (
               <span className="error-text">{errors.model_name}</span>
             )}

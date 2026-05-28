@@ -31,10 +31,38 @@ if (-not (Get-NetFirewallRule -DisplayName $fwRule -ErrorAction SilentlyContinue
     Write-Host "Firewall rule added for port $Port"
 }
 
+# Locate Python — search PATH and common install locations.
+# Necessary because this script may run under the SYSTEM account (via Marshal service)
+# which does not inherit the user's PATH.
+$PythonExe = $null
+$pythonCandidates = @(
+    "python",
+    "C:\Program Files\PyManager\python.exe",
+    "C:\Python313\python.exe",
+    "C:\Python312\python.exe",
+    "C:\Python311\python.exe"
+)
+foreach ($c in $pythonCandidates) {
+    try {
+        $null = & $c --version 2>&1
+        if ($LASTEXITCODE -eq 0) { $PythonExe = $c; break }
+    } catch {}
+}
+if (-not $PythonExe) {
+    # Search all user AppData locations
+    $PythonExe = Get-ChildItem "C:\Users\*\AppData\Local\Programs\Python\*\python.exe" `
+        -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+}
+if (-not $PythonExe) {
+    Write-Error "Python not found. Install Python 3.11+ or ensure it is on PATH."
+    exit 1
+}
+Write-Host "Using Python: $PythonExe"
+
 # Create venv if it doesn't exist
 if (-not (Test-Path $UvicornExe)) {
     Write-Host "Creating virtual environment at $VenvPath ..."
-    python -m venv $VenvPath
+    & $PythonExe -m venv $VenvPath
     if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create venv"; exit 1 }
 
     Write-Host "Installing base dependencies ..."
@@ -47,13 +75,19 @@ if (-not (Test-Path $UvicornExe)) {
     if ($LASTEXITCODE -ne 0) { Write-Error "Base install failed"; exit 1 }
 }
 
-# Install or upgrade onnxruntime-directml (mutually exclusive with onnxruntime)
-Write-Host "Installing onnxruntime-directml ..."
-& $PipExe install --no-cache-dir onnxruntime-directml --force-reinstall --quiet
+# Install onnxruntime-directml only if not already present.
+# Skipping --force-reinstall on subsequent runs avoids a 2+ minute delay on every startup.
+$onnxCheck = & $PipExe show onnxruntime-directml 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Write-Warning "onnxruntime-directml install failed. Falling back to onnxruntime (CPU)."
-    & $PipExe install --no-cache-dir onnxruntime --force-reinstall --quiet
-    $Device = "cpu"
+    Write-Host "Installing onnxruntime-directml ..."
+    & $PipExe install --no-cache-dir onnxruntime-directml --quiet
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "onnxruntime-directml install failed. Falling back to onnxruntime (CPU)."
+        & $PipExe install --no-cache-dir onnxruntime --quiet
+        $Device = "cpu"
+    }
+} else {
+    Write-Host "onnxruntime-directml already installed - skipping."
 }
 
 # Create model storage dir
