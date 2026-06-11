@@ -43,7 +43,7 @@ echo   --help               Show this help message
 echo.
 echo Available versions:
 echo   main                 Latest stable release
-echo   AI_service          AI service development branch
+echo   RuneCore_AI          AI module development branch (RuneCore_Mind)
 echo   experimental        Experimental features
 echo   test                Testing branch
 echo.
@@ -52,7 +52,7 @@ echo   # Install latest stable
 echo   install-runecore-windows.bat
 echo.
 echo   # Install AI service branch
-echo   install-runecore-windows.bat --version AI_service
+echo   install-runecore-windows.bat --version RuneCore_AI
 echo.
 echo   # Install to custom directory
 echo   install-runecore-windows.bat --install-dir C:\runecore
@@ -169,10 +169,18 @@ if not exist ".env" (
         echo RUNECORE_OS=windows
         echo.
         echo # Service Ports
-        echo AI_SERVICE_PORT=5000
-        echo ERRORLOGGER_PORT=5001
-        echo MESSAGE_SERVICE_PORT=5003
+        echo RUNECORE_CORE_PORT=11440
+        echo RUNECORE_CORE_INTERNAL_PORT=11441
+        echo RUNECORE_HA_PORT=11442
+        echo RUNEGUARD_LOGGER_PORT=5001
+        echo AI_BACKEND_PORT=5000
+        echo OLLAMA_WRAPPER_PORT=5002
+        echo ONNX_SERVICE_PORT=5006
         echo FRONTEND_PORT=3000
+        echo CORE_MEMORY_PORT=5010
+        echo DASHBOARD_BACKEND_PORT=5004
+        echo DASHBOARD_FRONTEND_PORT=3001
+        echo MESH_DROP_PORT=5100
         echo OLLAMA_PORT=11434
         echo.
         echo # Database Configuration
@@ -183,7 +191,7 @@ if not exist ".env" (
         echo.
         echo # Security
         echo JWT_SECRET_KEY=your-super-secret-jwt-key-change-this-in-production
-        echo ERRORLOGGER_SECRET=your-errorlogger-secret-key
+        echo RUNEGUARD_LOGGER_SECRET=your-runeguard-logger-secret-key
         echo.
         echo # Redis Configuration
         echo REDIS_URL=redis://localhost:6379/0
@@ -221,9 +229,9 @@ if exist "install.bat" (
 )
 
 REM Download any required models or dependencies
-if exist "projects\ai_service\bootstrap\setup_models.py" (
+if exist "projects\RuneCore_AI\bootstrap\setup_models.py" (
     echo ℹ️  Setting up AI models...
-    cd projects\ai_service\bootstrap
+    cd projects\RuneCore_AI\bootstrap
     %PYTHON_CMD% setup_models.py
     cd /d "%INSTALL_DIR%"
 )
@@ -275,7 +283,7 @@ REM Create runecore.bat command
     echo.
     echo :status
     echo echo 📊 RuneCore Service Status:
-    echo docker ps --filter "name=ai_service"
+    echo docker ps --filter "name=runecore"
     echo goto :end
     echo.
     echo :logs

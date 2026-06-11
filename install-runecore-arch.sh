@@ -2,7 +2,7 @@
 
 # RuneCore AI Ecosystem Arch Linux Installer
 # Usage: curl -sSL https://raw.githubusercontent.com/datamann1013/RuneCore_Ecosystem/main/install-runecore-arch.sh | bash
-# Or: curl -sSL https://raw.githubusercontent.com/datamann1013/RuneCore_Ecosystem/main/install-runecore-arch.sh | bash -s -- --version=AI_service
+# Or: curl -sSL https://raw.githubusercontent.com/datamann1013/RuneCore_Ecosystem/main/install-runecore-arch.sh | bash -s -- --version=RuneCore_AI
 
 set -e
 
@@ -58,7 +58,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "Available versions:"
             echo "  main                 Latest stable release"
-            echo "  AI_service          AI service development branch"
+            echo "  RuneCore_AI          AI module development branch (RuneCore_Mind)"
             echo "  experimental        Experimental features"
             echo "  test                Testing branch"
             echo ""
@@ -67,10 +67,10 @@ while [[ $# -gt 0 ]]; do
             echo "  curl -sSL $RAW_URL/main/install-runecore-arch.sh | bash"
             echo ""
             echo "  # Install AI service branch with AUR packages"
-            echo "  curl -sSL $RAW_URL/AI_service/install-runecore-arch.sh | bash -s -- --version=AI_service --use-aur"
+            echo "  curl -sSL $RAW_URL/RuneCore_AI/install-runecore-arch.sh | bash -s -- --version=RuneCore_AI --use-aur"
             echo ""
             echo "  # Install to custom directory"
-            echo "  curl -sSL $RAW_URL/AI_service/install-runecore-arch.sh | bash -s -- --install-dir=/opt/runecore"
+            echo "  curl -sSL $RAW_URL/RuneCore_AI/install-runecore-arch.sh | bash -s -- --install-dir=/opt/runecore"
             exit 0
             ;;
         *)
@@ -321,10 +321,18 @@ RUNECORE_ENV=production
 RUNECORE_OS=arch
 
 # Service Ports
-AI_SERVICE_PORT=5000
-ERRORLOGGER_PORT=5001
-MESSAGE_SERVICE_PORT=5003
+RUNECORE_CORE_PORT=11440
+RUNECORE_CORE_INTERNAL_PORT=11441
+RUNECORE_HA_PORT=11442
+RUNEGUARD_LOGGER_PORT=5001
+AI_BACKEND_PORT=5000
+OLLAMA_WRAPPER_PORT=5002
+ONNX_SERVICE_PORT=5006
 FRONTEND_PORT=3000
+CORE_MEMORY_PORT=5010
+DASHBOARD_BACKEND_PORT=5004
+DASHBOARD_FRONTEND_PORT=3001
+MESH_DROP_PORT=5100
 OLLAMA_PORT=11434
 
 # Database Configuration
@@ -335,7 +343,7 @@ DATABASE_URL=postgresql://runecore:runecore_secure_2024@postgres:5432/runecore_m
 
 # Security
 JWT_SECRET_KEY=your-super-secret-jwt-key-change-this-in-production
-ERRORLOGGER_SECRET=your-errorlogger-secret-key
+RUNEGUARD_LOGGER_SECRET=your-runeguard-logger-secret-key
 
 # Redis Configuration
 REDIS_URL=redis://redis:6379/0
@@ -380,9 +388,9 @@ install_runecore() {
     fi
     
     # Download any required models or dependencies
-    if [[ -f "projects/ai_service/bootstrap/setup_models.py" ]]; then
+    if [[ -f "projects/RuneCore_AI/bootstrap/setup_models.py" ]]; then
         print_info "Setting up AI models..."
-        cd projects/ai_service/bootstrap
+        cd projects/RuneCore_AI/bootstrap
         python setup_models.py
         cd "$INSTALL_DIR"
     fi
@@ -424,7 +432,7 @@ case "\$1" in
         ;;
     status)
         echo "📊 RuneCore Service Status:"
-        docker ps --filter "name=ai_service"
+        docker ps --filter "name=runecore"
         systemctl --user is-active runecore.service 2>/dev/null && echo "systemd service: active" || echo "systemd service: inactive"
         ;;
     logs)

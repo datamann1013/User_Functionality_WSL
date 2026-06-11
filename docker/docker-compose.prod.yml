@@ -1,100 +1,373 @@
 # RuneCore Ecosystem - Production Deployment
+#
+# NOTE: docker/docker-compose.unified.yml is the CANONICAL compose file for this
+# repository (service names, build contexts, networks, healthchecks). This file
+# is a thin production variant of it:
+#   - secrets are REQUIRED (no insecure defaults; compose fails fast if unset)
+#   - mTLS is always enforced (RUNECORE_DISABLE_MTLS cannot be overridden)
+#   - otherwise identical service/network/volume topology to unified.yml
+#
+# When unified.yml changes, mirror the change here.
+#
+# Usage:
+#   cp docker/.env.sample docker/.env   # then fill in real secrets
+#   docker compose -f docker/docker-compose.prod.yml --env-file docker/.env up -d
+#
+# See docker/README.md for the mTLS certificate bootstrap that must be done
+# before first start (services expect signed client certs in the certs volume).
+#
+# Build contexts are relative to the docker/ directory, so projects live one level up (../).
+
+networks:
+  # External network for public access
+  core_public:
+    driver: bridge
+
+  # Internal bridge networks (no external access)
+  core_ai_bridge:
+    driver: bridge
+    internal: true
+
+  core_memory_bridge:
+    driver: bridge
+    internal: true
+
+  core_logger_bridge:
+    driver: bridge
+    internal: true
+
+  core_ha_bridge:
+    driver: bridge
+    internal: true
+
+  core_backup_bridge:
+    driver: bridge
+    internal: true
+
+  # Service-specific internal networks
+  ai_internal:
+    driver: bridge
+    internal: true
+
+  memory_internal:
+    driver: bridge
+    internal: true
+
+volumes:
+  ollama_models:
+    name: ollama_models
+  core_data_primary:
+  core_data_secondary:
+  core_data_ha:
+  raft_primary_data:
+  raft_secondary_data:
+  raft_ha_data:
+  postgres_data:
+  redis_data:
+  influx_data:
+  runeguard_logs:
+  certs:
+    name: runecore_certs
+  backups:
+    name: runecore_backups
+
 services:
-  # Ollama AI Service
+  # ============================================================================
+  # CORE SERVICES (Primary, Secondary, HA)
+  # ============================================================================
+
+  core_primary:
+    build:
+      context: ../projects/RuneCore_Core
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_core_primary_1
+    environment:
+      - RUNECORE_DATA_DIR=/data
+      - RUNECORE_CA_PASSPHRASE=${CA_PASSPHRASE:?CA_PASSPHRASE is required in production}
+      - RUNECORE_DISABLE_MTLS=false
+      - RUNECORE_ENABLE_RAFT=true
+      - RAFT_NODE_ID=1
+      - RAFT_PEER_URLS=2=http://core_secondary:11440,3=http://runecore_ha:11440
+      - RAFT_STORAGE_PATH=/var/lib/runecore/raft
+      - RAFT_SNAPSHOT_INTERVAL=1000
+      - AUTO_RESTART_SERVICES=true
+    volumes:
+      - core_data_primary:/data
+      - raft_primary_data:/var/lib/runecore/raft
+      - certs:/certs
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - core_public
+      - core_ai_bridge
+      - core_memory_bridge
+      - core_logger_bridge
+      - core_ha_bridge
+      - core_backup_bridge
+    ports:
+      - "11440:11440"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-k", "https://localhost:11440/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  core_secondary:
+    build:
+      context: ../projects/RuneCore_Core
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_core_secondary_1
+    environment:
+      - RUNECORE_DATA_DIR=/data
+      - RUNECORE_CA_PASSPHRASE=${CA_PASSPHRASE:?CA_PASSPHRASE is required in production}
+      - RUNECORE_DISABLE_MTLS=false
+      - RUNECORE_ENABLE_RAFT=true
+      - RAFT_NODE_ID=2
+      - RAFT_PEER_URLS=1=http://core_primary:11440,3=http://runecore_ha:11440
+      - RAFT_STORAGE_PATH=/var/lib/runecore/raft
+      - RAFT_SNAPSHOT_INTERVAL=1000
+    volumes:
+      - core_data_secondary:/data
+      - raft_secondary_data:/var/lib/runecore/raft
+      - certs:/certs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - core_public
+      - core_ai_bridge
+      - core_memory_bridge
+      - core_logger_bridge
+      - core_ha_bridge
+      - core_backup_bridge
+    ports:
+      - "11443:11440"
+    restart: unless-stopped
+    depends_on:
+      - core_primary
+
+  runecore_ha:
+    build:
+      context: ../projects/RuneCore_Core
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_ha_1
+    environment:
+      - RUNECORE_DATA_DIR=/data
+      - RUNECORE_CA_PASSPHRASE=${CA_PASSPHRASE:?CA_PASSPHRASE is required in production}
+      - RUNECORE_DISABLE_MTLS=false
+      - RUNECORE_ENABLE_RAFT=true
+      - RAFT_NODE_ID=3
+      - RAFT_PEER_URLS=1=http://core_primary:11440,2=http://core_secondary:11440
+      - RAFT_STORAGE_PATH=/var/lib/runecore/raft
+      - RAFT_SNAPSHOT_INTERVAL=1000
+      - RUNECORE_HA_MODE=true
+    volumes:
+      - core_data_ha:/data
+      - raft_ha_data:/var/lib/runecore/raft
+      - certs:/certs:ro
+    networks:
+      - core_ha_bridge
+    ports:
+      - "11442:11440"
+    restart: unless-stopped
+    depends_on:
+      - core_primary
+      - core_secondary
+
+  # ============================================================================
+  # AI SERVICE BRIDGE (Ollama, Wrapper, Backend, Frontend)
+  # ============================================================================
+
   ollama:
     image: ollama/ollama:latest
-    container_name: runecore-ollama
-    restart: unless-stopped
-    ports:
-      - "11434:11434"
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_ollama_1
     volumes:
-      - ollama_data:/root/.ollama
-    environment:
-      - OLLAMA_ORIGINS=*
+      - ollama_models:/root/.ollama
+    networks:
+      - ai_internal
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
-    networks:
-      - runecore
 
-  # RuneGuard Security Service (uses ErrorLogger's own Docker setup)
-  runeguard:
+  ollama_service:
     build:
-      context: ../projects/ErrorLogger
+      context: ../projects/RuneCore_AI/ollama_service
       dockerfile: Dockerfile
-    container_name: runecore-guard
-    restart: unless-stopped
-    ports:
-      - "5001:5001"
-    volumes:
-      - guard_logs:/app/logs
-      - guard_data:/app/data
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_ollama_service_1
     environment:
-      - LOG_LEVEL=INFO
-      - RUNECORE_MODE=production
+      - OLLAMA_HOST=http://ollama:11434
+      - PORT=5002
+    networks:
+      - ai_internal
+    restart: unless-stopped
     depends_on:
       - ollama
-    networks:
-      - runecore
 
-  # RuneMind Backend (uses AI service's own Docker setup)
-  backend:
+  ai_backend:
     build:
-      context: ../projects/ai_service
-      dockerfile: docker/Dockerfile.backend
-    container_name: runecore-backend
-    restart: unless-stopped
-    ports:
-      - "5000:5000"
-    volumes:
-      - backend_logs:/app/logs
-      - backend_data:/app/data
-      - model_cache:/app/models
+      # Context is the project root because Dockerfile.backend copies:
+      #   projects/RuneCore_AI/backend/, projects/shared_utils/, projects/RuneGuard_Logger/
+      context: ..
+      dockerfile: projects/RuneCore_AI/docker/Dockerfile.backend
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_ai_backend_1
     environment:
-      - OLLAMA_HOST=ollama:11434
-      - ERRORLOGGER_URL=http://runeguard:5001
-      - RUNECORE_MODE=production
-    depends_on:
-      - ollama
-      - runeguard
+      - OLLAMA_SERVICE_URL=http://ollama_service:5002
+      - PORT=5000
+      - RUNECORE_CORE_URL=https://core_primary:11440
+      - RUNECORE_CORE_INTERNAL_URL=http://core_primary:11441
+      - RUNECORE_REGISTER_WITH_CORE=1
+      - CLIENT_CERT_PATH=/certs/ai/client.crt
+      - CLIENT_KEY_PATH=/certs/ai/client.key
+      - CA_CERT_PATH=/certs/ca.crt
+      - CONTAINER_NAME=${COMPOSE_PROJECT_NAME:-runecore}_ai_backend_1
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required in production}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
+    volumes:
+      - certs:/certs:ro
     networks:
-      - runecore
+      - core_ai_bridge
+      - ai_internal
+    restart: unless-stopped
+    depends_on:
+      - ollama_service
+      - core_primary
 
-  # RuneMind Frontend (uses AI service's own Docker setup)
-  frontend:
+  ai_frontend:
     build:
-      context: ../projects/ai_service
+      # Context is RuneCore_AI root because Dockerfile.frontend copies frontend/ and docker/nginx.conf
+      context: ../projects/RuneCore_AI
       dockerfile: docker/Dockerfile.frontend
-    container_name: runecore-frontend
-    restart: unless-stopped
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_ai_frontend_1
+    environment:
+      - PORT=3000
+    networks:
+      - ai_internal
+      - core_public
     ports:
       - "3000:3000"
-    environment:
-      - REACT_APP_API_URL=http://localhost:5000
-      - REACT_APP_ERRORLOGGER_URL=http://localhost:5001
+    restart: unless-stopped
     depends_on:
-      - backend
+      - ai_backend
+
+  # ============================================================================
+  # MEMORY SERVICE BRIDGE (Databases + Memory API)
+  # ============================================================================
+
+  postgresql:
+    image: postgres:15-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_postgresql_1
+    environment:
+      - POSTGRES_DB=runecore_memory
+      - POSTGRES_USER=runecore
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in production}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     networks:
-      - runecore
+      - memory_internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U runecore"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-volumes:
-  ollama_data:
-    driver: local
-  guard_logs:
-    driver: local
-  guard_data:
-    driver: local
-  backend_logs:
-    driver: local
-  backend_data:
-    driver: local
-  model_cache:
-    driver: local
+  redis:
+    image: redis:7-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_redis_1
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required in production}
+    volumes:
+      - redis_data:/data
+    networks:
+      - memory_internal
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
-networks:
-  runecore:
-    driver: bridge
-    name: runecore-network
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_influxdb_1
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=admin
+      - DOCKER_INFLUXDB_INIT_PASSWORD=${INFLUX_PASSWORD:?INFLUX_PASSWORD is required in production}
+      - DOCKER_INFLUXDB_INIT_ORG=runecore
+      - DOCKER_INFLUXDB_INIT_BUCKET=metrics
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=${INFLUX_TOKEN:?INFLUX_TOKEN is required in production}
+    volumes:
+      - influx_data:/var/lib/influxdb2
+    networks:
+      - memory_internal
+    restart: unless-stopped
+
+  core_memory_api:
+    build:
+      context: ../projects/RuneCore_Memory
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_memory_api_1
+    environment:
+      - DATABASE_URL=postgresql://runecore:${POSTGRES_PASSWORD}@postgresql:5432/runecore_memory
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - INFLUX_URL=http://influxdb:8086
+      - INFLUX_TOKEN=${INFLUX_TOKEN}
+      - INFLUX_ORG=runecore
+      - INFLUX_BUCKET=metrics
+      - RUNECORE_CORE_URL=https://core_primary:11440
+      - RUNECORE_CORE_INTERNAL_URL=http://core_primary:11441
+      - RUNECORE_REGISTER_WITH_CORE=1
+      - CLIENT_CERT_PATH=/certs/memory/client.crt
+      - CLIENT_KEY_PATH=/certs/memory/client.key
+      - CA_CERT_PATH=/certs/ca.crt
+      - CONTAINER_NAME=${COMPOSE_PROJECT_NAME:-runecore}_memory_api_1
+      - ENABLE_AUTH=true
+      - INFLUX_RETENTION_DAYS=${INFLUX_RETENTION_DAYS:-90}
+    volumes:
+      - certs:/certs:ro
+    networks:
+      - core_memory_bridge
+      - memory_internal
+    restart: unless-stopped
+    depends_on:
+      - postgresql
+      - redis
+      - influxdb
+      - core_primary
+
+  # ============================================================================
+  # RUNEGUARD SERVICES
+  # ============================================================================
+
+  runeguard_logger:
+    build:
+      context: ../projects/RuneGuard_Logger
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-runecore}_logger_1
+    environment:
+      - ERRORLOGGER_PORT=5001
+      - LOG_DIRECTORY=/app/logs
+      - RUNECORE_CORE_URL=https://core_primary:11440
+      - RUNECORE_CORE_INTERNAL_URL=http://core_primary:11441
+      - RUNECORE_REGISTER_WITH_CORE=1
+      - CLIENT_CERT_PATH=/certs/logger/client.crt
+      - CLIENT_KEY_PATH=/certs/logger/client.key
+      - CA_CERT_PATH=/certs/ca.crt
+      - CONTAINER_NAME=${COMPOSE_PROJECT_NAME:-runecore}_logger_1
+    volumes:
+      - certs:/certs:ro
+      - runeguard_logs:/app/logs
+    networks:
+      - core_logger_bridge
+    restart: unless-stopped
+    depends_on:
+      - core_primary
+
+# ============================================================================
+# ENVIRONMENT VARIABLES REQUIRED (create docker/.env from docker/.env.sample):
+# ============================================================================
+# CA_PASSPHRASE, JWT_SECRET_KEY
+# POSTGRES_PASSWORD, REDIS_PASSWORD, INFLUX_PASSWORD, INFLUX_TOKEN
+# ALLOWED_ORIGINS=http://localhost:3000
+# COMPOSE_PROJECT_NAME=runecore
