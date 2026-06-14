@@ -84,14 +84,16 @@ pub fn list_directory_def() -> ToolDef {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn resolve(args: &serde_json::Value, key: &str, cwd: &PathBuf) -> Option<PathBuf> {
-    let s = args.get(key)?.as_str()?;
+/// Resolve and sandbox-confine a path argument.
+/// `Err` carries a user-facing message (missing arg or sandbox violation).
+fn resolve(args: &serde_json::Value, key: &str, cwd: &PathBuf) -> Result<PathBuf, String> {
+    let s = args
+        .get(key)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("Missing required argument: {key}"))?;
     let p = PathBuf::from(s);
-    if p.is_absolute() {
-        Some(p)
-    } else {
-        Some(cwd.join(p))
-    }
+    let joined = if p.is_absolute() { p } else { cwd.join(p) };
+    crate::security::confine(cwd, &joined)
 }
 
 // ---------------------------------------------------------------------------
@@ -100,8 +102,8 @@ fn resolve(args: &serde_json::Value, key: &str, cwd: &PathBuf) -> Option<PathBuf
 
 pub async fn read_file(args: serde_json::Value, cwd: &PathBuf) -> (String, bool) {
     let path = match resolve(&args, "path", cwd) {
-        Some(p) => p,
-        None => return ("Missing required argument: path".to_string(), true),
+        Ok(p) => p,
+        Err(e) => return (e, true),
     };
 
     match std::fs::read_to_string(&path) {
@@ -118,8 +120,8 @@ pub async fn read_file(args: serde_json::Value, cwd: &PathBuf) -> (String, bool)
 
 pub async fn write_file(args: serde_json::Value, cwd: &PathBuf) -> (String, bool) {
     let path = match resolve(&args, "path", cwd) {
-        Some(p) => p,
-        None => return ("Missing required argument: path".to_string(), true),
+        Ok(p) => p,
+        Err(e) => return (e, true),
     };
     let content = match args.get("content").and_then(|v| v.as_str()) {
         Some(c) => c.to_string(),
@@ -143,8 +145,8 @@ pub async fn write_file(args: serde_json::Value, cwd: &PathBuf) -> (String, bool
 
 pub async fn create_file(args: serde_json::Value, cwd: &PathBuf) -> (String, bool) {
     let path = match resolve(&args, "path", cwd) {
-        Some(p) => p,
-        None => return ("Missing required argument: path".to_string(), true),
+        Ok(p) => p,
+        Err(e) => return (e, true),
     };
 
     if path.exists() {
@@ -176,8 +178,8 @@ pub async fn create_file(args: serde_json::Value, cwd: &PathBuf) -> (String, boo
 
 pub async fn delete_file(args: serde_json::Value, cwd: &PathBuf) -> (String, bool) {
     let path = match resolve(&args, "path", cwd) {
-        Some(p) => p,
-        None => return ("Missing required argument: path".to_string(), true),
+        Ok(p) => p,
+        Err(e) => return (e, true),
     };
 
     if !path.exists() {
@@ -194,7 +196,11 @@ pub async fn list_directory(args: serde_json::Value, cwd: &PathBuf) -> (String, 
     let dir = match args.get("path").and_then(|v| v.as_str()) {
         Some(s) => {
             let p = PathBuf::from(s);
-            if p.is_absolute() { p } else { cwd.join(p) }
+            let joined = if p.is_absolute() { p } else { cwd.join(p) };
+            match crate::security::confine(cwd, &joined) {
+                Ok(d) => d,
+                Err(e) => return (e, true),
+            }
         }
         None => cwd.clone(),
     };

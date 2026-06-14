@@ -39,6 +39,18 @@ project_context_files = [
 ]
 respect_gitignore = true
 
+[security]
+# Filesystem tools (read/write/create/delete/list) are confined to a sandbox
+# root. Empty = the project root (cwd). Path traversal (`..`), absolute paths
+# and symlink escapes that resolve outside the root are rejected.
+sandbox_root        = ""
+allow_outside_root  = false   # set true only if you trust the agent fully
+# Extra regex patterns for run_bash, MERGED with the builtin denylist
+# (rm -rf /, mkfs, dd of=/dev/, fork bombs, format C:, pipe-to-shell, shutdown).
+shell_denylist      = []
+# If non-empty, run_bash commands must match at least one of these regexes.
+shell_allowlist     = []
+
 [runecore]
 register = true
 core_url = "https://localhost:11440"  # Core HTTPS port (self-signed cert accepted)

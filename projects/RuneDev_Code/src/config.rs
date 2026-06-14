@@ -89,6 +89,33 @@ impl Default for RuneCoreConfig {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct SecurityConfig {
+    /// Sandbox root for filesystem tools. Empty = project root (cwd).
+    #[serde(default)]
+    pub sandbox_root: String,
+    /// Allow filesystem tools to touch paths outside the sandbox root.
+    #[serde(default)]
+    pub allow_outside_root: bool,
+    /// Extra regex patterns for `run_bash`, merged with the builtin denylist.
+    #[serde(default)]
+    pub shell_denylist: Vec<String>,
+    /// If non-empty, `run_bash` commands must match one of these regexes.
+    #[serde(default)]
+    pub shell_allowlist: Vec<String>,
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        SecurityConfig {
+            sandbox_root: String::new(),
+            allow_outside_root: false,
+            shell_denylist: Vec::new(),
+            shell_allowlist: Vec::new(),
+        }
+    }
+}
+
 /// An external MCP server runecode can connect to as a client.
 /// These servers are spawned as subprocesses and communicate via stdio.
 ///
@@ -115,6 +142,8 @@ pub struct Config {
     pub context: ContextConfig,
     #[serde(default)]
     pub runecore: RuneCoreConfig,
+    #[serde(default)]
+    pub security: SecurityConfig,
     /// External MCP servers to connect to as a client
     #[serde(default)]
     pub mcp_servers: Vec<McpServerConfig>,

@@ -23,6 +23,11 @@ pub async fn run() -> Result<()> {
     let mut writer = stdout;
 
     let cwd = std::env::current_dir()?;
+
+    // Apply security guardrails (path sandbox + shell denylist) in MCP mode too.
+    let config = crate::config::Config::load(&cwd);
+    crate::security::init(&config);
+
     let mut line = String::new();
 
     loop {

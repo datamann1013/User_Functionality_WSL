@@ -7,6 +7,7 @@ mod display;
 mod mcp_client;
 mod mcp_server;
 mod ollama;
+mod security;
 mod tools;
 
 use clap::Parser;

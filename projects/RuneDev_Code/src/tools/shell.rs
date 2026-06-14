@@ -30,6 +30,12 @@ pub async fn run_bash(args: serde_json::Value, cwd: &PathBuf) -> (String, bool) 
         None => return ("Missing required argument: command".to_string(), true),
     };
 
+    // Security guardrail: reject commands matching the denylist (or failing
+    // the allowlist) before spawning a shell.
+    if let Err(reason) = crate::security::check_command(&command) {
+        return (reason, true);
+    }
+
     let timeout_secs = args
         .get("timeout_secs")
         .and_then(|v| v.as_u64())

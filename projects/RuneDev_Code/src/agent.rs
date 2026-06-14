@@ -30,6 +30,7 @@ pub async fn run(cli: Cli) -> Result<()> {
     }
 
     let config = Config::load(&cwd);
+    crate::security::init(&config);
     let model = cli.model.clone().unwrap_or_else(|| config.model.name.clone());
 
     // -----------------------------------------------------------------------
