@@ -10,6 +10,8 @@ set "RAW_URL=https://raw.githubusercontent.com/datamann1013/RuneCore_Ecosystem"
 set "DEFAULT_VERSION=main"
 set "INSTALL_DIR=%USERPROFILE%\RuneCore_Ecosystem"
 set "VERSION="
+set "ACTION=install"
+set "PURGE="
 
 REM Parse command line arguments
 :parse_args
@@ -26,6 +28,12 @@ if "%~1"=="--install-dir" (
     shift
     goto :parse_args
 )
+if "%~1"=="--uninstall" set "ACTION=uninstall" & shift & goto :parse_args
+if "%~1"=="/uninstall" set "ACTION=uninstall" & shift & goto :parse_args
+if "%~1"=="--reinstall" set "ACTION=reinstall" & shift & goto :parse_args
+if "%~1"=="/reinstall" set "ACTION=reinstall" & shift & goto :parse_args
+if "%~1"=="--purge" set "PURGE=true" & shift & goto :parse_args
+if "%~1"=="/purge" set "PURGE=true" & shift & goto :parse_args
 if "%~1"=="--help" goto :show_help
 if "%~1"=="-h" goto :show_help
 shift
@@ -39,6 +47,10 @@ echo.
 echo Options:
 echo   --version VERSION     Version/branch to install (default: main)
 echo   --install-dir DIR     Installation directory (default: %USERPROFILE%\RuneCore_Ecosystem)
+echo   --uninstall          Remove RuneCore (delegates to uninstall-runecore-windows.bat)
+echo   --reinstall          Uninstall then install fresh in one run
+echo   --purge              With --uninstall/--reinstall: also wipe data volumes + .env
+echo                        (default preserves databases, models, certs, logs and .env)
 echo   --help               Show this help message
 echo.
 echo Available versions:
@@ -56,10 +68,58 @@ echo   install-runecore-windows.bat --version RuneCore_AI
 echo.
 echo   # Install to custom directory
 echo   install-runecore-windows.bat --install-dir C:\runecore
+echo.
+echo   # Re-run on an existing install (idempotent upgrade: stop, rebuild, restart;
+echo   # preserves data volumes and existing .env)
+echo   install-runecore-windows.bat
+echo.
+echo   # Reinstall preserving data, or fully purge
+echo   install-runecore-windows.bat --reinstall
+echo   install-runecore-windows.bat --uninstall --purge
 exit /b 0
 
 :args_done
 if "%VERSION%"=="" set "VERSION=%DEFAULT_VERSION%"
+
+REM Dispatch uninstall / reinstall actions by delegating to the sibling uninstaller
+if "%ACTION%"=="uninstall" goto :do_uninstall
+if "%ACTION%"=="reinstall" goto :do_reinstall
+goto :print_header
+
+:do_uninstall
+echo.
+echo 🗑️ Uninstalling RuneCore AI Ecosystem...
+call :run_uninstall
+exit /b %errorlevel%
+
+:do_reinstall
+echo.
+echo 🔄 Reinstalling RuneCore AI Ecosystem...
+if "%PURGE%"=="true" (
+    echo ⚠️  PURGE mode: data volumes and .env will be removed before reinstall
+) else (
+    echo ℹ️  Data volumes and .env will be preserved across the reinstall
+)
+call :run_uninstall
+REM Fall through to a fresh install
+goto :print_header
+
+:run_uninstall
+REM Reuse the sibling uninstaller. Prefer a local copy, else fetch from GitHub.
+set "UNINSTALL_DATA_FLAG=--purge"
+if not "%PURGE%"=="true" set "UNINSTALL_DATA_FLAG=--keep-data"
+if exist "%~dp0uninstall-runecore-windows.bat" (
+    echo ℹ️  Running local uninstaller: %~dp0uninstall-runecore-windows.bat
+    call "%~dp0uninstall-runecore-windows.bat" --force --install-dir "%INSTALL_DIR%" %UNINSTALL_DATA_FLAG%
+) else if exist "%INSTALL_DIR%\uninstall-runecore-windows.bat" (
+    echo ℹ️  Running local uninstaller: %INSTALL_DIR%\uninstall-runecore-windows.bat
+    call "%INSTALL_DIR%\uninstall-runecore-windows.bat" --force --install-dir "%INSTALL_DIR%" %UNINSTALL_DATA_FLAG%
+) else (
+    echo ℹ️  Fetching uninstaller from GitHub (branch: %VERSION%)...
+    powershell -c "iwr %RAW_URL%/%VERSION%/uninstall-runecore-windows.bat -o %TEMP%\runecore-uninstall.bat"
+    call "%TEMP%\runecore-uninstall.bat" --force --install-dir "%INSTALL_DIR%" %UNINSTALL_DATA_FLAG%
+)
+exit /b 0
 
 :print_header
 echo.
@@ -126,6 +186,40 @@ if errorlevel 1 (
 )
 
 echo ✅ All requirements satisfied
+
+:detect_existing
+if "%ACTION%"=="reinstall" goto :download_runecore
+set "EXISTING="
+if exist "%INSTALL_DIR%" set "EXISTING=true"
+for /f "tokens=*" %%i in ('docker network ls --format "{{.Name}}" 2^>nul ^| findstr /r /c:"^runecore_dev$" /c:"^runecore_ai_net$" /c:"^runecore_memory_net$" /c:"^runecore_dashboard_net$"') do set "EXISTING=true"
+for /f "tokens=*" %%i in ('docker volume ls --format "{{.Name}}" 2^>nul ^| findstr /r /c:"postgres_data" /c:"redis_data" /c:"influx_data" /c:"ollama_models" /c:"certs" /c:"runeguard_logs"') do set "EXISTING=true"
+for /f "tokens=*" %%i in ('docker ps -a --format "{{.Names}}" 2^>nul ^| findstr /r /c:"runecore" /c:"runeguard" /c:"runemesh" /c:"core_memory" /c:"ollama"') do set "EXISTING=true"
+if not "%EXISTING%"=="true" goto :download_runecore
+
+:upgrade_existing
+echo ⚠️  Existing RuneCore installation detected
+echo ℹ️  Performing a clean upgrade (preserving data volumes and .env)...
+if exist "%INSTALL_DIR%" (
+    cd /d "%INSTALL_DIR%"
+    if exist "docker-compose.yml" (
+        echo ℹ️  Stopping running services...
+        docker-compose down >nul 2>&1
+    )
+    if exist ".git" (
+        echo ℹ️  Updating repository (branch: %VERSION%)...
+        git fetch --depth 1 origin "%VERSION%" >nul 2>&1
+        git checkout "%VERSION%" >nul 2>&1
+        git pull --ff-only >nul 2>&1
+    )
+    if exist ".env" echo ℹ️  Existing .env preserved
+    if exist "docker-compose.yml" (
+        echo ℹ️  Rebuilding and restarting services...
+        docker-compose up -d --build >nul 2>&1
+    )
+)
+echo ℹ️  Existing 'runecore' command and shortcuts retained
+echo ✅ RuneCore upgrade completed
+goto :show_completion
 
 :download_runecore
 echo ℹ️  Downloading RuneCore Ecosystem (version: %VERSION%)...

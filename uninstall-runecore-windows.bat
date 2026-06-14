@@ -8,6 +8,7 @@ REM Default configuration
 set "DEFAULT_INSTALL_DIR=%USERPROFILE%\RuneCore_Ecosystem"
 set "INSTALL_DIR=%DEFAULT_INSTALL_DIR%"
 set "FORCE_UNINSTALL="
+set "KEEP_DATA="
 
 REM Parse command line arguments
 :parse_args
@@ -20,6 +21,31 @@ if "%~1"=="--install-dir" (
 )
 if "%~1"=="--force" (
     set "FORCE_UNINSTALL=true"
+    shift
+    goto :parse_args
+)
+if "%~1"=="/force" (
+    set "FORCE_UNINSTALL=true"
+    shift
+    goto :parse_args
+)
+if "%~1"=="--keep-data" (
+    set "KEEP_DATA=true"
+    shift
+    goto :parse_args
+)
+if "%~1"=="/keep-data" (
+    set "KEEP_DATA=true"
+    shift
+    goto :parse_args
+)
+if "%~1"=="--purge" (
+    set "KEEP_DATA="
+    shift
+    goto :parse_args
+)
+if "%~1"=="/purge" (
+    set "KEEP_DATA="
     shift
     goto :parse_args
 )
@@ -36,6 +62,8 @@ echo.
 echo Options:
 echo   --install-dir DIR     RuneCore installation directory (default: %USERPROFILE%\RuneCore_Ecosystem)
 echo   --force              Skip confirmation prompts
+echo   --keep-data          Preserve data volumes (postgres, redis, influx, ollama models, certs, logs)
+echo   --purge              Full wipe including data volumes (default behavior)
 echo   --help               Show this help message
 echo.
 echo Examples:
@@ -87,15 +115,19 @@ echo ℹ️  Starting uninstall process...
 :stop_services
 echo ℹ️  Stopping RuneCore services...
 
+REM Preserve data volumes when --keep-data is set (omit the -v flag)
+set "COMPOSE_DOWN_FLAGS=-v --remove-orphans"
+if "%KEEP_DATA%"=="true" set "COMPOSE_DOWN_FLAGS=--remove-orphans"
+
 REM Stop using docker-compose if available
 if exist "%INSTALL_DIR%\docker-compose.yml" (
     cd /d "%INSTALL_DIR%"
-    docker-compose down -v --remove-orphans >nul 2>&1
+    docker-compose down %COMPOSE_DOWN_FLAGS% >nul 2>&1
 )
 
 if exist "%INSTALL_DIR%\docker\docker-compose.prod.yml" (
     cd /d "%INSTALL_DIR%"
-    docker-compose -f docker\docker-compose.prod.yml down -v --remove-orphans >nul 2>&1
+    docker-compose -f docker\docker-compose.prod.yml down %COMPOSE_DOWN_FLAGS% >nul 2>&1
 )
 
 REM Stop and remove RuneCore containers
@@ -126,6 +158,10 @@ docker image prune -f >nul 2>&1
 echo ✅ Docker images removed
 
 :remove_docker_volumes
+if "%KEEP_DATA%"=="true" (
+    echo ℹ️  Preserving RuneCore Docker volumes ^(--keep-data^)
+    goto :remove_files
+)
 echo ℹ️  Removing RuneCore Docker volumes...
 
 REM Remove RuneCore-specific volumes

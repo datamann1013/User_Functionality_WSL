@@ -21,6 +21,11 @@ DEFAULT_VERSION="main"
 INSTALL_DIR="$HOME/RuneCore_Ecosystem"
 VERSION=""
 USE_AUR=false
+ACTION="install"
+PURGE=false
+
+# Directory this script lives in (used to find sibling uninstall script when run locally)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "")"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -45,6 +50,18 @@ while [[ $# -gt 0 ]]; do
             USE_AUR=true
             shift
             ;;
+        --uninstall)
+            ACTION="uninstall"
+            shift
+            ;;
+        --reinstall)
+            ACTION="reinstall"
+            shift
+            ;;
+        --purge)
+            PURGE=true
+            shift
+            ;;
         --help|-h)
             echo "RuneCore AI Ecosystem Arch Linux Installer"
             echo ""
@@ -54,6 +71,10 @@ while [[ $# -gt 0 ]]; do
             echo "  --version=VERSION     Version/branch to install (default: main)"
             echo "  --install-dir=DIR     Installation directory (default: $HOME/RuneCore_Ecosystem)"
             echo "  --use-aur            Use AUR packages when available"
+            echo "  --uninstall          Remove RuneCore (delegates to uninstall-runecore-arch.sh)"
+            echo "  --reinstall          Uninstall then install fresh in one run"
+            echo "  --purge              With --uninstall/--reinstall: also wipe data volumes + .env"
+            echo "                       (default preserves databases, models, certs, logs and .env)"
             echo "  --help               Show this help message"
             echo ""
             echo "Available versions:"
@@ -71,6 +92,14 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "  # Install to custom directory"
             echo "  curl -sSL $RAW_URL/RuneCore_AI/install-runecore-arch.sh | bash -s -- --install-dir=/opt/runecore"
+            echo ""
+            echo "  # Re-run on an existing install (idempotent upgrade: stop, rebuild, restart;"
+            echo "  # preserves data volumes and existing .env)"
+            echo "  bash install-runecore-arch.sh"
+            echo ""
+            echo "  # Reinstall preserving data, or fully purge"
+            echo "  bash install-runecore-arch.sh --reinstall"
+            echo "  bash install-runecore-arch.sh --uninstall --purge"
             exit 0
             ;;
         *)
@@ -544,9 +573,127 @@ show_arch_completion() {
     print_arch "Welcome to RuneCore on Arch Linux! 🏛️🚀"
 }
 
+delegate_uninstall() {
+    # Reuse the sibling uninstall script. Prefer a local copy (when running from a
+    # cloned repo); otherwise fetch it from GitHub as the generated CLI does.
+    local uninstall_args=("--force" "--install-dir" "$INSTALL_DIR")
+    if [[ "$PURGE" == "true" ]]; then
+        uninstall_args+=("--purge")
+    else
+        uninstall_args+=("--keep-data")
+    fi
+
+    local local_script=""
+    if [[ -f "$SCRIPT_DIR/uninstall-runecore-arch.sh" ]]; then
+        local_script="$SCRIPT_DIR/uninstall-runecore-arch.sh"
+    elif [[ -f "$INSTALL_DIR/uninstall-runecore-arch.sh" ]]; then
+        local_script="$INSTALL_DIR/uninstall-runecore-arch.sh"
+    fi
+
+    if [[ -n "$local_script" ]]; then
+        print_info "Running local uninstaller: $local_script"
+        bash "$local_script" "${uninstall_args[@]}"
+    else
+        print_info "Fetching uninstaller from GitHub (branch: $VERSION)..."
+        curl -sSL "$RAW_URL/$VERSION/uninstall-runecore-arch.sh" | bash -s -- "${uninstall_args[@]}"
+    fi
+}
+
+detect_existing_install() {
+    # Returns 0 (true) if any trace of a prior RuneCore install is found.
+    EXISTING_REASONS=()
+    [[ -d "$INSTALL_DIR" ]] && EXISTING_REASONS+=("install directory $INSTALL_DIR")
+
+    if systemctl --user list-unit-files 2>/dev/null | grep -q '^runecore\.service'; then
+        EXISTING_REASONS+=("systemd user service runecore.service")
+    fi
+
+    if command -v docker &> /dev/null; then
+        local nets
+        nets=$(docker network ls --format '{{.Name}}' 2>/dev/null             | grep -E '^(runecore_dev|runecore_ai_net|runecore_memory_net|runecore_dashboard_net)$' || true)
+        [[ -n "$nets" ]] && EXISTING_REASONS+=("docker networks: $(echo "$nets" | tr '
+' ' ')")
+
+        local vols
+        vols=$(docker volume ls --format '{{.Name}}' 2>/dev/null             | grep -E '(postgres_data|redis_data|influx_data|ollama_models|certs|runeguard_logs)' || true)
+        [[ -n "$vols" ]] && EXISTING_REASONS+=("docker volumes present")
+
+        local conts
+        conts=$(docker ps -a --format '{{.Names}}' 2>/dev/null             | grep -E '(runecore|runeguard|runemesh|core_memory|ollama)' || true)
+        [[ -n "$conts" ]] && EXISTING_REASONS+=("docker containers present")
+    fi
+
+    [[ ${#EXISTING_REASONS[@]} -gt 0 ]]
+}
+
+upgrade_existing_install() {
+    # Idempotent re-run: clean upgrade of an existing install, preserving data
+    # volumes and the existing .env file by default.
+    print_arch "Existing RuneCore installation detected:"
+    local reason
+    for reason in "${EXISTING_REASONS[@]}"; do
+        echo "    - $reason"
+    done
+    print_info "Performing a clean upgrade (preserving data volumes and .env)..."
+
+    if [[ -d "$INSTALL_DIR" ]]; then
+        cd "$INSTALL_DIR"
+
+        # Stop running services without touching data volumes.
+        if [[ -f "docker-compose.yml" ]] || [[ -f "docker-compose.dev.yml" ]]; then
+            print_info "Stopping running services..."
+            docker-compose down 2>/dev/null || true
+        fi
+
+        # Update source to the requested version.
+        if [[ -d ".git" ]]; then
+            print_info "Updating repository (branch: $VERSION)..."
+            git fetch --depth 1 origin "$VERSION" 2>/dev/null || git fetch origin 2>/dev/null || true
+            git checkout "$VERSION" 2>/dev/null || true
+            git pull --ff-only 2>/dev/null || print_warning "Could not fast-forward; keeping local checkout"
+        fi
+
+        # Refresh executable bits; preserve existing .env (do not clobber).
+        find . -name "*.sh" -type f -exec chmod +x {} \; 2>/dev/null || true
+        if [[ -f ".env" ]]; then
+            print_info "Existing .env preserved"
+        fi
+
+        # Rebuild and restart.
+        if [[ -f "docker-compose.yml" ]]; then
+            print_info "Rebuilding and restarting services..."
+            docker-compose up -d --build 2>/dev/null || print_warning "Rebuild step skipped or failed; start manually with 'runecore start'"
+        fi
+    fi
+
+    # Make sure the systemd unit and shortcuts reflect the current install.
+    create_arch_systemd_service
+    create_arch_shortcuts
+    print_status "RuneCore upgrade completed"
+}
+
 # Main installation flow
 main() {
     print_header
+
+    # Handle uninstall / reinstall actions by delegating to the sibling uninstaller.
+    if [[ "$ACTION" == "uninstall" ]]; then
+        print_arch "Uninstalling RuneCore AI Ecosystem on Arch Linux"
+        [[ "$PURGE" == "true" ]] && print_warning "PURGE mode: data volumes and .env will be removed"
+        delegate_uninstall
+        exit 0
+    fi
+
+    if [[ "$ACTION" == "reinstall" ]]; then
+        print_arch "Reinstalling RuneCore AI Ecosystem on Arch Linux"
+        if [[ "$PURGE" == "true" ]]; then
+            print_warning "PURGE mode: data volumes and .env will be removed before reinstall"
+        else
+            print_info "Data volumes and .env will be preserved across the reinstall"
+        fi
+        delegate_uninstall
+    fi
+
     print_arch "Installing RuneCore AI Ecosystem on Arch Linux"
     print_info "Version: $VERSION"
     print_info "Installation directory: $INSTALL_DIR"
@@ -554,10 +701,19 @@ main() {
         print_info "AUR packages: Enabled"
     fi
     echo ""
-    
+
     check_arch_linux
     check_aur_helper
     check_requirements
+
+    # Idempotent re-run: upgrade in place instead of failing or duplicating.
+    # (Skipped for reinstall, which already cleaned up above.)
+    if [[ "$ACTION" != "reinstall" ]] && detect_existing_install; then
+        upgrade_existing_install
+        show_arch_completion
+        exit 0
+    fi
+
     download_runecore
     setup_arch_environment
     install_runecore
