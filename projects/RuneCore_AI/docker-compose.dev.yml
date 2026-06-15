@@ -14,6 +14,11 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - ERRORLOGGER_URL=http://runeguard:5001
+      # Browser origin allowed to call this backend (frontend dev server).
+      - CORS_ORIGINS=http://localhost:3000
+      # Slow iGPU/CPU generations: give simple+complex prompts room (was 60s).
+      - OLLAMA_BASE_TIMEOUT=120
+      - OLLAMA_COMPLEX_TIMEOUT=180
       # Cross-VLAN: CoreMemory access goes through Core's internal HTTP proxy
       - CORE_MEMORY_URL=http://runecore_core:11441/api/proxy/CoreMemoryAPI
       - OLLAMA_SERVICE_URL=http://ollama_wrapper:5002
@@ -91,6 +96,8 @@ services:
     environment:
       - OLLAMA_HOST=http://ollama:11434
       - PORT=5002
+      # Ollama generation timeout — 180s so slow iGPU/CPU replies aren't cut off.
+      - OLLAMA_REQUEST_TIMEOUT=180
       # ONNX backend — set to http://onnx_service:5006 when running with --profile npu
       # For native DirectML access: http://host.docker.internal:5006
       - ONNX_SERVICE_URL=${ONNX_SERVICE_URL:-}

@@ -85,9 +85,14 @@ fn emit_alert(
         }
     });
 
-    let url = format!("{}/v1/memories", cfg.core_memory_url.trim_end_matches('/'));
+    let base = cfg.core_memory_url.trim_end_matches('/');
+    let url = format!("{}/v1/memories", base);
+
+    // Only skip TLS verification for a loopback CoreMemory (dev self-signed CA).
+    // Any non-local host uses the default verified TLS chain.
+    let is_local = base.contains("127.0.0.1") || base.contains("localhost") || base.contains("[::1]");
     let client = match reqwest::blocking::Client::builder()
-        .danger_accept_invalid_certs(true)
+        .danger_accept_invalid_certs(is_local)
         .timeout(std::time::Duration::from_secs(5))
         .build()
     {

@@ -212,7 +212,15 @@ if async_agent_manager is None:
     print("[WABA01] Using mock async agent manager")
 
 app = Flask(__name__)
-CORS(app)
+# Restrict CORS to configured origins instead of allowing all. Set CORS_ORIGINS
+# to a comma-separated list (e.g. "http://localhost:3000"). "*" keeps the old
+# permissive behaviour for setups that need it.
+_cors_origins_env = os.environ.get("CORS_ORIGINS", "http://localhost:3000").strip()
+if _cors_origins_env == "*":
+    CORS(app)
+else:
+    _cors_origins = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+    CORS(app, origins=_cors_origins)
 
 # Database connection (optional, None for now as we use file-based storage)
 db = None
@@ -1024,7 +1032,8 @@ def chat():
             except Exception:
                 pass
             message_length = len(message)
-            BASE_TIMEOUT = int(os.environ.get("OLLAMA_BASE_TIMEOUT", "60"))
+            # Base bumped 60→120: slow iGPU cut off even short prompts at 60s.
+            BASE_TIMEOUT = int(os.environ.get("OLLAMA_BASE_TIMEOUT", "120"))
             COMPLEX_TIMEOUT = int(os.environ.get("OLLAMA_COMPLEX_TIMEOUT", "180"))
             # Use complex timeout for any non-trivial question (>8 words or >50 chars)
             complex_timeout = (

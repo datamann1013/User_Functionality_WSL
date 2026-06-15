@@ -899,7 +899,8 @@ def chat():
             },
         }
 
-        request_timeout = int(os.environ.get("OLLAMA_REQUEST_TIMEOUT", "60"))
+        # Default 180s: slow iGPU/CPU generations were being cut off at 60s.
+        request_timeout = int(os.environ.get("OLLAMA_REQUEST_TIMEOUT", "180"))
         max_retries = int(os.environ.get("OLLAMA_MAX_RETRIES", "3"))
         backoff = float(os.environ.get("OLLAMA_RETRY_BASE_S", "1"))
         response = None
