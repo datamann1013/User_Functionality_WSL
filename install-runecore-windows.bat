@@ -28,12 +28,36 @@ if "%~1"=="--install-dir" (
     shift
     goto :parse_args
 )
-if "%~1"=="--uninstall" set "ACTION=uninstall" & shift & goto :parse_args
-if "%~1"=="/uninstall" set "ACTION=uninstall" & shift & goto :parse_args
-if "%~1"=="--reinstall" set "ACTION=reinstall" & shift & goto :parse_args
-if "%~1"=="/reinstall" set "ACTION=reinstall" & shift & goto :parse_args
-if "%~1"=="--purge" set "PURGE=true" & shift & goto :parse_args
-if "%~1"=="/purge" set "PURGE=true" & shift & goto :parse_args
+if "%~1"=="--uninstall" (
+    set "ACTION=uninstall"
+    shift
+    goto :parse_args
+)
+if "%~1"=="/uninstall" (
+    set "ACTION=uninstall"
+    shift
+    goto :parse_args
+)
+if "%~1"=="--reinstall" (
+    set "ACTION=reinstall"
+    shift
+    goto :parse_args
+)
+if "%~1"=="/reinstall" (
+    set "ACTION=reinstall"
+    shift
+    goto :parse_args
+)
+if "%~1"=="--purge" (
+    set "PURGE=true"
+    shift
+    goto :parse_args
+)
+if "%~1"=="/purge" (
+    set "PURGE=true"
+    shift
+    goto :parse_args
+)
 if "%~1"=="--help" goto :show_help
 if "%~1"=="-h" goto :show_help
 shift
@@ -115,7 +139,7 @@ if exist "%~dp0uninstall-runecore-windows.bat" (
     echo ℹ️  Running local uninstaller: %INSTALL_DIR%\uninstall-runecore-windows.bat
     call "%INSTALL_DIR%\uninstall-runecore-windows.bat" --force --install-dir "%INSTALL_DIR%" %UNINSTALL_DATA_FLAG%
 ) else (
-    echo ℹ️  Fetching uninstaller from GitHub (branch: %VERSION%)...
+    echo ℹ️  Fetching uninstaller from GitHub ^(branch: %VERSION%^)...
     powershell -c "iwr %RAW_URL%/%VERSION%/uninstall-runecore-windows.bat -o %TEMP%\runecore-uninstall.bat"
     call "%TEMP%\runecore-uninstall.bat" --force --install-dir "%INSTALL_DIR%" %UNINSTALL_DATA_FLAG%
 )
@@ -206,7 +230,7 @@ if exist "%INSTALL_DIR%" (
         docker-compose down >nul 2>&1
     )
     if exist ".git" (
-        echo ℹ️  Updating repository (branch: %VERSION%)...
+        echo ℹ️  Updating repository ^(branch: %VERSION%^)...
         git fetch --depth 1 origin "%VERSION%" >nul 2>&1
         git checkout "%VERSION%" >nul 2>&1
         git pull --ff-only >nul 2>&1

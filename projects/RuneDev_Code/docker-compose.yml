@@ -1,0 +1,32 @@
+# Isolated run of RuneDev_Code (runecode).
+#
+# The agent can read/write ONLY the mounted workspace. Everything else on the
+# host is invisible to the container. Run interactively:
+#
+#   RUNECODE_WORKSPACE=/path/to/project docker compose run --rm runecode
+#
+# Or as an MCP stdio server for an external client:
+#
+#   RUNECODE_WORKSPACE=/path/to/project docker compose run --rm runecode --mcp-server
+
+services:
+  runecode:
+    build: .
+    image: runecore/runedev-code:latest
+    container_name: runedev_code
+    stdin_open: true        # keep STDIN open (interactive agent + MCP stdio)
+    tty: true
+    working_dir: /workspace
+    user: "10001"           # non-root
+    # SECURE DEFAULT: no network. The agent cannot exfiltrate or fetch anything.
+    # Comment this out (and set runecore.register / wrapper_url) if the agent
+    # must reach the RuneCore_Mind wrapper or register with Core.
+    network_mode: "none"
+    read_only: false        # /workspace must be writable; rest of FS is the image
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      # Only the target project is exposed — this is the sandbox boundary.
+      - ${RUNECODE_WORKSPACE:-./workspace}:/workspace
