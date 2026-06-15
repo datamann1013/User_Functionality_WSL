@@ -943,6 +943,36 @@ def dependency_available():
         return jsonify({"error": str(e)}), 500
 
 
+def _persist_chat_turn(agent_id, message, ai_response):
+    """Persist a completed chat turn: conversation cache, limb storage,
+    profile curation, and CoreMemory. Shared by the streaming and
+    non-streaming chat paths."""
+    try:
+        conversation_cache.add_conversation(agent_id, message, ai_response)
+    except Exception as cache_error:
+        log_error("EABC02", f"Failed to cache conversation: {str(cache_error)}")
+
+    if service_discovery and service_discovery.LIMB_MODE:
+        try:
+            limb_storage = service_discovery.get_limb_storage()
+            if limb_storage:
+                limb_storage.store_conversation(agent_id, message, ai_response)
+        except Exception as limb_error:
+            log_error("EABB07", f"Failed to store in limb storage: {str(limb_error)}")
+
+    if _curator_mod is not None:
+        try:
+            _curator_mod.curate_async(message, ai_response)
+        except Exception:
+            pass
+
+    if _cmb is not None:
+        try:
+            _cmb.store_turn(agent_id, message, ai_response)
+        except Exception:
+            pass
+
+
 @app.route("/api/chat", methods=["POST"])
 def chat():
     """Chat endpoint with conversation cache, rate limiting, and input sanitization"""
@@ -1213,6 +1243,55 @@ def chat():
                 "max_tokens": max_tokens,
                 "timestamp": datetime.now().isoformat(),
             }
+
+            # Streaming path: proxy the wrapper's NDJSON token stream straight
+            # to the client, accumulate the full text, then persist the turn.
+            if bool(data.get("stream", False)):
+                from flask import Response as FlaskResponse
+
+                stream_payload = dict(payload)
+                stream_payload["stream"] = True
+                stream_timeout = int(os.environ.get("OLLAMA_COMPLEX_TIMEOUT", "180"))
+                _agent_id = agent_id
+                _message = message
+
+                def _proxy_stream():
+                    full_parts = []
+                    try:
+                        r = requests.post(
+                            f"{OLLAMA_SERVICE_URL}/api/chat",
+                            json=stream_payload,
+                            stream=True,
+                            timeout=stream_timeout,
+                        )
+                        for raw_line in r.iter_lines():
+                            if not raw_line:
+                                continue
+                            line = raw_line.decode("utf-8", "ignore")
+                            yield line + "\n"
+                            try:
+                                chunk = json.loads(line)
+                                if chunk.get("delta"):
+                                    full_parts.append(chunk["delta"])
+                                if chunk.get("done"):
+                                    break
+                            except Exception:
+                                pass
+                    except Exception as e:
+                        yield json.dumps({"delta": "", "done": True, "error": str(e)}) + "\n"
+                    finally:
+                        full = "".join(full_parts)
+                        if full:
+                            try:
+                                _persist_chat_turn(_agent_id, _message, full)
+                            except Exception:
+                                pass
+
+                return FlaskResponse(
+                    _proxy_stream(),
+                    mimetype="application/x-ndjson",
+                    headers={"X-Accel-Buffering": "no"},
+                )
 
             # Debug: log what we're sending to Ollama (truncated for safety)
             try:

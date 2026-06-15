@@ -518,11 +518,78 @@ function App() {
         body: JSON.stringify({
           message: userMessage,
           agent_id: selectedAgent,
+          stream: true,
         }),
       });
 
       // Check if response is JSON before parsing
-      const contentType = response.headers.get("content-type");
+      const contentType = response.headers.get("content-type") || "";
+
+      // Streaming path: backend returns NDJSON {"delta","done"} lines.
+      // Render tokens incrementally into a live AI message.
+      if (response.ok && contentType.includes("ndjson") && response.body) {
+        const aiId = Date.now() + Math.random();
+        let acc = "";
+
+        const renderPartial = (text, streaming) => {
+          const build = (list) =>
+            list
+              .filter((m) => m.id !== thinkingId && m.id !== aiId)
+              .concat([
+                {
+                  id: aiId,
+                  sender: "ai",
+                  text,
+                  timestamp: new Date().toISOString(),
+                  agentId: agentIdNow,
+                  streaming,
+                },
+              ]);
+          setMessageStore((prev) =>
+            trimMessageStore(prev, agentIdNow, build(prev[agentIdNow] || []))
+          );
+          if (agentIdNow === selectedAgentRef.current) {
+            setMessages((prev) => build(prev));
+          }
+        };
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        try {
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let nl;
+            while ((nl = buffer.indexOf("\n")) >= 0) {
+              const line = buffer.slice(0, nl).trim();
+              buffer = buffer.slice(nl + 1);
+              if (!line) continue;
+              try {
+                const obj = JSON.parse(line);
+                if (obj.delta) {
+                  acc += obj.delta;
+                  renderPartial(acc, true);
+                }
+              } catch (_e) {
+                /* ignore partial/non-JSON line */
+              }
+            }
+          }
+        } finally {
+          renderPartial(acc || "[No response from model]", false);
+          if (agentIdNow !== selectedAgentRef.current && acc) {
+            setUnreadCounts((counts) => ({
+              ...counts,
+              [agentIdNow]: (counts[agentIdNow] || 0) + 1,
+            }));
+          }
+        }
+        logFrontendError("FRONTEND_CHAT_SUCCESS", "Chat streamed successfully");
+        return;
+      }
+
       let data;
       try {
         if (contentType && contentType.includes("application/json")) {

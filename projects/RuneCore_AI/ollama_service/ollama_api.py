@@ -840,6 +840,53 @@ def chat():
         else:
             target_host = OLLAMA_HOST
 
+        # Streaming path: return NDJSON token stream (mirrors /api/agent).
+        # Frontend reads {"delta": "...", "done": bool} lines.
+        if bool(data.get("stream", False)):
+            from flask import Response as FlaskResponse
+
+            stream_payload = {
+                "model": model_name,
+                "messages": messages,
+                "stream": True,
+                "options": {
+                    "temperature": temperature,
+                    "top_p": top_p,
+                    "num_predict": max_tokens,
+                    **extra_options,
+                },
+            }
+            stream_timeout = int(os.environ.get("OLLAMA_REQUEST_TIMEOUT", "180"))
+
+            def _chat_stream_gen():
+                try:
+                    r = requests.post(
+                        f"{target_host}/api/chat",
+                        json=stream_payload,
+                        stream=True,
+                        timeout=stream_timeout,
+                    )
+                    for raw_line in r.iter_lines():
+                        if not raw_line:
+                            continue
+                        try:
+                            chunk = json.loads(raw_line)
+                            delta = chunk.get("message", {}).get("content", "")
+                            done = chunk.get("done", False)
+                            yield json.dumps({"delta": delta, "done": done}) + "\n"
+                            if done:
+                                break
+                        except Exception:
+                            pass
+                except Exception as e:
+                    yield json.dumps({"delta": "", "done": True, "error": str(e)}) + "\n"
+
+            return FlaskResponse(
+                _chat_stream_gen(),
+                mimetype="application/x-ndjson",
+                headers={"X-Accel-Buffering": "no"},
+            )
+
         ollama_payload = {
             "model": model_name,
             "messages": messages,
