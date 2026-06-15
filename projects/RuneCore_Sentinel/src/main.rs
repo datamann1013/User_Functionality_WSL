@@ -8,6 +8,7 @@ use std::env;
 use serde_json;
 
 mod config;
+mod disk_alert;
 mod install;
 mod ipc;
 mod metrics;
@@ -86,6 +87,7 @@ fn main() {
     // Only fast ops here: sysinfo (no subprocess) + nvidia-smi (hidden window).
     let interval      = Duration::from_secs(cfg.sampling_interval as u64);
     let mut loop_count: u64 = 0;
+    let mut disk_alerter = disk_alert::DiskAlerter::new(cfg.disk_alert_percent);
 
     loop {
         let metric = sample_system_metrics(&hw);
@@ -114,6 +116,9 @@ fn main() {
 
         // HTTP → InfluxDB via CoreMemory proxy
         telemetry::push_host_metrics(&cfg, &metric);
+
+        // Disk-usage threshold events (edge-triggered → CoreMemory)
+        disk_alerter.check(&cfg, &metric.host);
 
         // Refresh static profile periodically
         loop_count += 1;

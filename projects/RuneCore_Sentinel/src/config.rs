@@ -11,6 +11,8 @@ pub struct Config {
     /// CoreMemory base URL for publishing profiles and telemetry.
     /// Defaults to Core's internal HTTP proxy which forwards to CoreMemory.
     pub core_memory_url: String,
+    /// Disk usage percentage at/above which a `sentinel.disk_alert` event fires.
+    pub disk_alert_percent: f64,
 }
 
 impl Config {
@@ -34,6 +36,11 @@ impl Config {
         let core_memory_url = env::var("SENTINEL_CORE_MEMORY_URL")
             .unwrap_or_else(|_| "http://127.0.0.1:5010".to_string());
 
+        let disk_alert_percent = env::var("SENTINEL_DISK_ALERT_PERCENT")
+            .ok()
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap_or(90.0);
+
         Config {
             sampling_interval,
             unix_socket_path,
@@ -41,6 +48,7 @@ impl Config {
             core_url,
             service_name,
             core_memory_url,
+            disk_alert_percent,
         }
     }
 }
