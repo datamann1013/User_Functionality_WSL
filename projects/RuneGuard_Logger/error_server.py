@@ -21,12 +21,26 @@ from logger import log_error
 app = Flask(__name__)
 
 
+def _heartbeat_loop(core_url):
+    """Best-effort periodic heartbeat so Core keeps the Logger marked healthy."""
+    interval = int(os.environ.get("RUNECORE_HEARTBEAT_INTERVAL", "30"))
+    payload = {"name": "RuneGuard_Logger", "container_name": socket.gethostname()}
+    while True:
+        time.sleep(interval)
+        try:
+            requests.post(
+                f"{core_url}/api/v1/services/heartbeat", json=payload, timeout=5
+            )
+        except Exception as e:
+            print(f"[RuneGuard] Heartbeat failed: {e}")
+
+
 def _register_with_core():
     core_url = os.environ.get("RUNECORE_CORE_URL")
     if not core_url:
         return
     payload = {
-        "name": "RuneGuardLogger",
+        "name": "RuneGuard_Logger",
         "version": "1.0.0",
         "rest_url": "http://runeguard:5001",
         "dependencies": [],
@@ -37,6 +51,9 @@ def _register_with_core():
             r = requests.post(f"{core_url}/api/v1/services/register", json=payload, timeout=5)
             if r.ok:
                 print("[RuneGuard] Registered with Core")
+                threading.Thread(
+                    target=_heartbeat_loop, args=(core_url,), daemon=True
+                ).start()
                 return
         except Exception as e:
             print(f"[RuneGuard] Registration attempt {attempt + 1} failed: {e}")
@@ -100,7 +117,7 @@ def _push_stats_loop():
             total, last_hour, by_type = _compute_error_stats()
             payload = {
                 "measurement": "error_stats",
-                "tags": {"service": "RuneGuardLogger"},
+                "tags": {"service": "RuneGuard_Logger"},
                 "fields": {
                     "total_errors": float(total),
                     "errors_last_hour": float(last_hour),
