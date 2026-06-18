@@ -15,10 +15,26 @@ services:
         aliases:
           - dashboard_backend
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5004/health')"]
-      interval: 15s
+      test: ["CMD", "curl", "-f", "http://localhost:5004/health"]
+      interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  dashboard_frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: dashboard_frontend
+    ports:
+      - '3001:3001'
+    depends_on:
+      - dashboard_backend
+    networks:
+      runecore_dev:
+        aliases:
+          - dashboard_frontend
     restart: unless-stopped
 
 networks:
