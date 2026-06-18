@@ -6,6 +6,8 @@ Centralized error logging that can be used by any program in the system
 import os
 import sys
 import json
+import time
+import threading
 import argparse
 from datetime import datetime
 from flask import Flask, request, jsonify
@@ -161,21 +163,99 @@ def get_services():
         return jsonify({"error": "Could not retrieve services", "message": str(e)}), 500
 
 
+SERVICE_NAME = "RuneGuard_Logger"
+SERVICE_VERSION = "1.0.0"
+
+# Heartbeat thread state
+_heartbeat_thread = None
+_heartbeat_running = False
+
+
+def _service_rest_url():
+    """Base reachable URL for this service. In Docker the alias is `runeguard`;
+    falls back to the explicit ERRORLOGGER_SERVICE_URL or localhost."""
+    return os.environ.get("ERRORLOGGER_SERVICE_URL", "http://runeguard:5001")
+
+
+def _build_registration_info():
+    """ServiceInfo advertised to Core. Logger exposes /health and /log on 5001."""
+    base = _service_rest_url().rstrip("/")
+    return {
+        "name": SERVICE_NAME,
+        "version": SERVICE_VERSION,
+        "rest_url": base,
+        "health_url": f"{base}/health",
+        "log_url": f"{base}/log",
+        "dependencies": [],
+    }
+
+
 def maybe_register_with_core():
-    """If RUNECORE_REGISTER_WITH_CORE is set, attempt to register this service with Core using CoreClient.
-    This is best-effort and will not raise on failure."""
+    """If RUNECORE_REGISTER_WITH_CORE is set, attempt to register this service with
+    Core using the shared CoreClient and start a best-effort heartbeat loop.
+
+    Best-effort / limb-mode: the Logger is the bottom of the dependency stack, so a
+    Core that is down or unreachable MUST never block or crash it. Any failure is
+    logged as a warning and execution continues."""
     if not os.environ.get("RUNECORE_REGISTER_WITH_CORE"):
         return
     if CoreClient is None:
         print("CoreClient not available; skipping registration")
         return
     try:
-        cc = CoreClient(core_url=os.environ.get("RUNECORE_CORE_URL"), disable_mtls=os.environ.get("RUNECORE_DISABLE_MTLS") in ("1","true","True"))
-        info = {"name": "ErrorLogger", "version": "1.0.0", "rest_url": os.environ.get("ERRORLOGGER_SERVICE_URL", "http://127.0.0.1:5001/log")}
+        cc = CoreClient(
+            core_url=os.environ.get("RUNECORE_CORE_URL"),
+            disable_mtls=os.environ.get("RUNECORE_DISABLE_MTLS") in ("1", "true", "True"),
+        )
+        info = _build_registration_info()
         res = cc.register_service(info)
         print(f"Registered with core: {res}")
+        start_heartbeat_thread()
     except Exception as e:
+        # limb mode: warn and keep running, never propagate
         print(f"Failed to register with core: {e}")
+
+
+def send_heartbeat():
+    """Send a single best-effort heartbeat to Core. Never raises."""
+    if CoreClient is None:
+        return
+    core_url = os.environ.get("RUNECORE_CORE_URL")
+    if not core_url:
+        return
+    try:
+        import requests
+
+        disable_mtls = os.environ.get("RUNECORE_DISABLE_MTLS") in ("1", "true", "True")
+        requests.post(
+            f"{core_url.rstrip('/')}/api/v1/services/heartbeat",
+            json={
+                "name": SERVICE_NAME,
+                "status": "healthy",
+                "metadata": {"service_type": "error_logger"},
+            },
+            timeout=5,
+            verify=False if disable_mtls else True,
+        )
+    except Exception as e:
+        print(f"Heartbeat to core failed: {e}")
+
+
+def heartbeat_loop(interval: int = 30):
+    """Background heartbeat loop (mirrors CoreMemory service_discovery)."""
+    while _heartbeat_running:
+        send_heartbeat()
+        time.sleep(interval)
+
+
+def start_heartbeat_thread():
+    """Start the best-effort heartbeat thread if not already running."""
+    global _heartbeat_thread, _heartbeat_running
+    if _heartbeat_thread and _heartbeat_thread.is_alive():
+        return
+    _heartbeat_running = True
+    _heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
+    _heartbeat_thread.start()
 
 
 if __name__ == "__main__":
@@ -197,6 +277,9 @@ if __name__ == "__main__":
     print(f"   Logs: {LOG_DIR}")
     print(f"   Date: {datetime.now().strftime('%Y-%m-%d')}")
     print(f"   Ready to receive logs from any service...")
+
+    # Best-effort Core registration + heartbeat (never blocks/crashes the logger)
+    maybe_register_with_core()
 
     try:
         app.run(host=args.host, port=args.port, debug=args.debug, use_reloader=False)

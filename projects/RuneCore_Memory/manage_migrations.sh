@@ -7,8 +7,12 @@ if [ -z "${POSTGRES_DSN:-}" ]; then
   exit 1
 fi
 
-cd $(dirname "$0")
-# Run alembic from repo root so script_location paths resolve
-cd ..
+# Run from the directory that holds alembic.ini / the core_memory package.
+# This is /app in the container and projects/RuneCore_Memory/ when run from a checkout.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
 
-alembic -c projects/core_memory/alembic.ini upgrade head
+# Make the local core_memory package importable by alembic/env.py regardless of CWD.
+export PYTHONPATH="$SCRIPT_DIR:${PYTHONPATH:-}"
+
+alembic -c "$SCRIPT_DIR/alembic.ini" upgrade head

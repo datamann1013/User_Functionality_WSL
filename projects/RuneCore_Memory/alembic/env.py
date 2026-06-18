@@ -15,8 +15,14 @@ config = context.config
 fileConfig(config.config_file_name)
 
 # add your model's MetaData object here
+# Anchor the import to the module root (the directory that contains the
+# `core_memory` package and `alembic/`), which is the parent of this env.py's
+# directory. This is CWD-independent: works in Docker (/app) and from a checkout
+# (projects/RuneCore_Memory/).
 import sys
-sys.path.append(os.path.abspath(os.path.join(os.getcwd(), 'projects', 'core_memory')))
+_MODULE_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+if _MODULE_ROOT not in sys.path:
+    sys.path.insert(0, _MODULE_ROOT)
 from core_memory.db import Base
 target_metadata = Base.metadata
 
