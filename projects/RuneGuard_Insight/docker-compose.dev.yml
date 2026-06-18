@@ -1,7 +1,10 @@
 version: '3.8'
 services:
   insight:
-    build: .
+    build:
+      # Repo root context so the image can include projects/shared_utils
+      context: ../../
+      dockerfile: projects/RuneGuard_Insight/Dockerfile
     container_name: runeguard_insight
     volumes:
       # Read-only Docker socket access for container stats
@@ -9,6 +12,16 @@ services:
     environment:
       - CORE_PROXY_URL=http://runecore_core:11441/api/proxy/CoreMemoryAPI
       - COLLECT_INTERVAL=30
+      - HEALTH_PORT=5005
+      - RUNECORE_CORE_URL=http://runecore_core:11441
+      - RUNEGUARD_LOGGER_URL=http://runeguard_logger:5001/log
+      - RUNECORE_DISABLE_MTLS=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5005/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     networks:
       runecore_dev:
         aliases:
