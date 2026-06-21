@@ -11,6 +11,7 @@ Features:
 """
 import os
 import json
+import logging
 import requests
 import asyncio
 import threading
@@ -20,6 +21,12 @@ import socket
 from datetime import datetime
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+
+logging.basicConfig(
+    level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO),
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger("runecore_mind.backend")
 
 # Optional integration with RuneCore Core for mTLS and service registration
 try:
@@ -93,7 +100,7 @@ def _try_import_modules():
                 print(f"[IABC01] Conversation cache loaded from {mod_name}")
                 break
         except Exception as e:
-            print(f"[IMPORT_DEBUG] Failed to import {mod_name}: {e}")
+            logger.warning("Failed to import conversation_cache from %s: %s", mod_name, e)
 
     # Import async agent manager
     manager_candidates = [
@@ -109,7 +116,7 @@ def _try_import_modules():
                 print(f"[IABA02] Async agent manager loaded from {mod_name}")
                 break
         except Exception as e:
-            print(f"[IMPORT_DEBUG] Failed to import async_agent_manager from {mod_name}: {e}")
+            logger.warning("Failed to import async_agent_manager from %s: %s", mod_name, e)
 
     # Import model manager
     model_candidates = [
@@ -125,7 +132,7 @@ def _try_import_modules():
                 print(f"[IABM01] Model manager loaded from {mod_name}")
                 break
         except Exception as e:
-            print(f"[IMPORT_DEBUG] Failed to import model_manager from {mod_name}: {e}")
+            logger.warning("Failed to import model_manager from %s: %s", mod_name, e)
 
     # Import security module
     security_candidates = [
@@ -141,7 +148,7 @@ def _try_import_modules():
                 print(f"[IABS01] Security module loaded from {mod_name}")
                 break
         except Exception as e:
-            print(f"[IMPORT_DEBUG] Failed to import security from {mod_name}: {e}")
+            logger.warning("Failed to import security from %s: %s", mod_name, e)
 
 
 # Try to import all modules
@@ -1479,22 +1486,22 @@ def debug_payload():
 
         # Diagnostic: show which cache implementation we're using
         try:
-            print(
-                f"[DEBUG_PAYLOAD] conversation_cache type: {conversation_cache.__class__.__name__}"
+            logger.debug(
+                "conversation_cache type: %s", conversation_cache.__class__.__name__
             )
         except Exception:
             pass
 
         chat_history = conversation_cache.format_context_for_ai(agent_id)
-        print(f"[DEBUG_PAYLOAD] raw chat_history before append: {chat_history}")
+        logger.debug("raw chat_history before append: %s", chat_history)
         chat_history.append({"role": "user", "content": message})
-        print(f"[DEBUG_PAYLOAD] chat_history after append: {chat_history}")
+        logger.debug("chat_history after append: %s", chat_history)
         try:
             enhanced_message = conversation_cache.format_chat_history_to_string(
                 chat_history
             )
         except Exception as e:
-            print(f"[DEBUG_PAYLOAD] format_chat_history_to_string error: {e}")
+            logger.debug("format_chat_history_to_string error: %s", e)
             enhanced_message = ""
 
         agent_config = next(

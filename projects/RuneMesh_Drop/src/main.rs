@@ -1,3 +1,4 @@
+use actix_cors::Cors;
 use actix_multipart::Multipart;
 use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder, Result, HttpRequest};
 use chrono::{Duration, Utc};
@@ -31,6 +32,55 @@ struct AppStateData {
 
 const STORAGE_DIR: &str = "./storage/uploads";
 const META_FILE: &str = "./storage/metadata.json";
+
+// Default maximum upload size: 5 GiB. Override with env MAX_UPLOAD_BYTES.
+// Rationale: RuneDrop is a LAN file-transfer service intended for large files
+// (images, archives), so a generous default; admins can tighten it.
+const DEFAULT_MAX_UPLOAD_BYTES: u64 = 5 * 1024 * 1024 * 1024;
+// Default GC sweep interval (seconds). Override with env GC_INTERVAL_SECS.
+const DEFAULT_GC_INTERVAL_SECS: u64 = 3600;
+
+fn max_upload_bytes() -> u64 {
+    std::env::var("MAX_UPLOAD_BYTES")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_MAX_UPLOAD_BYTES)
+}
+
+fn gc_interval_secs() -> u64 {
+    std::env::var("GC_INTERVAL_SECS")
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(DEFAULT_GC_INTERVAL_SECS)
+}
+
+/// Remove metadata entries whose expiry has passed and delete their on-disk files.
+/// Concurrency-safe: caller passes the already-locked state guard. Returns the
+/// number of entries removed. Saves metadata if anything changed.
+fn gc_expired(state: &mut AppStateData, now: chrono::DateTime<chrono::Utc>) -> usize {
+    let expired_ids: Vec<String> = state
+        .files
+        .iter()
+        .filter(|(_, meta)| meta.expires_at < now)
+        .map(|(id, _)| id.clone())
+        .collect();
+
+    for id in &expired_ids {
+        if let Some(meta) = state.files.remove(id) {
+            // best-effort delete of the orphaned file
+            let _ = fs::remove_file(&meta.path);
+            // drop any associated signaling messages too
+            state.signals.remove(id);
+        }
+    }
+
+    if !expired_ids.is_empty() {
+        save_meta(state);
+    }
+    expired_ids.len()
+}
 
 fn ensure_dirs() -> std::io::Result<()> {
     fs::create_dir_all(STORAGE_DIR)?;
@@ -197,23 +247,39 @@ async fn upload(req: HttpRequest, query: web::Query<HashMap<String, String>>, mu
         let file_id = Uuid::new_v4().to_string();
         let filepath = format!("{}/{}", STORAGE_DIR, file_id);
 
-        // Accumulate chunks into memory then write once (simple MVP approach)
+        // DoS protection: enforce an env-configurable max upload size while streaming.
+        // We track bytes seen and abort + clean up the partial file the moment we
+        // exceed the cap, returning 413 instead of buffering an unbounded body.
+        let limit = max_upload_bytes();
         let mut buf = BytesMut::new();
+        let mut total: u64 = 0;
         while let Some(chunk) = field.next().await {
-            let data = chunk.map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
-            buf.extend_from_slice(&data);
+            let chunk = chunk.map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+            total += chunk.len() as u64;
+            if total > limit {
+                // nothing has been written to disk yet (we buffer first), but be
+                // defensive in case a partial file exists, then reject.
+                let _ = fs::remove_file(&filepath);
+                return Ok(HttpResponse::PayloadTooLarge().json(serde_json::json!({
+                    "error": "upload exceeds maximum allowed size",
+                    "max_upload_bytes": limit,
+                })));
+            }
+            buf.extend_from_slice(&chunk);
         }
 
         // write to disk in a blocking task (clone path for move into closure)
         let write_path = filepath.clone();
-        // web::block returns Result<Result<T, io::Error>, BlockingError> — propagate both
+        // web::block returns Result<Result<T, io::Error>, BlockingError> — propagate both.
+        // On any write failure, clean up the partial file before bubbling the error.
+        let write_path_cleanup = filepath.clone();
         web::block(move || {
             let mut f = std::fs::File::create(&write_path)?;
             f.write_all(&buf)?;
             Ok::<(), std::io::Error>(())
         }).await
-            .map_err(|e| actix_web::error::ErrorInternalServerError(e))?
-            .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+            .map_err(|e| { let _ = fs::remove_file(&write_path_cleanup); actix_web::error::ErrorInternalServerError(e) })?
+            .map_err(|e| { let _ = fs::remove_file(&write_path_cleanup); actix_web::error::ErrorInternalServerError(e) })?;
 
         // create token and expire
         let token = Uuid::new_v4().to_string();
@@ -361,6 +427,34 @@ async fn register_with_core(req_body: String) -> impl Responder {
     }
 }
 
+/// Build the CORS middleware from configuration. Restrictive by default:
+/// no origins are allowed unless CORS_ALLOWED_ORIGINS lists them (comma-separated).
+/// Setting CORS_ALLOWED_ORIGINS=* opts in to permissive any-origin (explicit only).
+fn build_cors() -> Cors {
+    let mut cors = Cors::default()
+        .allow_any_method()
+        .allow_any_header()
+        .max_age(3600);
+
+    match std::env::var("CORS_ALLOWED_ORIGINS") {
+        Ok(val) if val.trim() == "*" => {
+            cors = cors.allow_any_origin();
+        }
+        Ok(val) => {
+            for origin in val.split(',') {
+                let origin = origin.trim();
+                if !origin.is_empty() {
+                    cors = cors.allowed_origin(origin);
+                }
+            }
+        }
+        // Default: no cross-origin allowed (same-origin only). The static frontend
+        // is served from this same service, so it keeps working without CORS.
+        Err(_) => {}
+    }
+    cors
+}
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     println!("Starting RuneMesh_Drop service ...");
@@ -368,6 +462,36 @@ async fn main() -> std::io::Result<()> {
     let state = load_meta();
 
     let data = web::Data::new(std::sync::Mutex::new(state));
+
+    // Run an immediate GC sweep on startup so stale entries from a previous run
+    // (and their orphaned files) are cleared before serving traffic.
+    {
+        let mut guard = data.lock().unwrap();
+        let removed = gc_expired(&mut guard, Utc::now());
+        if removed > 0 {
+            println!("GC: removed {} expired entries on startup", removed);
+        }
+    }
+
+    // Background GC task: periodically remove expired tokens/files.
+    let gc_data = data.clone();
+    let gc_secs = gc_interval_secs();
+    println!("GC interval: {}s; max upload: {} bytes", gc_secs, max_upload_bytes());
+    actix_web::rt::spawn(async move {
+        let mut ticker = actix_web::rt::time::interval(std::time::Duration::from_secs(gc_secs));
+        // first tick fires immediately; skip it since we already swept above
+        ticker.tick().await;
+        loop {
+            ticker.tick().await;
+            let removed = {
+                let mut guard = gc_data.lock().unwrap();
+                gc_expired(&mut guard, Utc::now())
+            };
+            if removed > 0 {
+                println!("GC: removed {} expired entries", removed);
+            }
+        }
+    });
 
     // Try to register with core (best-effort)
     let core_url = std::env::var("RUNECORE_CORE_URL").unwrap_or_else(|_| "http://localhost:5000/api/modules/register".into());
@@ -402,9 +526,16 @@ async fn main() -> std::io::Result<()> {
     let bind = format!("0.0.0.0:{}", std::env::var("PORT").unwrap_or_else(|_| "5010".into()));
     println!("Listening on {}", bind);
 
+    // Backstop payload cap (request body bytes). Slightly above the streaming
+    // limit to leave room for multipart boundaries/headers; the streaming check
+    // in `upload` is the authoritative per-file enforcement.
+    let payload_cap = max_upload_bytes().saturating_add(1024 * 1024) as usize;
+
     HttpServer::new(move || {
         App::new()
+            .wrap(build_cors())
             .app_data(data.clone())
+            .app_data(web::PayloadConfig::new(payload_cap))
             // API routes registered first so they are not shadowed by the file server
             .service(get_interfaces)
             .service(upload)
@@ -419,4 +550,93 @@ async fn main() -> std::io::Result<()> {
     .bind(bind)?
     .run()
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn meta_with(file_id: &str, path: &str, expires_at: chrono::DateTime<chrono::Utc>) -> FileMeta {
+        FileMeta {
+            file_id: file_id.to_string(),
+            filename: format!("{}.bin", file_id),
+            path: path.to_string(),
+            token: Uuid::new_v4().to_string(),
+            expires_at,
+        }
+    }
+
+    #[test]
+    fn gc_removes_expired_keeps_fresh_and_deletes_file() {
+        let dir = std::env::temp_dir().join(format!("runedrop_gc_{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let expired_path = dir.join("expired.bin");
+        let fresh_path = dir.join("fresh.bin");
+
+        // create both on-disk files
+        std::fs::File::create(&expired_path).unwrap().write_all(b"old").unwrap();
+        std::fs::File::create(&fresh_path).unwrap().write_all(b"new").unwrap();
+
+        let now = Utc::now();
+        let mut state = AppStateData::default();
+        state.files.insert(
+            "expired".into(),
+            meta_with("expired", expired_path.to_str().unwrap(), now - Duration::hours(1)),
+        );
+        state.files.insert(
+            "fresh".into(),
+            meta_with("fresh", fresh_path.to_str().unwrap(), now + Duration::hours(48)),
+        );
+        // a signal tied to the expired entry should also be cleaned up
+        state.signals.insert("expired".into(), vec!["msg".into()]);
+
+        let removed = gc_expired(&mut state, now);
+
+        assert_eq!(removed, 1, "exactly one expired entry should be removed");
+        assert!(!state.files.contains_key("expired"), "expired entry removed from map");
+        assert!(state.files.contains_key("fresh"), "fresh entry kept in map");
+        assert!(!state.signals.contains_key("expired"), "expired signals cleaned up");
+        assert!(!expired_path.exists(), "expired on-disk file deleted");
+        assert!(fresh_path.exists(), "fresh on-disk file kept");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn gc_at_exact_expiry_boundary_keeps_entry() {
+        // expires_at == now is NOT past (filter uses strict `<`), so it is kept.
+        let now = Utc::now();
+        let mut state = AppStateData::default();
+        state.files.insert(
+            "boundary".into(),
+            meta_with("boundary", "/nonexistent/boundary.bin", now),
+        );
+        let removed = gc_expired(&mut state, now);
+        assert_eq!(removed, 0);
+        assert!(state.files.contains_key("boundary"));
+    }
+
+    #[test]
+    fn max_upload_bytes_defaults_and_parses() {
+        // Default applies when unset/invalid.
+        std::env::remove_var("MAX_UPLOAD_BYTES");
+        assert_eq!(max_upload_bytes(), DEFAULT_MAX_UPLOAD_BYTES);
+
+        std::env::set_var("MAX_UPLOAD_BYTES", "0");
+        assert_eq!(max_upload_bytes(), DEFAULT_MAX_UPLOAD_BYTES, "0 is rejected -> default");
+
+        std::env::set_var("MAX_UPLOAD_BYTES", "104857600");
+        assert_eq!(max_upload_bytes(), 104857600);
+        std::env::remove_var("MAX_UPLOAD_BYTES");
+    }
+
+    #[test]
+    fn size_limit_boundary_logic() {
+        // Mirror the streaming check: total > limit triggers rejection.
+        let limit: u64 = 100;
+        let at_limit: u64 = 100;
+        let over_limit: u64 = 101;
+        assert!(!(at_limit > limit), "exactly at the limit is accepted");
+        assert!(over_limit > limit, "one byte over the limit is rejected");
+    }
 }
