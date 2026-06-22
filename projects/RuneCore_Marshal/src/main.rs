@@ -24,7 +24,7 @@ mod registry;
 mod tls;
 
 use api::{AppState, ActionLog, CallerCn, push_log};
-use config::{MarshalConfig, register_with_core};
+use config::{MarshalConfig, register_with_core, send_heartbeat, heartbeat_interval_secs};
 use registry::Registry;
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -75,7 +75,13 @@ async fn async_main() {
     env_logger::init();
     info!("RuneCore_Marshal v{} starting", env!("CARGO_PKG_VERSION"));
 
-    let cfg = MarshalConfig::load();
+    let cfg = match MarshalConfig::load() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Config error: {}", e);
+            std::process::exit(1);
+        }
+    };
     info!(
         "Config loaded — port={} cert={} ca={}",
         cfg.server.port, cfg.server.cert_path, cfg.server.ca_path
@@ -85,6 +91,22 @@ async fn async_main() {
     match register_with_core(&cfg).await {
         Ok(_)  => info!("Registered with RuneCore_Core"),
         Err(e) => warn!("Core registration failed (non-fatal): {}", e),
+    }
+
+    // Periodic heartbeat task (best-effort; never panics)
+    {
+        let cfg_hb = cfg.clone();
+        let interval = heartbeat_interval_secs();
+        tokio::spawn(async move {
+            let mut ticker =
+                tokio::time::interval(std::time::Duration::from_secs(interval));
+            loop {
+                ticker.tick().await;
+                if let Err(e) = send_heartbeat(&cfg_hb).await {
+                    warn!("heartbeat failed: {}", e);
+                }
+            }
+        });
     }
 
     // Build TLS config (mTLS — client cert required)

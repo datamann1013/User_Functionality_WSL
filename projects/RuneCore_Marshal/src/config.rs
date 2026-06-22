@@ -55,7 +55,9 @@ fn default_true() -> bool { true }
 fn default_tray_port() -> u16 { 11444 }
 
 impl MarshalConfig {
-    pub fn load() -> Self {
+    /// Load and parse marshal.toml. Returns a clear error string instead of
+    /// panicking so the caller can exit cleanly (no backtrace) on bad config.
+    pub fn load() -> Result<Self, String> {
         // Config file path: env var > working dir > binary dir
         let config_path = std::env::var("MARSHAL_CONFIG")
             .unwrap_or_else(|_| "marshal.toml".to_string());
@@ -70,12 +72,14 @@ impl MarshalConfig {
             });
 
         if content.is_empty() {
-            panic!(
+            return Err(
                 "marshal.toml not found. Set MARSHAL_CONFIG env var or place marshal.toml in working directory."
+                    .to_string(),
             );
         }
 
-        toml::from_str(&content).expect("Failed to parse marshal.toml")
+        toml::from_str(&content)
+            .map_err(|e| format!("Failed to parse marshal.toml: {}", e))
     }
 }
 
@@ -114,5 +118,63 @@ pub async fn register_with_core(cfg: &MarshalConfig) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("Core registration returned {}", resp.status()))
+    }
+}
+
+/// Heartbeat interval in seconds (env `RUNECORE_HEARTBEAT_INTERVAL`, default 30).
+pub fn heartbeat_interval_secs() -> u64 {
+    std::env::var("RUNECORE_HEARTBEAT_INTERVAL")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30)
+}
+
+/// Send a single best-effort heartbeat to Core's heartbeat endpoint.
+pub async fn send_heartbeat(cfg: &MarshalConfig) -> Result<(), String> {
+    let payload = serde_json::json!({
+        "name": cfg.core.service_name.clone(),
+        "container_name": hostname(),
+    });
+    let url = format!(
+        "{}/api/v1/services/heartbeat",
+        cfg.core.url.trim_end_matches('/')
+    );
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e: reqwest::Error| e.to_string())?;
+    let resp = client.post(&url).json(&payload).send().await
+        .map_err(|e: reqwest::Error| e.to_string())?;
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("heartbeat returned {}", resp.status()))
+    }
+}
+
+fn hostname() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn malformed_toml_is_err_not_panic() {
+        // Same deserialization path load() uses — malformed input must yield
+        // an Err the caller can handle, never a panic/backtrace.
+        let bad = "this is = = not valid toml [[[";
+        let parsed: Result<MarshalConfig, _> = toml::from_str(bad);
+        assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn heartbeat_interval_defaults_to_30() {
+        std::env::remove_var("RUNECORE_HEARTBEAT_INTERVAL");
+        assert_eq!(heartbeat_interval_secs(), 30);
     }
 }
