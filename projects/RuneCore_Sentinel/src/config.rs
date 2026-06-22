@@ -62,6 +62,27 @@ struct ServiceInfo {
     pub public_key_pem: Option<String>,
 }
 
+/// Whether to skip TLS certificate validation.
+///
+/// Secure by default (validate certs). Only skips validation when
+/// `RUNECORE_DISABLE_MTLS` is set to a truthy value — the project-wide
+/// dev opt-out convention (see shared_utils/core_contract.md).
+pub fn insecure_tls_enabled() -> bool {
+    matches!(
+        env::var("RUNECORE_DISABLE_MTLS").ok().as_deref(),
+        Some("1") | Some("true") | Some("True")
+    )
+}
+
+/// Build a blocking reqwest client, gating cert validation behind
+/// `RUNECORE_DISABLE_MTLS` (default = secure / validate certs).
+fn build_blocking_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .danger_accept_invalid_certs(insecure_tls_enabled())
+        .build()
+        .map_err(|e| e.to_string())
+}
+
 pub fn register_with_core(cfg: &Config) -> Result<(), String> {
     let info = ServiceInfo {
         name: cfg.service_name.clone(),
@@ -72,7 +93,7 @@ pub fn register_with_core(cfg: &Config) -> Result<(), String> {
     };
 
     let url = format!("{}/api/v1/services/register", cfg.core_url.trim_end_matches('/'));
-    let client = reqwest::blocking::Client::builder().danger_accept_invalid_certs(true).build().map_err(|e| e.to_string())?;
+    let client = build_blocking_client()?;
     let resp = client.post(&url).json(&info).send().map_err(|e| e.to_string())?;
     if resp.status().is_success() {
         Ok(())
@@ -81,10 +102,45 @@ pub fn register_with_core(cfg: &Config) -> Result<(), String> {
     }
 }
 
+/// Send a single heartbeat to Core's `/api/v1/services/heartbeat` endpoint.
+/// Best-effort: returns Err on any failure; callers log and continue.
+pub fn send_heartbeat(cfg: &Config) -> Result<(), String> {
+    let hostname = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "unknown".to_string());
+
+    let payload = serde_json::json!({
+        "name": cfg.service_name,
+        "status": "healthy",
+        "metadata": {
+            "hostname": hostname,
+            "service_type": "host_telemetry",
+        }
+    });
+
+    let url = format!("{}/api/v1/services/heartbeat", cfg.core_url.trim_end_matches('/'));
+    let client = build_blocking_client()?;
+    let resp = client.post(&url).json(&payload).send().map_err(|e| e.to_string())?;
+    if resp.status().is_success() {
+        Ok(())
+    } else {
+        Err(format!("heartbeat returned status {}", resp.status()))
+    }
+}
+
+/// Heartbeat interval in seconds (env `RUNECORE_HEARTBEAT_INTERVAL`, default 30).
+pub fn heartbeat_interval_secs() -> u64 {
+    env::var("RUNECORE_HEARTBEAT_INTERVAL")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(30)
+}
+
 /// Query core for the CoreMemory service rest_url.
 pub fn get_core_memory_url(cfg: &Config) -> Result<String, String> {
     let url = format!("{}/api/v1/services", cfg.core_url.trim_end_matches('/'));
-    let client = reqwest::blocking::Client::builder().danger_accept_invalid_certs(true).build().map_err(|e| e.to_string())?;
+    let client = build_blocking_client()?;
     let resp = client.get(&url).send().map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
         return Err(format!("core services list returned {}", resp.status()));

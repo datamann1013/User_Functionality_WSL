@@ -50,6 +50,18 @@ fn main() {
         Err(e) => warn!("Core registration failed: {}", e),
     }
 
+    // Periodic heartbeat thread (best-effort; never crashes the daemon)
+    {
+        let cfg_clone = cfg.clone();
+        let interval = config::heartbeat_interval_secs();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_secs(interval));
+            if let Err(e) = config::send_heartbeat(&cfg_clone) {
+                warn!("heartbeat failed: {}", e);
+            }
+        });
+    }
+
     // Background spool-flush thread
     {
         let cfg_clone = cfg.clone();
